@@ -3,8 +3,10 @@ package com.becalm.android.ui.onboarding
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -75,7 +77,7 @@ class PipaConsentScreenTest {
             onDeclinedClick = { declined++ },
         )
 
-        composeTestRule.onNodeWithText(string(R.string.onb_pipa_button_decline)).performClick()
+        composeTestRule.onNodeWithTag("onb-pipa-decline").performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(0, consented)

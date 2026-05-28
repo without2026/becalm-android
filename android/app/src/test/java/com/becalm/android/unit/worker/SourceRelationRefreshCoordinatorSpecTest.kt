@@ -106,6 +106,54 @@ class SourceRelationRefreshCoordinatorSpecTest {
         verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
+    @Test
+    fun `refresh enqueues follow-up mirror refresh when any repository still has more pages`() = runTest {
+        stubRaw(upserted = 0, hasMore = true)
+        stubSourceParticipants(upserted = 0)
+        stubCommitments(upserted = 0)
+        stubCommitmentParticipants(upserted = 0)
+
+        val result = coordinator().refresh(
+            userId = "user-1",
+            plan = SourceRelationRefreshPlan(
+                sourceType = "gmail",
+                rawSourceType = "gmail",
+            ),
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertTrue((result as BecalmResult.Success).value.hasMore)
+        verify(exactly = 1) { workScheduler.enqueueSourceRelationRefresh("gmail", 0L) }
+    }
+
+    @Test
+    fun `follow-up refresh chain keeps resuming until six pages are exhausted`() = runTest {
+        coEvery { rawIngestionRepository.refreshSince("user-1", "gmail", null) } returnsMany listOf(
+            rawStats(hasMore = true),
+            rawStats(hasMore = true),
+            rawStats(hasMore = true),
+            rawStats(hasMore = true),
+            rawStats(hasMore = true),
+            rawStats(hasMore = false),
+        )
+        stubSourceParticipants(upserted = 0)
+        stubCommitments(upserted = 0)
+        stubCommitmentParticipants(upserted = 0)
+        val subject = coordinator()
+        val plan = SourceRelationRefreshPlan(
+            sourceType = "gmail",
+            rawSourceType = "gmail",
+        )
+
+        repeat(6) {
+            val result = subject.refresh(userId = "user-1", plan = plan)
+            assertTrue(result is BecalmResult.Success)
+        }
+
+        coVerify(exactly = 6) { rawIngestionRepository.refreshSince("user-1", "gmail", null) }
+        verify(exactly = 5) { workScheduler.enqueueSourceRelationRefresh("gmail", 0L) }
+    }
+
     private fun coordinator(
         scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     ): SourceRelationRefreshCoordinator =
@@ -120,10 +168,13 @@ class SourceRelationRefreshCoordinatorSpecTest {
             logger = logger,
         )
 
-    private fun stubRaw(upserted: Int) {
+    private fun stubRaw(upserted: Int, hasMore: Boolean = false) {
         coEvery { rawIngestionRepository.refreshSince(any(), any(), any()) } returns
-            BecalmResult.Success(RawIngestionRepository.RefreshStats(upserted, upserted, false, null))
+            rawStats(upserted = upserted, hasMore = hasMore)
     }
+
+    private fun rawStats(upserted: Int = 0, hasMore: Boolean): BecalmResult.Success<RawIngestionRepository.RefreshStats> =
+        BecalmResult.Success(RawIngestionRepository.RefreshStats(upserted, upserted, hasMore, null))
 
     private fun stubCalendar(upserted: Int) {
         coEvery { calendarEventRepository.refreshSince(any(), any(), any(), any()) } returns

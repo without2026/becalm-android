@@ -62,6 +62,20 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(buildFile.contains("val telemetryEnabled = if (isJvmUnitTestInvocation()) false"))
         assertTrue(buildFile.contains("localProps.getProperty(envKey)"))
         assertTrue(localPropertiesSample.contains("TELEMETRY_ENABLED=true"))
+        assertTrue(buildFile.contains("PHONE_AUTH_ENABLED"))
+        assertTrue(localPropertiesSample.contains("PHONE_AUTH_ENABLED=true"))
+    }
+
+    @Test
+    fun `android local properties sample uses protected runtime key names`() {
+        // spec: REL-004
+        val localPropertiesSample = repoFile("android/local.properties.sample").readText()
+
+        assertTrue(localPropertiesSample.contains("BECALM_API_BASE_URL="))
+        assertTrue(localPropertiesSample.contains("SUPABASE_URL="))
+        assertTrue(localPropertiesSample.contains("SUPABASE_ANON_KEY="))
+        assertTrue(localPropertiesSample.contains("GOOGLE_WEB_CLIENT_ID="))
+        assertFalse(localPropertiesSample.contains("google.web.client.id="))
     }
 
     @Test

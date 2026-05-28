@@ -17,7 +17,7 @@ behaviors:
 
   - id: ONB-SETUP
     type: ui_interaction
-    description: "로그인 직후 온보딩은 단일 Setup 화면으로 진입한다. 약관/개인정보 핵심 요약은 한 페이지 안에서 확인되며, 이후 권한과 소스는 필수/추천/선택 섹션으로 나뉜다. Android 시스템 권한, SAF picker, OAuth 브라우저는 외부 요청으로 순차 표시될 수 있지만 앱 내부 full-screen onboarding page를 권한마다 하나씩 넘기지 않는다"
+    description: "로그인 직후 온보딩은 단일 Setup 화면으로 진입한다. 약관/개인정보 핵심 요약은 한 페이지 안에서 확인되며, 이후 권한과 소스는 필수/추천/선택 섹션으로 나뉜다. Android 시스템 권한과 OAuth 브라우저는 외부 요청으로 순차 표시될 수 있지만 앱 내부 full-screen onboarding page를 권한마다 하나씩 넘기지 않는다. 녹음 경로 연결은 SAF picker가 아니라 앱 내부 Recordings preset 선택으로 처리한다"
     screen: "OnboardingSetupScreen"
     interaction: "[선택한 항목 연결] 또는 각 항목 [연결] / [건너뛰기]"
     precondition: "ONB-001(terms_accepted=true) 및 Supabase Auth 로그인 완료, DataStore onboarding_completed=false"
@@ -27,30 +27,30 @@ behaviors:
 
   - id: ONB-PIPA
     type: consent
-    description: "PIPA 제3자 제공 + 국외 이전 동의는 standalone 필수 페이지가 아니라 관련 소스 연결 직전의 inline consent로 처리한다. 음성 녹음 폴더를 연결할 때는 오디오 바이트가 NAVER Cloud CLOVA Speech로 전송되고, 전사 텍스트/화자 라벨이 Google LLC Vertex AI로 전달되어 약속/할 일 추출에 쓰인다는 사실을 명시 고지하고 동의가 저장된 뒤 SAF picker를 실행한다"
+    description: "PIPA 제3자 제공 + 국외 이전 동의는 standalone 필수 페이지가 아니라 관련 소스 연결 직전의 inline consent로 처리한다. 음성 녹음 경로를 연결할 때는 오디오 바이트가 NAVER Cloud CLOVA Speech로 전송되고, 전사 텍스트/화자 라벨이 Google LLC Vertex AI로 전달되어 약속/할 일 추출에 쓰인다는 사실을 명시 고지하고 동의가 저장된 뒤 Android READ_MEDIA_AUDIO 권한을 요청한다. 폴더 선택은 OS SAF picker가 아니라 앱 내부 Recordings preset 선택으로 처리한다"
     screen: "OnboardingSetupScreen"
     interaction: "녹음 폴더 [연결] 또는 음성 처리 consent action"
     precondition: "ONB-001(terms_accepted=true) 및 Supabase Auth 로그인 완료, DataStore pipa_third_party_consent 미설정"
-    expected: "inline 고지문에 다음 내용이 표시됨 — (1) 제공받는 자: NAVER Cloud Corp. 및 Google LLC, (2) 제공 항목: 녹음 파일 전체 오디오 바이트, CLOVA 전사 텍스트, 화자 라벨, 요청 메타데이터, (3) 제공 목적: CLOVA Speech 음성 인식/화자 분리 및 약속/할 일 자동 추출, (4) 데이터 처리 리전: 대한민국(NAVER Cloud), us-central1(미국 중부, Google Vertex AI), (5) 보유 및 이용 기간: 요청 처리 후 즉시 삭제(ZDR, 원문 오디오/전사 전문 미저장), (6) 거부 권리 및 불이익: 동의 거부 시 음성 자동 처리 기능만 비활성화되고 나머지 앱 기능은 정상 사용 가능. 동의 저장 후 녹음 폴더 SAF picker가 실행된다"
+    expected: "inline 고지문에 다음 내용이 표시됨 — (1) 제공받는 자: NAVER Cloud Corp. 및 Google LLC, (2) 제공 항목: 녹음 파일 전체 오디오 바이트, CLOVA 전사 텍스트, 화자 라벨, 요청 메타데이터, (3) 제공 목적: CLOVA Speech 음성 인식/화자 분리 및 약속/할 일 자동 추출, (4) 데이터 처리 리전: 대한민국(NAVER Cloud), us-central1(미국 중부, Google Vertex AI), (5) 보유 및 이용 기간: 요청 처리 후 즉시 삭제(ZDR, 원문 오디오/전사 전문 미저장), (6) 거부 권리 및 불이익: 동의 거부 시 음성 자동 처리 기능만 비활성화되고 나머지 앱 기능은 정상 사용 가능. 동의 저장 후 앱 내부 Recordings 경로 선택 화면 또는 setup row에서 READ_MEDIA_AUDIO 권한이 요청된다"
     source: phase2-acceptance
     tests: []
 
   - id: ONB-002
     type: ui_interaction
-    description: "Setup 화면의 녹음 폴더 항목은 Samsung One UI 기본 'Recordings/' 경로를 자동 탐색한다. Samsung One UI 6.x 기준 음성 녹음(Voice Recorder)과 통화 녹음(Call)은 동일한 상위 'Recordings/' 폴더 하위의 서로 다른 서브디렉토리에 저장되므로 상위 폴더 단일 SAF grant로 두 경로를 동시에 커버한다"
+    description: "Setup 화면의 녹음 항목은 Samsung One UI 기본 'Recordings/' 경로를 앱 내부 preset으로 제시한다. Samsung One UI 기준 음성 녹음(Voice Recorder)과 통화 녹음(Call)은 동일한 상위 'Recordings/' 폴더 하위의 서로 다른 서브디렉토리에 저장되므로 앱은 SAF grant 없이 READ_MEDIA_AUDIO + MediaStore.Audio 쿼리에서 선택된 preset 경로만 필터링한다"
     screen: "OnboardingSetupScreen"
     interaction: "화면 진입 (자동)"
     precondition: "ONB-PIPA 완료(pipa_third_party_consent=true), READ_MEDIA_AUDIO 권한 미부여"
-    expected: "OnboardingSetupScreen의 녹음 폴더 항목에서 자동 탐색 결과가 사용된다. 자동 탐색 우선순위: (1) '/storage/emulated/0/Recordings/' (Samsung One UI 6.x 표준), (2) '/storage/emulated/0/VoiceRecorder/' (일부 구형/변형 기종 fallback). 발견 시 SAF picker 초기 위치로 사용하고, 모두 실패 시 수동 folder picker로 폴백한다. pipa_third_party_consent=false인 경우 녹음 자동 처리만 비활성화되고 setup 진행은 막지 않는다"
+    expected: "OnboardingSetupScreen의 녹음 항목에서 앱 내부 기본 경로가 표시된다. 기본 우선순위: (1) 'Recordings/' (Samsung One UI 표준), (2) 'VoiceRecorder/' (일부 구형/변형 기종 fallback). 사용자가 [이 폴더 사용] 또는 setup row [연결]을 누르면 SAF picker 없이 내부 MediaStore path selection이 저장된다. pipa_third_party_consent=false인 경우 녹음 자동 처리만 비활성화되고 setup 진행은 막지 않는다"
     source: phase2-acceptance
     tests: []
 
   - id: ONB-003
     type: permission
-    description: "녹음 폴더 권한 요청 시 READ_MEDIA_AUDIO + SAF URI 권한을 요청한다. SAF grant는 상위 'Recordings/' 단일 URI에 부여되며 하위 'Voice Recorder/'(source_type='voice'), 'Call/'(source_type='call_recording'), 앱 생성 'BeCalm Meetings/'(source_type='meeting') 서브디렉토리를 동시에 커버한다 — 사용자는 한 번의 폴더 선택으로 녹음 감지와 미팅 자료 저장을 모두 활성화한다"
+    description: "녹음 경로 연결 시 READ_MEDIA_AUDIO 권한만 요청한다. 폴더 선택은 앱 내부 Recordings preset 선택이며, OS SAF URI grant를 요구하지 않는다. BeCalm은 전체 오디오 권한을 받더라도 MediaStore.Audio 쿼리에서 'Recordings/' 및 'Recordings/Call/' 등 선택된 녹음 경로만 필터링한다"
     os_permission: "READ_MEDIA_AUDIO"
     precondition: "OnboardingSetupScreen 표시됨, 녹음 폴더 항목 미연결, READ_MEDIA_AUDIO 미부여"
-    expected: "시스템 READ_MEDIA_AUDIO 권한 다이얼로그 표시됨. 승인 시 SAF folder picker가 'Recordings/' 초기 위치로 열림. grant된 URI는 tree permission으로 하위 서브디렉토리 traverse를 포함하므로 음성/통화 두 폴더를 별도 grant 없이 감지한다"
+    expected: "시스템 READ_MEDIA_AUDIO 권한 다이얼로그 표시됨. 승인 시 OS SAF folder picker는 열리지 않고 앱 내부 path selection이 저장된다. 이후 MediaStoreWorker는 선택된 preset과 source_enabled 상태를 확인한 뒤 MediaStore.Audio에서 source별 경로만 쿼리한다. Android 16에서 Recordings/Call 폴더가 SAF picker에서 비활성화되어도 자동 녹음 감지는 이 경로로 유지된다"
     source: phase2-acceptance
     tests: []
 

@@ -7,6 +7,7 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.ui.components.isCallSource
 import com.becalm.android.ui.components.isEmailSource
@@ -86,6 +87,7 @@ internal object PersonDetailProjector {
                         ),
                         commitmentsExtractedCount = raw?.commitmentsExtractedCount ?: 0,
                         sourceRef = interaction.sourceRef,
+                        firstMemoryOrigin = interaction.firstMemoryOrigin(),
                     )
                 }
                 bucket.applyScheduleLinks(
@@ -226,6 +228,7 @@ internal object PersonDetailProjector {
         var snippet: String?,
         var commitmentsExtractedCount: Int = 0,
         val sourceRef: String?,
+        var firstMemoryOrigin: String? = null,
         val myActions: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
         val theirActions: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
         val schedules: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
@@ -277,8 +280,12 @@ internal object PersonDetailProjector {
                 schedules = schedules.toList(),
                 linkedCalendarEventId = linkedCalendarEventId,
                 relatedSourceTypes = relatedSourceTypes.toList(),
+                firstMemoryOrigin = firstMemoryOrigin,
             )
     }
+
+    private fun PersonInteractionEntity.firstMemoryOrigin(): String? =
+        status?.takeIf { sourceType == SourceType.MANUAL && sourceRef.startsWith("manual_memory:") }
 
     private fun findEnrichment(
         identities: List<PersonIdentityEntity>,

@@ -32,6 +32,7 @@ import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.main.OverallSyncState
+import com.becalm.android.ui.today.ScheduleRangeFilter
 import com.becalm.android.ui.today.TimelineItem
 import com.becalm.android.ui.today.TodayCommitmentRowTreatment
 import com.becalm.android.ui.today.TodayEffect
@@ -122,7 +123,7 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `TDY-001 timeline merges sorted rows and resolves counterparty display with enrichment`() = runTest {
+    fun `TDY-001 schedule timeline merges sorted schedule rows and calendar events`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
             todayRows(
@@ -162,30 +163,23 @@ class TodayViewModelSpecTest {
             var emission = awaitItem()
             while (emission.loading) emission = awaitItem()
 
-            assertEquals(4, emission.timeline.size)
+            assertEquals(3, emission.timeline.size)
             assertTrue(emission.timeline[0] is TimelineItem.Meeting)
             assertTrue(emission.timeline[1] is TimelineItem.Commitment)
-            assertTrue(emission.timeline[2] is TimelineItem.Commitment)
-            assertTrue(emission.timeline[3] is TimelineItem.CalendarEvent)
+            assertTrue(emission.timeline[2] is TimelineItem.CalendarEvent)
             assertEquals(
                 "이대리",
                 (emission.timeline[1] as TimelineItem.Commitment).counterpartyDisplayName,
             )
             assertEquals(
                 CommitmentItemType.SCHEDULE,
-                (emission.timeline[2] as TimelineItem.Commitment).itemType,
-            )
-            assertEquals(
-                TodayCommitmentRowTreatment.ACTION,
-                (emission.timeline[1] as TimelineItem.Commitment).rowTreatment,
+                (emission.timeline[1] as TimelineItem.Commitment).itemType,
             )
             assertEquals(
                 TodayCommitmentRowTreatment.SCHEDULE,
-                (emission.timeline[2] as TimelineItem.Commitment).rowTreatment,
+                (emission.timeline[1] as TimelineItem.Commitment).rowTreatment,
             )
-            assertEquals(1, emission.personFocus.size)
-            assertEquals("이대리", emission.personFocus.single().displayName)
-            assertEquals(2, emission.personFocus.single().commitmentCount)
+            assertTrue(emission.personFocus.isEmpty())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -497,18 +491,24 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `today timeline places commitments without exact due time after timed items`() = runTest {
+    fun `schedule timeline places schedules without exact due time after timed items`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
             todayRows(
                 commitment(
                     id = "untimed",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
                     occurredAt = Instant.parse("2026-04-18T00:30:00Z"),
                     counterpartyRef = "lee@corp.com",
                     dueAt = null,
                 ),
                 commitment(
                     id = "timed",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
                     occurredAt = Instant.parse("2026-04-18T00:00:00Z"),
                     counterpartyRef = "lee@corp.com",
                     dueAt = Instant.parse("2026-04-18T02:00:00Z"),
@@ -560,7 +560,7 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `TDY-004 today commitments stay room-backed and react to local invalidation within the KST day`() = runTest {
+    fun `TDY-004 schedule commitments stay room-backed and query the upcoming range`() = runTest {
         val commitmentsFlow = MutableStateFlow<List<TodayCommitmentRow>>(emptyList())
         val dayStartEpochMs = slot<Long>()
         val dayEndEpochMs = slot<Long>()
@@ -585,14 +585,14 @@ class TodayViewModelSpecTest {
                 Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds(),
                 dayStartEpochMs.captured,
             )
-            assertEquals(
-                Instant.parse("2026-04-18T14:59:59.999Z").toEpochMilliseconds(),
-                dayEndEpochMs.captured,
-            )
+            assertEquals(Long.MAX_VALUE - 1L, dayEndEpochMs.captured)
 
             commitmentsFlow.value = todayRows(
                 commitment(
                     id = "c-kst",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
                     occurredAt = Instant.parse("2026-04-18T04:00:00Z"),
                     counterpartyRef = "lee@corp.com",
                 ),
@@ -611,7 +611,7 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `TDY-005 today calendar stays room-backed and queries the exact KST day window`() = runTest {
+    fun `TDY-005 calendar stays room-backed and queries the upcoming schedule window`() = runTest {
         val calendarFlow = MutableStateFlow<List<CalendarEventEntity>>(emptyList())
         val todayStart = slot<Instant>()
         val todayEnd = slot<Instant>()
@@ -634,10 +634,7 @@ class TodayViewModelSpecTest {
 
             assertTrue(emission.timeline.isEmpty())
             assertEquals(Instant.parse("2026-04-17T15:00:00Z"), todayStart.captured)
-            assertEquals(
-                Instant.parse("2026-04-18T15:00:00Z").toEpochMilliseconds(),
-                todayEnd.captured.toEpochMilliseconds(),
-            )
+            assertEquals(Long.MAX_VALUE, todayEnd.captured.toEpochMilliseconds())
 
             calendarFlow.value = listOf(
                 calendarEvent(
@@ -657,6 +654,47 @@ class TodayViewModelSpecTest {
         }
 
         coVerify(exactly = 0) { calendarEventRepository.refreshSince(any(), any()) }
+    }
+
+    @Test
+    fun `schedule range dropdown switches repository query to past schedules`() = runTest {
+        val startBounds = mutableListOf<Long>()
+        val endBounds = mutableListOf<Long>()
+        coEvery { authRepository.currentSession() } returns session()
+        every {
+            commitmentRepository.observeTimelineForToday(
+                userId = "user-1",
+                endOfTodayEpochMs = any(),
+                startOfTodayEpochMs = any(),
+            )
+        } answers {
+            endBounds += secondArg<Long>()
+            startBounds += thirdArg<Long>()
+            flowOf(emptyList())
+        }
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+            assertEquals(ScheduleRangeFilter.ALL, emission.scheduleRangeFilter)
+            assertEquals(0L, startBounds.last())
+            assertEquals(Long.MAX_VALUE - 1L, endBounds.last())
+
+            viewModel.onScheduleRangeChange(ScheduleRangeFilter.PAST)
+
+            do {
+                emission = awaitItem()
+            } while (emission.scheduleRangeFilter != ScheduleRangeFilter.PAST)
+            assertEquals(0L, startBounds.last())
+            assertEquals(
+                Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds() - 1L,
+                endBounds.last(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -721,6 +759,9 @@ class TodayViewModelSpecTest {
             todayRows(
                 commitment(
                     id = "c2",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
                     occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
                     counterpartyRef = "raw@example.com",
                 ),
@@ -1007,6 +1048,37 @@ class TodayViewModelSpecTest {
             assertEquals(0, emission.processingStatus.actionCount)
             assertEquals(0, emission.processingStatus.activeItemCount)
             assertEquals(null, emission.processingStatus.latestPhase)
+            assertFalse(emission.processingStatus.visible)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `processing status does not show recent terminal work on today surface`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+        every { processingStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.MEETING,
+                    phase = ProcessingPhase.SYNCED,
+                    itemCount = 1,
+                    updatedAt = Instant.parse("2026-04-18T08:55:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            assertEquals(0, emission.processingStatus.activeCount)
+            assertEquals(0, emission.processingStatus.actionCount)
+            assertEquals(ProcessingPhase.SYNCED, emission.processingStatus.latestPhase)
             assertFalse(emission.processingStatus.visible)
             cancelAndIgnoreRemainingEvents()
         }

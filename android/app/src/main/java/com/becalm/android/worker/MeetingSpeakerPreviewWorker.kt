@@ -15,10 +15,14 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewEntity
 import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.RawIngestionSyncStatus
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
 import com.becalm.android.data.remote.dto.MeetingTranscriptSegmentDto
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.MeetingTranscriptArchiveInput
+import com.becalm.android.data.repository.ProcessingStatusMessages
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.toPlainRequestBody
 import com.squareup.moshi.Moshi
@@ -47,6 +51,7 @@ public class MeetingSpeakerPreviewWorker @AssistedInject constructor(
     private val sourceExtractionApiProvider: Provider<SourceExtractionApi>,
     private val sourceArtifactRepositoryProvider: Provider<SourceArtifactRepository>,
     private val userPrefsStore: UserPrefsStore,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val moshi: Moshi,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -79,6 +84,29 @@ public class MeetingSpeakerPreviewWorker @AssistedInject constructor(
         }
         val event = rawIngestionEventDao.findById(rawEventId, userId)
             ?: return@withContext Result.failure()
+        if (event.syncStatus == RawIngestionSyncStatus.SKIPPED_BY_USER) {
+            logger.d(TAG, "speaker preview skipped by user id=${redact(rawEventId)}")
+            return@withContext Result.success()
+        }
+        if (event.requiresExplicitAudioProcessingConfirmation()) {
+            val now = Clock.System.now()
+            rawIngestionEventDao.updateSyncStatus(
+                id = rawEventId,
+                status = RawIngestionSyncStatus.DETECTED_PENDING_CONFIRMATION,
+                now = now,
+                lastError = null,
+            )
+            val pendingCount = rawIngestionEventDao.countDetectedAudioConfirmationsForSource(
+                userId = userId,
+                sourceType = event.sourceType,
+            ).coerceAtLeast(1)
+            processingStatusRepository.recordAwaitingConfirmation(
+                sourceType = event.sourceType,
+                itemCount = pendingCount,
+                message = ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
+            )
+            return@withContext Result.success()
+        }
         ensurePreviewRow(event, audioUriString)
 
         if (!userPrefsStore.observeThirdPartyProvisionConsent().first()) {
@@ -119,6 +147,7 @@ public class MeetingSpeakerPreviewWorker @AssistedInject constructor(
                 rawEventId = rawEventId.toPlainRequestBody(),
                 durationSeconds = durationSeconds.toString().toPlainRequestBody(),
                 sourceType = event.sourceType.toPlainRequestBody(),
+                processingConfirmed = true.toString().toPlainRequestBody(),
             )
         } catch (e: IOException) {
             logger.w(TAG, "preview network error id=${redact(rawEventId)} attempt=$runAttemptCount: ${e.message}")
@@ -130,6 +159,11 @@ public class MeetingSpeakerPreviewWorker @AssistedInject constructor(
             200 -> {
                 val body = response.body()
                     ?: return@withContext retryOrFail(rawEventId, "empty_preview_response")
+                if (body.speakers.isEmpty()) {
+                    logger.w(TAG, "preview returned no speakers id=${redact(rawEventId)}")
+                    markFailed(rawEventId, "speaker_preview_empty")
+                    return@withContext Result.success()
+                }
                 meetingSpeakerPreviewDao.markPreviewReady(
                     rawEventId = rawEventId,
                     status = MeetingSpeakerPreviewStatus.REVIEW_REQUIRED,
@@ -288,6 +322,10 @@ public class MeetingSpeakerPreviewWorker @AssistedInject constructor(
             Types.newParameterizedType(List::class.java, MeetingTranscriptSegmentDto::class.java),
         )
     }
+
+    private fun RawIngestionEventEntity.requiresExplicitAudioProcessingConfirmation(): Boolean =
+        processingConfirmedAt == null &&
+            (sourceType == SourceType.CALL_RECORDING || sourceType == SourceType.MEETING)
 
     public companion object {
         public const val KEY_RAW_EVENT_ID: String = "raw_event_id"

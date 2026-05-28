@@ -4,7 +4,6 @@ import android.content.ContentResolver
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import com.becalm.android.core.di.IoDispatcher
@@ -27,11 +26,10 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.meeting.MeetingImportFilePolicy
-import com.becalm.android.domain.meeting.MeetingImportFolderKind
-import com.becalm.android.domain.meeting.MeetingImportFolders
 import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.time.DateTimeException
@@ -135,11 +133,13 @@ public class MeetingImportRepository @Inject constructor(
                     status = MeetingSpeakerPreviewStatus.EXTRACT_PENDING,
                     updatedAt = now,
                 )
-                rawIngestionEventDao.updateSyncStatus(
-                    id = rawEvent.id,
-                    status = STATUS_PENDING,
-                    now = now,
-                    lastError = null,
+                rawIngestionEventDao.update(
+                    rawEvent.copy(
+                        syncStatus = STATUS_PENDING,
+                        processingConfirmedAt = rawEvent.processingConfirmedAt ?: now,
+                        lastAttemptAt = now,
+                        lastError = null,
+                    ),
                 )
                 workScheduler.enqueueVoiceUpload(
                     rawEventId = rawEvent.id,
@@ -149,26 +149,6 @@ public class MeetingImportRepository @Inject constructor(
                     speakerPreviewId = speakerReviewContext.speakerPreviewId,
                 )
                 BecalmResult.Success(MeetingImportResult(rawEvent.id, sourceRef))
-            } catch (e: IOException) {
-                BecalmResult.Failure(BecalmError.Io(e::class.simpleName ?: "I/O error"))
-            } catch (t: Throwable) {
-                BecalmResult.Failure(BecalmError.Unknown(t))
-            }
-        }
-
-    public suspend fun ensureTargetFolder(kind: MeetingImportFolderKind): BecalmResult<String> =
-        withContext(ioDispatcher) {
-            try {
-                val treeUriString = userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING).first()
-                    ?: return@withContext BecalmResult.Failure(
-                        BecalmError.Permission("Recordings folder"),
-                    )
-                val target = ensureTargetDirectory(
-                    resolver = context.contentResolver,
-                    treeUri = Uri.parse(treeUriString),
-                    kind = kind,
-                )
-                BecalmResult.Success(target.toString())
             } catch (e: IOException) {
                 BecalmResult.Failure(BecalmError.Io(e::class.simpleName ?: "I/O error"))
             } catch (t: Throwable) {
@@ -195,30 +175,29 @@ public class MeetingImportRepository @Inject constructor(
 
                 val userId = userPrefsStore.observeCurrentUserId().first()
                     ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
-                val treeUriString = userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING).first()
-                    ?: return@withContext BecalmResult.Failure(
-                        BecalmError.Permission("Recordings folder"),
-                    )
-                val treeUri = Uri.parse(treeUriString)
                 val importedAt = Clock.System.now()
                 val recordedAt = resolver.resolveMeetingRecordedAt(uri, meta.displayName, importedAt)
                 val durationSeconds = resolver.resolveAudioDurationSeconds(uri)
                 val thirdPartyConsentGranted = userPrefsStore.observeThirdPartyProvisionConsent().first()
                 val shouldPreviewSpeakers = speakerReviewContext == null
-                val savedFile = copyIntoMeetingsFolder(
+                val sourceFingerprint = meetingImportFingerprint(
+                    kind = kind,
+                    sourceUri = uri,
+                    meta = meta,
+                    durationSeconds = durationSeconds,
+                )
+                val savedFile = copyIntoAppPrivateMeetingAudio(
                     resolver = resolver,
                     sourceUri = uri,
-                    treeUri = treeUri,
-                    kind = kind,
+                    userId = userId,
                     displayName = meta.displayName,
-                    mimeType = mimeType ?: fallbackMimeType(kind),
-                    occurredAt = importedAt,
+                    sourceFingerprint = sourceFingerprint,
                 )
                 val rawEvent = buildRawEvent(
                     userId = userId,
-                    clientEventId = deterministicClientEventId(kind, savedFile.displayName),
+                    clientEventId = deterministicClientEventId(kind, sourceFingerprint),
                     sourceRef = savedFile.uri.toString(),
-                    title = meta.displayName,
+                    title = ImportedEvidenceTitleFormatter.meetingRecording(recordedAt),
                     occurredAt = recordedAt,
                     durationSeconds = durationSeconds,
                     syncStatus = if (shouldPreviewSpeakers && thirdPartyConsentGranted) {
@@ -228,7 +207,8 @@ public class MeetingImportRepository @Inject constructor(
                     } else {
                         STATUS_AWAITING_CONSENT
                     },
-                    snippet = null,
+                    snippet = ImportedEvidenceTitleFormatter.originalFileSnippet(meta.displayName),
+                    processingConfirmedAt = importedAt,
                 )
                 val inserted = rawIngestionRepository.insertLocal(rawEvent)
                 if (inserted is BecalmResult.Failure) return@withContext inserted
@@ -303,6 +283,7 @@ public class MeetingImportRepository @Inject constructor(
         durationSeconds: Int?,
         syncStatus: String,
         snippet: String?,
+        processingConfirmedAt: Instant?,
     ): RawIngestionEventEntity {
         val id = UUID.randomUUID().toString()
         return RawIngestionEventEntity(
@@ -316,6 +297,7 @@ public class MeetingImportRepository @Inject constructor(
             durationSeconds = durationSeconds,
             timestamp = occurredAt,
             syncStatus = syncStatus,
+            processingConfirmedAt = processingConfirmedAt,
         )
     }
 
@@ -396,104 +378,26 @@ public class MeetingImportRepository @Inject constructor(
             .replace(Regex("\\s+"), " ")
             .trim()
 
-    private fun copyIntoMeetingsFolder(
+    private fun copyIntoAppPrivateMeetingAudio(
         resolver: ContentResolver,
         sourceUri: Uri,
-        treeUri: Uri,
-        kind: ImportKind,
+        userId: String,
         displayName: String,
-        mimeType: String,
-        occurredAt: Instant,
+        sourceFingerprint: String,
     ): SavedMeetingFile {
-        val targetDir = ensureTargetDirectory(
-            resolver = resolver,
-            treeUri = treeUri,
-            kind = kind.folderKind,
-        )
-        val targetName = "${occurredAt.toEpochMilliseconds()}-${sanitizeFileName(displayName)}"
-        val target = DocumentsContract.createDocument(resolver, targetDir, mimeType, targetName)
-            ?: throw IOException("Unable to create meeting import target")
+        val targetDir = appPrivateMeetingAudioDir(userId)
+        if (!targetDir.exists() && !targetDir.mkdirs()) {
+            throw IOException("Unable to create meeting import directory")
+        }
+        val targetName = "${fingerprintFilePrefix(sourceFingerprint)}-${sanitizeFileName(displayName)}"
+        val target = File(targetDir, targetName)
         resolver.openInputStream(sourceUri).use { input ->
-            resolver.openOutputStream(target, "w").use { output ->
-                if (input == null || output == null) throw IOException("Unable to open meeting import streams")
+            target.outputStream().use { output ->
+                if (input == null) throw IOException("Unable to open meeting import streams")
                 input.copyTo(output)
             }
         }
-        return SavedMeetingFile(uri = target, displayName = targetName)
-    }
-
-    private fun ensureTargetDirectory(
-        resolver: ContentResolver,
-        treeUri: Uri,
-        kind: MeetingImportFolderKind,
-    ): Uri {
-        val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
-        val root = DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            treeDocumentId,
-        )
-        val treeLocation = classifyMeetingTree(treeDocumentId, kind)
-        if (treeLocation == MeetingTreeLocation.TargetDirectory) return root
-        val meetings = if (treeLocation == MeetingTreeLocation.MeetingsDirectory) {
-            root
-        } else {
-            resolver.findOrCreateDirectory(treeUri, root, MeetingImportFolders.MEETINGS_DIR)
-        }
-        return resolver.findOrCreateDirectory(
-            treeUri = treeUri,
-            parentUri = meetings,
-            name = MeetingImportFolders.targetDirectoryName(kind),
-        )
-    }
-
-    private fun classifyMeetingTree(
-        documentId: String,
-        kind: MeetingImportFolderKind,
-    ): MeetingTreeLocation {
-        val segments = Uri.decode(documentId)
-            .trimEnd('/')
-            .split('/', ':')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        val targetDirectoryName = MeetingImportFolders.targetDirectoryName(kind)
-        return when {
-            segments.takeLast(2) == listOf(MeetingImportFolders.MEETINGS_DIR, targetDirectoryName) ->
-                MeetingTreeLocation.TargetDirectory
-            segments.lastOrNull() == MeetingImportFolders.MEETINGS_DIR ->
-                MeetingTreeLocation.MeetingsDirectory
-            else -> MeetingTreeLocation.RecordingsRoot
-        }
-    }
-
-    private fun ContentResolver.findOrCreateDirectory(treeUri: Uri, parentUri: Uri, name: String): Uri {
-        val existing = findChild(treeUri, parentUri, name, DocumentsContract.Document.MIME_TYPE_DIR)
-        if (existing != null) return existing
-        return DocumentsContract.createDocument(this, parentUri, DocumentsContract.Document.MIME_TYPE_DIR, name)
-            ?: throw IOException("Unable to create $name")
-    }
-
-    private fun ContentResolver.findChild(treeUri: Uri, parentUri: Uri, name: String, mimeType: String): Uri? {
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-            treeUri,
-            DocumentsContract.getDocumentId(parentUri),
-        )
-        val projection = arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE,
-        )
-        query(childrenUri, projection, null, null, null).use { cursor ->
-            if (cursor == null) return null
-            val idIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-            val nameIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-            val mimeIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-            while (cursor.moveToNext()) {
-                if (cursor.getString(nameIdx) == name && cursor.getString(mimeIdx) == mimeType) {
-                    return DocumentsContract.buildDocumentUriUsingTree(treeUri, cursor.getString(idIdx))
-                }
-            }
-        }
-        return null
+        return SavedMeetingFile(uri = Uri.fromFile(target), displayName = targetName)
     }
 
     private fun ContentResolver.readOpenableMeta(uri: Uri): OpenableMeta {
@@ -519,7 +423,7 @@ public class MeetingImportRepository @Inject constructor(
     ): Instant {
         displayName.toFilenameRecordingInstant(importedAt)?.let { return it }
         readEmbeddedAudioRecordedAt(uri, importedAt)?.let { return it }
-        readLongColumn(uri, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+        readLongColumn(uri, DOCUMENT_LAST_MODIFIED_COLUMN)
             ?.toValidEpochMillis(importedAt)
             ?.let { return it }
         readLongColumn(uri, MediaStore.MediaColumns.DATE_MODIFIED)
@@ -736,28 +640,35 @@ public class MeetingImportRepository @Inject constructor(
             .ifEmpty { "meeting-file" }
             .take(MAX_FILE_NAME_CHARS)
 
-    private fun fallbackMimeType(kind: ImportKind): String =
-        "audio/m4a"
+    private fun meetingImportFingerprint(
+        kind: ImportKind,
+        sourceUri: Uri,
+        meta: OpenableMeta,
+        durationSeconds: Int?,
+    ): String =
+        listOf(
+            "kind=${kind.name}",
+            "uri=$sourceUri",
+            "name=${meta.displayName}",
+            "size=${meta.byteSize ?: "unknown"}",
+            "duration=${durationSeconds ?: "unknown"}",
+        ).joinToString("|")
 
-    private fun deterministicClientEventId(kind: ImportKind, savedDisplayName: String): String {
-        val sourceKey = "meeting:audio:$savedDisplayName"
+    private fun deterministicClientEventId(kind: ImportKind, sourceFingerprint: String): String {
+        val sourceKey = "meeting:${kind.name.lowercase(Locale.ROOT)}:$sourceFingerprint"
         return UUID.nameUUIDFromBytes(sourceKey.toByteArray(StandardCharsets.UTF_8)).toString()
+    }
+
+    private fun fingerprintFilePrefix(sourceFingerprint: String): String =
+        UUID.nameUUIDFromBytes("meeting-file:$sourceFingerprint".toByteArray(StandardCharsets.UTF_8)).toString()
+
+    private fun appPrivateMeetingAudioDir(userId: String): File {
+        val userDir = UUID.nameUUIDFromBytes("meeting-import-user:$userId".toByteArray(StandardCharsets.UTF_8)).toString()
+        return File(File(File(context.filesDir, "meeting_imports"), userDir), "audio")
     }
 
     private enum class ImportKind {
         Audio,
-        ;
-
-        val folderKind: MeetingImportFolderKind
-            get() = when (this) {
-                Audio -> MeetingImportFolderKind.Audio
-            }
-    }
-
-    private enum class MeetingTreeLocation {
-        RecordingsRoot,
-        MeetingsDirectory,
-        TargetDirectory,
     }
 
     private data class OpenableMeta(
@@ -774,6 +685,7 @@ public class MeetingImportRepository @Inject constructor(
         const val MAX_FILE_NAME_CHARS = 96
         const val SNIPPET_CHARS = 200
         const val MAX_TRANSCRIPT_BYTES = 10L * 1024L * 1024L
+        private const val DOCUMENT_LAST_MODIFIED_COLUMN = "last_modified"
         private const val STATUS_PENDING = "pending"
         private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
         private const val DEFAULT_MEETING_TITLE = "회의 녹음"

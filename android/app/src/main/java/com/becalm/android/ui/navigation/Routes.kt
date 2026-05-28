@@ -40,7 +40,7 @@ public sealed class BecalmRoute(public val path: String) {
 
     // ── Auth / Public ──────────────────────────────────────────────────────────
 
-    /** Splash gate: decides onboarding vs /today based on DataStore state. */
+    /** Splash gate: decides onboarding vs authenticated home based on DataStore state. */
     public data object Splash : BecalmRoute("splash")
 
     /** Terms & conditions acceptance screen shown before login. */
@@ -63,25 +63,50 @@ public sealed class BecalmRoute(public val path: String) {
 
     // ── Onboarding (auth required) ─────────────────────────────────────────────
 
-    /**
-     * Canonical first-run setup surface after login.
-     *
-     * Terms and login remain public/auth gates. Post-login setup groups recommended
-     * permissions and optional source connections in one screen so users do not walk
-     * through one app page per permission. Legacy individual onboarding routes remain
-     * registered for settings reconnect and recovery flows.
-     */
+    /** Compatibility alias for the route-aware first-run setup flow. */
     public data object OnboardingSetup : BecalmRoute("onboarding/setup")
+
+    /** First-run setup step: welcome. */
+    public data object OnboardingSetupWelcome : BecalmRoute("onboarding/setup/welcome")
+
+    /** First-run setup step: self identity. */
+    public data object OnboardingSetupIdentity : BecalmRoute("onboarding/setup/identity")
+
+    /** First-run setup step: contacts and device-local evidence sources. */
+    public data object OnboardingSetupDeviceSources : BecalmRoute("onboarding/setup/device-sources")
+
+    /** First-run setup step: calendar connection. */
+    public data object OnboardingSetupCalendar : BecalmRoute("onboarding/setup/calendar")
+
+    /** First-run setup step: mail connection. */
+    public data object OnboardingSetupEmail : BecalmRoute("onboarding/setup/email")
+
+    /** First-run setup step: Gmail activation preview. */
+    public data object OnboardingSetupGmailPreview : BecalmRoute("onboarding/setup/gmail-preview")
+
+    /** First-run setup fallback step: create the first memory manually. */
+    public data object OnboardingSetupFirstMemory : BecalmRoute("onboarding/setup/first-memory")
+
+    /**
+     * First-memory activation completion surface. The route carries only the stable
+     * person id; display copy is loaded from the local person detail projection.
+     */
+    public data class OnboardingComplete(public val personId: String) :
+        BecalmRoute("onboarding/complete/$personId") {
+        public companion object {
+            public const val PATH: String = "onboarding/complete/{person_id}"
+        }
+    }
 
     /**
      * Compatibility route for the former standalone PIPA 제3자 제공 + 국외 이전 동의 screen.
      *
      * Canonical first-run setup now shows the same disclosure inline before the
-     * recording folder permission flow.
+     * recording audio permission and path selection flow.
      */
     public data object OnboardingPipaConsent : BecalmRoute("onboarding/pipa-consent")
 
-    /** Compatibility route: standalone recording folder permission grant. */
+    /** Compatibility route: standalone recording audio permission and path selection. */
     public data object OnboardingRecordingFolder : BecalmRoute("onboarding/recording-folder")
 
     /** Onboarding step: optional READ_CALL_LOG consent for call-recording person matching. */
@@ -143,17 +168,18 @@ public sealed class BecalmRoute(public val path: String) {
 
     /**
      * Compatibility route: former first-run cold-sync progress screen (TDY-010 / ONB-008).
-     * Canonical setup now enters Today first and lets runtime sync status surface progress.
+     * Production navigation immediately redirects this route to authenticated home;
+     * canonical setup lets runtime sync status surface progress in the main app.
      */
     public data object OnboardingColdSync : BecalmRoute("onboarding/cold-sync")
 
     // ── Main app — 3-tab bottom nav ────────────────────────────────────────────
 
-    /** Tab 1: today's timeline — unified calendar events + due commitments. */
-    public data object Today : BecalmRoute("today")
-
-    /** Tab 2: persons list with enriched display names and DNBadge counts. */
+    /** Primary tab: persons list with enriched display names and DNBadge counts. */
     public data object Persons : BecalmRoute("persons")
+
+    /** Supporting tab: today's timeline — unified calendar events + due commitments. */
+    public data object Today : BecalmRoute("today")
 
     /**
      * Person detail: 3-section body — pending commitments / completed /
@@ -286,8 +312,28 @@ public sealed class BecalmRoute(public val path: String) {
     /** Local-only PIPA activity log. */
     public data object ActivityLog : BecalmRoute("settings/privacy/activity-log")
 
-    /** Sources list: 6-source adapter status rows + contacts pseudo-source (ENR-008, SMG-001). */
-    public data object SettingsSources : BecalmRoute("settings/sources")
+    /** Sources list: source status rows + contacts pseudo-source (ENR-008, SMG-001). */
+    public data object SettingsSources : BecalmRoute("settings/sources") {
+        public const val OAUTH_RESULT_PATH: String =
+            "settings/sources?sourceConnectionResult={source_connection_result}&sourceProvider={source_provider}&sourceFamily={source_family}"
+        public const val ARG_SOURCE_CONNECTION_RESULT: String = "source_connection_result"
+        public const val ARG_SOURCE_PROVIDER: String = "source_provider"
+        public const val ARG_SOURCE_FAMILY: String = "source_family"
+
+        public fun oauthResultPath(
+            result: String,
+            provider: String?,
+            family: String?,
+        ): String = buildString {
+            append(path)
+            append("?sourceConnectionResult=")
+            append(result)
+            append("&sourceProvider=")
+            append(provider.orEmpty())
+            append("&sourceFamily=")
+            append(family.orEmpty())
+        }
+    }
 
     /** Settings source connection hub shared with onboarding source OAuth rows. */
     public data object SettingsSourceConnections : BecalmRoute("settings/sources/connect")
@@ -325,4 +371,20 @@ public sealed class BecalmRoute(public val path: String) {
             public const val PATH: String = "settings/sources/{source_id}"
         }
     }
+}
+
+/**
+ * Shared navigation defaults for authenticated app entry and main tab restoration.
+ *
+ * Route paths stay stable; this object only centralizes which stable route acts as the
+ * product home so auth, onboarding, and tab navigation cannot drift independently.
+ */
+public object BecalmNavigationDefaults {
+    public val authenticatedHomeRoute: String = BecalmRoute.Persons.path
+    public val mainTabBackStackRootRoute: String = authenticatedHomeRoute
+    public val mainTabRoutes: List<String> = listOf(
+        BecalmRoute.Persons.path,
+        BecalmRoute.Today.path,
+        BecalmRoute.Commitments.path,
+    )
 }

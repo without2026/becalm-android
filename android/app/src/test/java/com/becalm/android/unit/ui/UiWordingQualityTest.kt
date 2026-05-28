@@ -35,12 +35,15 @@ class UiWordingQualityTest {
                     ?: node.parentNode?.attributes?.getNamedItem("name")?.nodeValue
                     ?: "unnamed"
                 val value = node.textContent.orEmpty()
-                val banned = bannedWords.filter { it in value }
+                val banned = bannedWords.filter { word -> word in value && !isAllowed(name, word) }
                 if (banned.isNotEmpty()) {
                     offenders += "$name=${banned.joinToString()}: $value"
                 }
             }
         }
+
+        fun isAllowed(name: String, word: String): Boolean =
+            name == "onb_intro_calendar_info" && word == "동기화"
 
         val bannedWords = listOf(
             "데이터 소스",

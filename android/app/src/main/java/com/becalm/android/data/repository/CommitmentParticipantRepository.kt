@@ -4,6 +4,8 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.NoopSyncCursorStore
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -14,6 +16,7 @@ import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -35,10 +38,13 @@ public interface CommitmentParticipantRepository {
     )
 }
 
+private const val CURSOR_KEY = "commitment_participants"
+
 @Singleton
 public class CommitmentParticipantRepositoryImpl @Inject constructor(
     private val personIndexDao: PersonIndexDao,
     private val apiProvider: Provider<RailwayApi>,
+    private val cursorStore: SyncCursorStore,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : CommitmentParticipantRepository {
@@ -53,6 +59,7 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
     ) : this(
         personIndexDao = personIndexDao,
         apiProvider = Provider { api },
+        cursorStore = NoopSyncCursorStore,
         logger = logger,
     )
 
@@ -62,7 +69,9 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
         personId: String?,
         commitmentId: String?,
     ): BecalmResult<CommitmentParticipantRepository.RefreshStats> = withContext(ioDispatcher) {
-        var cursor: String? = null
+        val useStoredCursor = since == null && personId == null && commitmentId == null
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(CURSOR_KEY).first() else null
+        val startedFromScratch = useStoredCursor && cursor == null
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -115,8 +124,11 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
             lastHasMore = body.hasMore
             lastCursor = body.cursor
             cursor = body.cursor
+            if (useStoredCursor) {
+                cursorStore.setCursor(CURSOR_KEY, body.cursor)
+            }
         }
-        if (since == null && personId == null && commitmentId == null && !lastHasMore) {
+        if (startedFromScratch && !lastHasMore) {
             replaceFullMirror(
                 userId = userId,
                 keepIds = fetchedIds,

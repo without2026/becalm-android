@@ -70,6 +70,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.Becalm.Splash"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -98,7 +99,32 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="becalm" android:host="settings" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="becalm" android:host="debug" />
+            </intent-filter>
+            <!-- OAuth browser completion page opens the existing app task. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="becalm" android:host="oauth-complete" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".share.ShareImportActivity"
+            android:exported="true"
+            android:label="@string/share_import_activity_label"
+            android:theme="@style/Theme.Becalm.Splash">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
 

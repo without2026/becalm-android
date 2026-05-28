@@ -12,7 +12,7 @@
     </style>
 
     <style name="Theme.Becalm.Splash" parent="Theme.Becalm">
-        <item name="android:windowBackground">#111111</item>
-        <item name="android:windowSplashScreenBackground" tools:targetApi="s">#111111</item>
+        <item name="android:windowBackground">#F4F0E9</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="s">#F4F0E9</item>
     </style>
 </resources>

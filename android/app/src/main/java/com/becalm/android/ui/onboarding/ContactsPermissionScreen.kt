@@ -3,16 +3,14 @@ package com.becalm.android.ui.onboarding
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -22,7 +20,6 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
-import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.flow.Flow
@@ -91,36 +88,18 @@ internal fun ContactsPermissionContent(
     onSkip: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .padding(horizontal = 16.dp, vertical = 24.dp)
-            .fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    SourceStoryLayout(
+        icon = Icons.Outlined.Groups,
+        headline = stringResource(R.string.onb_contacts_headline),
+        body = stringResource(R.string.onb_contacts_body),
+        modifier = modifier,
     ) {
-        Text(
-            text = stringResource(R.string.onb_contacts_headline),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        SourceStoryInfoPanel(
+            title = stringResource(R.string.onb_intro_contacts_panel_title),
+            body = stringResource(R.string.onb_intro_contacts_panel_body),
+            detailLines = listOf(stringResource(R.string.onb_contacts_pipa)),
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        QuietPanel(
-            modifier = Modifier
-                .fillMaxWidth(),
-        ) {
-            Text(
-                text = stringResource(R.string.onb_contacts_body),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = stringResource(R.string.onb_contacts_pipa),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         BecalmButton(
             text = stringResource(R.string.action_grant),
             onClick = onGrant,

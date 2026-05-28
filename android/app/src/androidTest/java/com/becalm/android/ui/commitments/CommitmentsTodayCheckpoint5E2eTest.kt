@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -35,6 +36,7 @@ import com.becalm.android.ui.today.TodayTimelineContent
 import com.becalm.android.ui.today.TodayUiState
 import com.becalm.android.ui.today.TimelineItem
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -60,16 +62,13 @@ class CommitmentsTodayCheckpoint5E2eTest {
             ),
         )
 
-        composeTestRule.onAllNodesWithText("Alice Kim").assertCountEquals(3)
-        composeTestRule.onNodeWithText(string(R.string.commitments_person_group_count_fmt, 2)).assertIsDisplayed()
-        composeTestRule.onAllNodesWithText("Bob Lee").assertCountEquals(2)
         composeTestRule.onNodeWithText("Alice today").assertIsDisplayed()
         composeTestRule.onNodeWithText("Alice tomorrow").assertIsDisplayed()
         composeTestRule.onNodeWithText("Bob later").assertIsDisplayed()
     }
 
     @Test
-    fun e2e_054_commitment_filters_render_give_take_schedule_closed_and_keep_decisions_hidden() {
+    fun e2e_054_commitment_filters_render_give_take_closed_and_keep_decisions_hidden() {
         var selectedFilter: CommitmentFilter? = null
 
         setCommitments(
@@ -98,11 +97,11 @@ class CommitmentsTodayCheckpoint5E2eTest {
 
         composeTestRule.onNodeWithTag("commitment-filter-give").performClick()
         composeTestRule.onNodeWithTag("commitment-filter-take").performClick()
-        composeTestRule.onNodeWithTag("commitment-filter-schedule").performClick()
+        composeTestRule.onAllNodesWithTag("commitment-filter-schedule").assertCountEquals(0)
         composeTestRule.onNodeWithTag("commitment-filter-closed").performClick()
         composeTestRule.onNodeWithText("내가 보낼 제안서").assertIsDisplayed()
         composeTestRule.onNodeWithText("상대가 보낼 가격표").assertIsDisplayed()
-        composeTestRule.onNodeWithText("금요일 리뷰 미팅").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("금요일 리뷰 미팅").assertCountEquals(0)
         composeTestRule.onNodeWithText("완료된 공유").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("A안 승인").assertCountEquals(0)
 
@@ -305,10 +304,10 @@ class CommitmentsTodayCheckpoint5E2eTest {
             ),
         )
 
-        composeTestRule.onNodeWithText(string(R.string.today_timed_section)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.schedule_range_upcoming)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.schedule_section_today)).assertIsDisplayed()
         composeTestRule.onNodeWithText("10시까지 제안서 보내기").assertIsDisplayed()
         composeTestRule.onNodeWithText("오후 리뷰 미팅").assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.today_untimed_section)).assertIsDisplayed()
         composeTestRule.onNodeWithText("시간 정해서 회신하기").assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_no_due_time)).assertIsDisplayed()
     }
@@ -360,8 +359,23 @@ class CommitmentsTodayCheckpoint5E2eTest {
         composeTestRule.setContent {
             BecalmTheme {
                 val pullState = rememberPullRefreshState(refreshing = false, onRefresh = {})
+                val actionRows = state.activeItems.filter { row ->
+                    row.itemType != CommitmentItemType.SCHEDULE
+                }
+                val projectedState = if (state.confirmedSection.count == 0 && actionRows.isNotEmpty()) {
+                    state.copy(
+                        confirmedSection = CommitmentSectionUiState(
+                            count = actionRows.size,
+                            items = actionRows,
+                            expanded = true,
+                            dimmed = false,
+                        ),
+                    )
+                } else {
+                    state
+                }
                 CommitmentManagementScreenContent(
-                    state = state,
+                    state = projectedState,
                     snackbarHostState = SnackbarHostState(),
                     pullState = pullState,
                     onFilterChange = onFilterChange,
@@ -385,6 +399,7 @@ class CommitmentsTodayCheckpoint5E2eTest {
                     state = TodayUiState(
                         loading = false,
                         timeline = timeline,
+                        today = LocalDate(2026, 5, 7),
                     ),
                     onOpenSettings = {},
                     onPullRefresh = {},

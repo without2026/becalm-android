@@ -16,12 +16,11 @@ import kotlinx.datetime.Instant
  * upload, or any network-facing field to this entity.
  *
  * **Purpose.**
- * [PersonEnrichmentEntity] enriches the virtual "person" groupings formed by the
- * shared `person_ref` key across [RawIngestionEventEntity] and [CommitmentEntity].
- * Because those tables only carry a canonicalized string key (phone E.164, lowercase
- * email, or normalized display name), this table supplies the human-readable metadata
- * (display name, company, title) needed to render PersonsScreen rows and
- * PersonDetailScreen headers — entirely from on-device contact data.
+ * [PersonEnrichmentEntity] is the local contacts baseline used for person matching.
+ * Each row stores one matchable contact identity key such as an E.164 phone number,
+ * lowercase email, or normalized display name. Existing source projections may still
+ * join bare `person_ref` values against this table for display metadata, but the table
+ * is populated from ContactsContract first rather than from app-created people.
  *
  * **Lifecycle.**
  * Rows are inserted or replaced by `EnrichmentWorker` after CONTACTS permission is
@@ -43,11 +42,11 @@ import kotlinx.datetime.Instant
 public data class PersonEnrichmentEntity(
 
     /**
-     * Canonicalized counterparty identifier; primary key for this table.
+     * Canonicalized local contact identity key; primary key for this table.
      *
-     * Matches `person_ref` in `raw_ingestion_events` and `commitments` and is used
-     * exclusively as a local JOIN key. The value is never transmitted to Railway or
-     * Supabase.
+     * May match `person_ref` in older raw-event/commitment projections and is also used
+     * by the local person index to match unresolved source participants before creating
+     * new people. The value is never transmitted to Railway or Supabase.
      *
      * Precedence used when deriving the key: E.164 phone > lowercase email >
      * normalized display name.

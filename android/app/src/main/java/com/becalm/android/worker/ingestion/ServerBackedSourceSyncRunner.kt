@@ -31,6 +31,7 @@ internal data class ServerBackedSourceSyncRequest(
 
 internal sealed interface ServerBackedTriggerResult {
     data class Success(val syncedCount: Int? = null) : ServerBackedTriggerResult
+    data class Pending(val message: String, val retryAfterSeconds: Long? = null) : ServerBackedTriggerResult
     data class Failure(val message: String, val retryable: Boolean) : ServerBackedTriggerResult
 }
 
@@ -83,6 +84,14 @@ internal class ServerBackedSourceSyncRunner(
                 } else {
                     ServerBackedSourceSyncResult.FAILURE
                 }
+            }
+            is ServerBackedTriggerResult.Pending -> {
+                processingStatusRepository?.recordScanning(request.sourceType, triggerResult.message)
+                logger.d(
+                    tag,
+                    "backend sync pending source=${request.sourceType} retryAfter=${triggerResult.retryAfterSeconds}",
+                )
+                return ServerBackedSourceSyncResult.RETRY
             }
             is ServerBackedTriggerResult.Success -> {
                 triggerResult.syncedCount?.let { count ->

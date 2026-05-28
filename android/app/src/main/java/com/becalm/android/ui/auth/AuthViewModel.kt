@@ -7,8 +7,10 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.PhoneNumberUtils
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.ui.components.UiMessage
@@ -56,7 +58,7 @@ public sealed class AuthUiState {
     public data class SignedIn(
         val userId: String,
         val onboardingCompleted: Boolean = false,
-        val onboardingResumeRoute: String = com.becalm.android.ui.navigation.BecalmRoute.OnboardingSetup.path,
+        val onboardingResumeRoute: String = com.becalm.android.ui.navigation.BecalmRoute.OnboardingSetupWelcome.path,
     ) : AuthUiState()
 
     /**
@@ -79,6 +81,14 @@ public sealed class AuthUiState {
         val termsAccepted: Boolean,
     ) : AuthUiState()
 }
+
+public data class PhoneOtpUiState(
+    val normalizedPhone: String? = null,
+    val codeRequested: Boolean = false,
+    val sending: Boolean = false,
+    val verifying: Boolean = false,
+    val error: UiMessage? = null,
+)
 
 /** One-shot effects emitted by [AuthViewModel]. */
 public sealed interface AuthEffect {
@@ -103,16 +113,20 @@ public class AuthViewModel @Inject constructor(
     private val authRepositoryProvider: Provider<AuthRepository>,
     private val sessionStore: SupabaseSessionStore,
     private val userPrefsStore: UserPrefsStore,
+    private val userProfileRepository: UserProfileRepository,
     private val runtimeBootstrapProvider: Provider<AuthenticatedRuntimeBootstrap>,
     @IoDispatcher private val runtimeBootstrapDispatcher: CoroutineDispatcher,
     private val logger: Logger,
 ) : ViewModel() {
 
     private val _uiState: MutableStateFlow<AuthUiState> = MutableStateFlow(AuthUiState.Loading)
+    private val _phoneOtpState: MutableStateFlow<PhoneOtpUiState> = MutableStateFlow(PhoneOtpUiState())
     private val _effects: MutableSharedFlow<AuthEffect> = MutableSharedFlow(extraBufferCapacity = 1)
 
     /** Current authentication UI state. Never null; starts as [AuthUiState.Loading]. */
     public val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
+
+    public val phoneOtpState: StateFlow<PhoneOtpUiState> = _phoneOtpState.asStateFlow()
 
     /** One-shot authentication effects such as AUTH-006 app finish. */
     public val effects: SharedFlow<AuthEffect> = _effects.asSharedFlow()
@@ -209,6 +223,78 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "google sign-in failed")
+                    _uiState.value = AuthUiState.Error(result.error.toAuthMessage())
+                }
+            }
+        }
+    }
+
+    public fun requestPhoneOtp(phone: String) {
+        viewModelScope.launch {
+            val normalized = PhoneNumberUtils.toE164OrNull(phone)
+            if (normalized.isNullOrBlank()) {
+                _phoneOtpState.value = PhoneOtpUiState(error = UiMessage.resource(R.string.auth_error_phone_invalid))
+                return@launch
+            }
+            _phoneOtpState.value = PhoneOtpUiState(normalizedPhone = normalized, sending = true)
+            when (val result = authRepository().requestPhoneOtp(normalized)) {
+                is BecalmResult.Success -> {
+                    _phoneOtpState.value = PhoneOtpUiState(
+                        normalizedPhone = normalized,
+                        codeRequested = true,
+                    )
+                }
+                is BecalmResult.Failure -> {
+                    _phoneOtpState.value = PhoneOtpUiState(
+                        normalizedPhone = normalized,
+                        error = result.error.toAuthMessage(),
+                    )
+                }
+            }
+        }
+    }
+
+    public fun verifyPhoneOtp(phone: String, code: String) {
+        viewModelScope.launch {
+            val normalized = PhoneNumberUtils.toE164OrNull(phone)
+            if (normalized.isNullOrBlank()) {
+                _phoneOtpState.value = _phoneOtpState.value.copy(
+                    error = UiMessage.resource(R.string.auth_error_phone_invalid),
+                )
+                return@launch
+            }
+            val token = code.trim()
+            if (token.isBlank()) {
+                _phoneOtpState.value = _phoneOtpState.value.copy(
+                    normalizedPhone = normalized,
+                    codeRequested = true,
+                    error = UiMessage.resource(R.string.auth_error_phone_code_required),
+                )
+                return@launch
+            }
+            _uiState.value = AuthUiState.Loading
+            _phoneOtpState.value = _phoneOtpState.value.copy(
+                normalizedPhone = normalized,
+                codeRequested = true,
+                verifying = true,
+                error = null,
+            )
+            when (val result = authRepository().verifyPhoneOtp(normalized, token)) {
+                is BecalmResult.Success -> {
+                    logger.d(TAG, "phone otp sign-in succeeded")
+                    _phoneOtpState.value = PhoneOtpUiState(
+                        normalizedPhone = normalized,
+                        codeRequested = true,
+                    )
+                    setUiState(result.value.toUiState())
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "phone otp sign-in failed")
+                    _phoneOtpState.value = PhoneOtpUiState(
+                        normalizedPhone = normalized,
+                        codeRequested = true,
+                        error = result.error.toAuthMessage(),
+                    )
                     _uiState.value = AuthUiState.Error(result.error.toAuthMessage())
                 }
             }
@@ -360,12 +446,12 @@ public class AuthViewModel @Inject constructor(
 
     private suspend fun SupabaseSession?.toUiState(): AuthUiState =
         if (this != null) {
-            val onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first()
+            val onboardingCompleted = resolveOnboardingCompletedFromServerOrCache(this)
             AuthUiState.SignedIn(
                 userId = userId,
                 onboardingCompleted = onboardingCompleted,
                 onboardingResumeRoute = if (onboardingCompleted) {
-                    com.becalm.android.ui.navigation.BecalmRoute.OnboardingSetup.path
+                    com.becalm.android.ui.navigation.BecalmRoute.OnboardingSetupWelcome.path
                 } else {
                     onboardingResumeRoute()
                 },
@@ -373,6 +459,21 @@ public class AuthViewModel @Inject constructor(
         } else {
             signedOutState()
         }
+
+    private suspend fun resolveOnboardingCompletedFromServerOrCache(session: SupabaseSession): Boolean {
+        return when (val refreshed = userProfileRepository.refreshFromServer(session.userId)) {
+            is BecalmResult.Success -> {
+                val completed = refreshed.value.onboardingCompletedAt != null
+                runCatching { userPrefsStore.setOnboardingCompleted(completed) }
+                    .onFailure { logger.w(TAG, "failed to cache server onboarding completion") }
+                completed
+            }
+            is BecalmResult.Failure -> {
+                logger.w(TAG, "profile refresh failed during auth routing; falling back to local onboarding cache")
+                userPrefsStore.observeOnboardingCompleted().first()
+            }
+        }
+    }
 
     private suspend fun signedOutState(): AuthUiState.SignedOut =
         AuthUiState.SignedOut(termsAccepted = userPrefsStore.observeTermsAccepted().first())
@@ -389,7 +490,10 @@ public class AuthViewModel @Inject constructor(
             termsAccepted = userPrefsStore.observeTermsAccepted().first(),
             signedIn = true,
         )
-        return OnboardingProgressResolver.resumeRoute(stepStates)
+        return OnboardingProgressResolver.resumeRoute(
+            stepStates = stepStates,
+            setupRoute = runCatching { userPrefsStore.observeOnboardingSetupRoute().first() }.getOrNull(),
+        )
     }
 
     private fun authRepository(): AuthRepository = authRepositoryProvider.get()
@@ -403,6 +507,7 @@ private fun BecalmError.toAuthMessage(): UiMessage = when (this) {
     is BecalmError.Validation -> when (message) {
         "google_provider_disabled" -> UiMessage.resource(R.string.login_google_setup_required)
         "email_not_confirmed" -> UiMessage.resource(R.string.auth_error_email_not_confirmed)
+        "phone_otp_failed" -> UiMessage.resource(R.string.auth_error_phone_otp_failed)
         else -> UiMessage.resource(R.string.auth_error_validation)
     }
     is BecalmError.Io -> UiMessage.resource(R.string.auth_error_local_io)

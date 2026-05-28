@@ -83,11 +83,17 @@ public class DefaultColdSyncRuntimeCoordinator @Inject constructor(
             val stageSources = STAGE2_SOURCE_TYPES.filter { it in enabledSources }
 
             stageSources.forEach { sourceStatusRepository.recordSyncStart(it) }
+            var mediaStoreScanEnqueued = false
             stageSources.forEach { sourceType ->
                 when (sourceType) {
                     SourceType.NAVER_IMAP -> foregroundWorkScheduler.enqueueImapNaverOneShotNow(STAGE2_LOOKBACK_DAYS)
                     SourceType.DAUM_IMAP -> foregroundWorkScheduler.enqueueImapDaumOneShotNow(STAGE2_LOOKBACK_DAYS)
-                    SourceType.VOICE -> foregroundWorkScheduler.enqueueMediaStoreOneShotNow(STAGE2_LOOKBACK_DAYS)
+                    in STAGE2_RECORDING_SOURCE_TYPES -> {
+                        if (!mediaStoreScanEnqueued) {
+                            foregroundWorkScheduler.enqueueMediaStoreOneShotNow(STAGE2_LOOKBACK_DAYS)
+                            mediaStoreScanEnqueued = true
+                        }
+                    }
                 }
             }
             logger.d(TAG, "startStage2 complete at=$now sources=$stageSources")
@@ -124,11 +130,15 @@ public class DefaultColdSyncRuntimeCoordinator @Inject constructor(
             SourceType.NAVER_IMAP,
             SourceType.DAUM_IMAP,
         )
+        public val STAGE2_RECORDING_SOURCE_TYPES: List<String> = listOf(
+            SourceType.VOICE,
+            SourceType.CALL_RECORDING,
+            SourceType.MEETING,
+        )
         public val STAGE2_SOURCE_TYPES: List<String> = listOf(
             SourceType.NAVER_IMAP,
             SourceType.DAUM_IMAP,
-            SourceType.VOICE,
-        )
+        ) + STAGE2_RECORDING_SOURCE_TYPES
         private const val TAG: String = "ColdSyncRuntime"
     }
 }

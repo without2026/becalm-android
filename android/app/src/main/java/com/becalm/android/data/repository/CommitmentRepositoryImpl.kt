@@ -138,7 +138,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
         direction: String?,
         actionState: String?,
     ): BecalmResult<CommitmentRepository.RefreshStats> {
-        var cursor: String? = null
+        val useStoredCursor = since == null && counterpartyRef == null && direction == null && actionState == null
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(CURSOR_KEY).firstOrNull() else null
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -191,7 +192,9 @@ public class CommitmentRepositoryImpl @Inject constructor(
                     lastHasMore = page.hasMore
                     lastCursor = page.cursor
                     cursor = page.cursor
-                    cursorStore.setCursor(CURSOR_KEY, page.cursor)
+                    if (useStoredCursor) {
+                        cursorStore.setCursor(CURSOR_KEY, page.cursor)
+                    }
                 }
             }
         }

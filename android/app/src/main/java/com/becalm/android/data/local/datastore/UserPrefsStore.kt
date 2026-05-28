@@ -86,6 +86,12 @@ public interface UserPrefsStore {
     /** Persists multiple onboarding step statuses atomically for multi-step branches. */
     public suspend fun setOnboardingStepStatuses(statuses: Map<String, String>)
 
+    /** Emits the last visible route-aware first-run setup step for resume after auth/OAuth return. */
+    public fun observeOnboardingSetupRoute(): Flow<String?>
+
+    /** Persists or clears the last visible route-aware first-run setup step. */
+    public suspend fun setOnboardingSetupRoute(route: String?)
+
     /**
      * Emits user-hidden person refs normalized with [PersonIdentityResolver.normalizeBlockKey].
      *
@@ -127,16 +133,16 @@ public interface UserPrefsStore {
     /** Persists the Stage 2 deferred flag. */
     public suspend fun setColdSyncStage2Deferred(deferred: Boolean)
 
-    /** Emits the persistable SAF tree URI granted for the Recordings folder, or null. */
+    /** Emits the selected recording MediaStore path preset, legacy SAF tree URI, or null. */
     public fun observeRecordingFolderTreeUri(): Flow<String?>
 
-    /** Persists or clears the Recordings SAF tree URI grant. */
+    /** Persists or clears the selected recording path marker. */
     public suspend fun setRecordingFolderTreeUri(uri: String?)
 
-    /** Emits the persistable SAF tree URI granted for a single recording source. */
+    /** Emits the selected recording path marker for a single recording source. */
     public fun observeRecordingFolderTreeUri(sourceType: String): Flow<String?>
 
-    /** Persists or clears the SAF tree URI grant for a single recording source. */
+    /** Persists or clears the selected recording path marker for a single recording source. */
     public suspend fun setRecordingFolderTreeUri(sourceType: String, uri: String?)
 
     /**
@@ -571,6 +577,24 @@ public class UserPrefsStoreImpl @Inject constructor(
         }
     }
 
+    override fun observeOnboardingSetupRoute(): Flow<String?> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map null
+            prefs[userScoped(userId).onboardingSetupRouteKey]
+        }
+
+    override suspend fun setOnboardingSetupRoute(route: String?) {
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val key = userScoped(userId).onboardingSetupRouteKey
+            if (route.isNullOrBlank()) {
+                prefs.remove(key)
+            } else {
+                prefs[key] = route
+            }
+        }
+    }
+
     override fun observeBlockedPersonRefs(): Flow<Set<String>> =
         dataStore.data.map { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@map emptySet()
@@ -865,6 +889,8 @@ public class UserPrefsStoreImpl @Inject constructor(
             booleanKey("onboarding_completed")
         val onboardingStepStatusesKey: Preferences.Key<String> =
             stringPreferencesKey(namespaced(scopedUserId, "onboarding_step_statuses_v1"))
+        val onboardingSetupRouteKey: Preferences.Key<String> =
+            stringPreferencesKey(namespaced(scopedUserId, "onboarding_setup_route_v1"))
         val blockedPersonRefsKey: Preferences.Key<String> =
             stringPreferencesKey(namespaced(scopedUserId, "blocked_person_refs_v1"))
         val coldSyncStage1CompletedAtKey: Preferences.Key<Long> =

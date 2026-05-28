@@ -28,11 +28,18 @@ public interface UserProfileRepository {
         userId: String,
         displayName: String?,
         phoneE164Self: String?,
+        displayNameSource: String? = null,
+    ): BecalmResult<UserProfileEntity>
+    public suspend fun markOnboardingCompleted(
+        userId: String,
+        completedAt: kotlinx.datetime.Instant = Clock.System.now(),
     ): BecalmResult<UserProfileEntity>
     public suspend fun upsertLocal(
         userId: String,
         displayName: String?,
         phoneE164Self: String?,
+        displayNameSource: String? = null,
+        onboardingCompletedAt: kotlinx.datetime.Instant? = null,
     ): UserProfileEntity
     public suspend fun bootstrapIfMissing(
         userId: String,
@@ -82,11 +89,13 @@ public class UserProfileRepositoryImpl @Inject constructor(
         userId: String,
         displayName: String?,
         phoneE164Self: String?,
+        displayNameSource: String?,
     ): BecalmResult<UserProfileEntity> = withContext(ioDispatcher) {
         try {
             val response = api.patchUserProfile(
                 UserProfilePatchRequestDto(
                     displayName = displayName?.trim()?.takeIf { it.isNotEmpty() },
+                    displayNameSource = displayNameSource?.trim()?.takeIf { it.isNotEmpty() },
                     phoneE164Self = phoneE164Self?.trim()?.takeIf { it.isNotEmpty() },
                 ),
             )
@@ -108,10 +117,38 @@ public class UserProfileRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun markOnboardingCompleted(
+        userId: String,
+        completedAt: kotlinx.datetime.Instant,
+    ): BecalmResult<UserProfileEntity> = withContext(ioDispatcher) {
+        try {
+            val response = api.patchUserProfile(
+                UserProfilePatchRequestDto(onboardingCompletedAt = completedAt.toString()),
+            )
+            if (!response.isSuccessful) return@withContext BecalmResult.Failure(response.toUserProfileError())
+            val dto = response.body()?.data
+                ?: return@withContext BecalmResult.Failure(
+                    BecalmError.Unknown(IllegalStateException("null user profile body")),
+                )
+            val entity = dto.toEntity(userId = userId, existing = dao.findByUserId(userId))
+            dao.upsert(entity)
+            BecalmResult.Success(entity)
+        } catch (e: IOException) {
+            logger.w(TAG, "profile onboarding completion network failure", e)
+            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
+        } catch (t: Throwable) {
+            t.rethrowIfCancellation()
+            logger.e(TAG, "profile onboarding completion failed", t)
+            BecalmResult.Failure(BecalmError.Unknown(t))
+        }
+    }
+
     override suspend fun upsertLocal(
         userId: String,
         displayName: String?,
         phoneE164Self: String?,
+        displayNameSource: String?,
+        onboardingCompletedAt: kotlinx.datetime.Instant?,
     ): UserProfileEntity = withContext(ioDispatcher) {
         val existing = dao.findByUserId(userId)
         val now = Clock.System.now()
@@ -121,6 +158,8 @@ public class UserProfileRepositoryImpl @Inject constructor(
             phoneE164Self = phoneE164Self?.trim()?.takeIf { it.isNotEmpty() },
             timezone = existing?.timezone ?: "Asia/Seoul",
             preferredLocale = existing?.preferredLocale ?: "ko",
+            displayNameSource = displayNameSource?.trim()?.takeIf { it.isNotEmpty() } ?: existing?.displayNameSource,
+            onboardingCompletedAt = onboardingCompletedAt ?: existing?.onboardingCompletedAt,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
         )
@@ -140,6 +179,8 @@ public class UserProfileRepositoryImpl @Inject constructor(
             userId = userId,
             timezone = timezone,
             preferredLocale = preferredLocale,
+            displayNameSource = null,
+            onboardingCompletedAt = null,
             createdAt = now,
             updatedAt = now,
         )
@@ -163,6 +204,8 @@ private fun UserProfileDto.toEntity(
         phoneE164Self = phoneE164Self,
         timezone = timezone,
         preferredLocale = preferredLocale,
+        displayNameSource = displayNameSource ?: existing?.displayNameSource,
+        onboardingCompletedAt = onboardingCompletedAt ?: existing?.onboardingCompletedAt,
         createdAt = createdAt ?: existing?.createdAt ?: now,
         updatedAt = updatedAt ?: now,
     )

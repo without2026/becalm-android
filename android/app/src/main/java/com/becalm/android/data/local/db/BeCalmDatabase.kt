@@ -88,6 +88,8 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  * - v28: adds local meeting speaker display aliases for transcript rendering.
  * - v29: adds `raw_ingestion_events.conversation_ref` plus local
  *   `commitment_progress_events` for high-confidence completion evidence.
+ * - v30: mirrors server `user_profiles.onboarding_completed_at` and the display-name source
+ *   so auth routing treats the server profile as authoritative while preserving local fallback.
  *
  * ## Type converters
  * [Converters] is applied at the database level so that every DAO and entity
@@ -147,7 +149,7 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         MeetingSpeakerAliasEntity::class,
         CommitmentProgressEventEntity::class,
     ],
-    version = 29,
+    version = 31,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -157,8 +159,8 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
         // annotation site (ksp#2439), so both sites must be bumped together on every schema
         // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
-        require(DATABASE_VERSION == 29) {
-            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 29) literal"
+        require(DATABASE_VERSION == 31) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 31) literal"
         }
     }
 
@@ -254,7 +256,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 29
+        public const val DATABASE_VERSION: Int = 31
 
         /**
          * Returns the per-user SQLite filename for the given [userIdHash].

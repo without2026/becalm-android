@@ -82,22 +82,26 @@ internal fun buildChips(sourceStatus: Map<String, SourceStatusUi>): List<SourceS
 internal data class SourceStatusAttention(
     val disconnectedCount: Int,
     val failedCount: Int,
+    val disconnectedSources: List<String> = emptyList(),
+    val failedSources: List<String> = emptyList(),
 ) {
     val hasWarning: Boolean = disconnectedCount > 0 || failedCount > 0
 }
 
 internal fun buildSourceStatusAttention(sourceStatus: Map<String, SourceStatusUi>): SourceStatusAttention {
-    var disconnectedCount = 0
-    var failedCount = 0
+    val disconnectedSources = mutableListOf<String>()
+    val failedSources = mutableListOf<String>()
     CHIP_ORDER.forEach { sourceType ->
         val ui = sourceStatus[sourceType] ?: return@forEach
         when {
-            ui.errorMessage != null || ui.status == SourceSyncStatus.Error -> failedCount += 1
-            ui.status == SourceSyncStatus.Disconnected -> disconnectedCount += 1
+            ui.errorMessage != null || ui.status == SourceSyncStatus.Error -> failedSources += sourceType
+            ui.status == SourceSyncStatus.Disconnected -> disconnectedSources += sourceType
         }
     }
     return SourceStatusAttention(
-        disconnectedCount = disconnectedCount,
-        failedCount = failedCount,
+        disconnectedCount = disconnectedSources.size,
+        failedCount = failedSources.size,
+        disconnectedSources = disconnectedSources,
+        failedSources = failedSources,
     )
 }

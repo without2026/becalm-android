@@ -16,6 +16,7 @@ import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
@@ -154,6 +155,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         val affectedPersonIds = (
             previousAffectedPersonIds +
                 repairedPersons.map { it.id } +
+                snapshot.persons.map { it.id } +
                 snapshot.identities.map { it.personId } +
                 snapshot.interactions.map { it.personId }
             )
@@ -177,6 +179,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 }
             }
             if (repairedPersons.isNotEmpty()) txDao.upsertPersons(repairedPersons)
+            if (snapshot.persons.isNotEmpty()) txDao.upsertPersons(snapshot.persons)
             if (repairedIdentities.isNotEmpty()) txDao.upsertIdentities(repairedIdentities)
             if (snapshot.identities.isNotEmpty()) txDao.upsertIdentities(snapshot.identities)
             if (snapshot.interactions.isNotEmpty()) txDao.upsertInteractions(snapshot.interactions)
@@ -370,6 +373,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         private val commitmentLinkedSourcePeople: Set<SourcePersonKey>,
     ) {
         private val now = Clock.System.now()
+        private val persons = linkedMapOf<String, PersonEntity>()
         private val identities = linkedMapOf<String, PersonIdentityEntity>()
         private val interactions = linkedMapOf<String, PersonInteractionEntity>()
         private val unmatched = linkedMapOf<String, UnmatchedPersonInteractionEntity>()
@@ -378,7 +382,9 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             participant: SourceEventParticipantEntity,
             raw: RawIngestionEventEntity?,
         ) {
-            if (participant.isSourceLocalSpeakerLabelOnly()) return
+            val sourceLocalSpeakerReviewCandidate =
+                SourceParticipantReviewPolicy.isSourceLocalSpeakerReviewCandidate(participant)
+            if (participant.isSourceLocalSpeakerLabelOnly() && !sourceLocalSpeakerReviewCandidate) return
             val localSourceEventId = raw?.id ?: participant.sourceEventId
             val sourceRef = "raw:$localSourceEventId"
             val kind = interactionKindFor(participant.sourceType)
@@ -420,12 +426,19 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                     )
                     return
                 }
-                if (participant.resolutionStatus in REVIEWABLE_PARTICIPANT_STATUSES) {
-                    val suggestedLabel = participant.displayNameRaw
-                        ?: participant.emailRaw
-                        ?: participant.phoneRaw
-                        ?: participant.organizationRaw
-                        ?: participant.normalizedValue
+                if (
+                    participant.resolutionStatus in REVIEWABLE_PARTICIPANT_STATUSES &&
+                    SourceParticipantReviewPolicy.isReviewableForManualReview(participant)
+                ) {
+                    val suggestedLabel = if (sourceLocalSpeakerReviewCandidate) {
+                        null
+                    } else {
+                        participant.displayNameRaw
+                            ?: participant.emailRaw
+                            ?: participant.phoneRaw
+                            ?: participant.organizationRaw
+                            ?: participant.normalizedValue
+                    }
                     upsertUnmatched(
                         sourceType = participant.sourceType,
                         sourceRef = sourceRef,
@@ -483,6 +496,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
         fun snapshot(): Snapshot =
             Snapshot(
+                persons = persons.values.toList(),
                 identities = identities.values.toList(),
                 interactions = interactions.values.toList(),
                 unmatched = unmatched.values.toList(),
@@ -609,7 +623,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         ) {
             val hasUserVisibleContent = listOf(title, snippet, suggestedLabel).any { !it.isNullOrBlank() }
             if (!hasUserVisibleContent) return
-            if (PersonIdentityResolver.isSpeakerLabelValue(suggestedLabel)) return
+            val safeSuggestedLabel = suggestedLabel?.takeUnless(PersonIdentityResolver::isSpeakerLabelValue)
             if (PersonMatchingEventPolicy.isLikelyServiceAccountNotification(title, snippet, suggestedLabel)) return
             val id = UUID.nameUUIDFromBytes(
                 "unmatched:$userId:$sourceType:$sourceRef:$kind".toByteArray(Charsets.UTF_8),
@@ -622,7 +636,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 interactionKind = kind,
                 title = title,
                 snippet = snippet,
-                suggestedLabel = suggestedLabel,
+                suggestedLabel = safeSuggestedLabel,
                 occurredAt = occurredAt,
                 createdAt = now,
             )
@@ -652,6 +666,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     }
 
     private data class Snapshot(
+        val persons: List<PersonEntity>,
         val identities: List<PersonIdentityEntity>,
         val interactions: List<PersonInteractionEntity>,
         val unmatched: List<UnmatchedPersonInteractionEntity>,

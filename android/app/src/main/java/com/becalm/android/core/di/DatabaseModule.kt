@@ -33,10 +33,7 @@ import javax.inject.Singleton
  * cross-account leak defence). `provideBeCalmDatabase` itself is **not** `@Singleton`
  * — it proxies to [BeCalmDatabaseProvider.current] on every injection so that a
  * downstream user-scope swap routed through [BeCalmDatabaseProvider.ensureOpenFor]
- * is observable without rebuilding Hilt's graph. For alpha, repositories scoped
- * `@Singleton` still cache the reference they receive at construction time; the
- * recommended UX is a process restart on user swap and a follow-up refactor will
- * migrate repos to `Provider<Dao>` injection.
+ * is observable without rebuilding Hilt's graph.
  *
  * DAOs are **not** scoped to `@Singleton`. To keep pre-auth startup safe, Hilt receives
  * lazy proxy instances that defer `BeCalmDatabaseProvider.current()` until the first DAO

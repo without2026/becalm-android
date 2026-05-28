@@ -4,7 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.becalm.android.BuildConfig
 import com.becalm.android.data.local.datastore.EmailPipaProvider
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
@@ -21,13 +23,18 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.interceptor.AuthInterceptor
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
+import com.becalm.android.data.repository.ProcessingStatusMessages
+import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.SourceMirrorCursorReset
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
+import java.util.Base64
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -43,18 +50,39 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
     @Inject lateinit var userPrefsStore: UserPrefsStore
     @Inject lateinit var sessionStore: SupabaseSessionStore
     @Inject lateinit var databaseProvider: BeCalmDatabaseProvider
+    @Inject lateinit var processingStatusRepository: ProcessingStatusRepository
     @Inject lateinit var sourceStatusRepository: SourceStatusRepository
+    @Inject lateinit var syncCursorStore: SyncCursorStore
     @Inject lateinit var workScheduler: WorkScheduler
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action !in setOf(ACTION, ACTION_ENQUEUE_CLOVA_AUDIO_E2E, ACTION_SEED_MEETING_SPEAKER_JOURNEY)) return
+        if (intent.action !in setOf(
+                ACTION,
+                ACTION_SEED_SCALE_PERSON_TIMELINE,
+                ACTION_PREPARE_STAGING_MIRROR_SMOKE,
+                ACTION_REPORT_STAGING_MIRROR_SMOKE,
+                ACTION_ENQUEUE_CLOVA_AUDIO_E2E,
+                ACTION_SEED_MEETING_SPEAKER_JOURNEY,
+                ACTION_SEED_SYNC_FAILURE_UI_SMOKE,
+                ACTION_SEED_PROCESSING_STATUS_SMOKE,
+                ACTION_SEED_ACCOUNT_SWAP_SMOKE,
+                ACTION_SEED_PRIVACY_SMOKE,
+            )
+        ) return
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching {
                 when (intent.action) {
                     ACTION -> seedDemoData()
+                    ACTION_SEED_SCALE_PERSON_TIMELINE -> seedScalePersonTimeline()
+                    ACTION_PREPARE_STAGING_MIRROR_SMOKE -> prepareStagingMirrorSmoke(intent)
+                    ACTION_REPORT_STAGING_MIRROR_SMOKE -> reportStagingMirrorSmoke(intent)
                     ACTION_ENQUEUE_CLOVA_AUDIO_E2E -> enqueueClovaAudioE2e(intent)
                     ACTION_SEED_MEETING_SPEAKER_JOURNEY -> seedMeetingSpeakerJourney()
+                    ACTION_SEED_SYNC_FAILURE_UI_SMOKE -> seedSyncFailureUiSmoke()
+                    ACTION_SEED_PROCESSING_STATUS_SMOKE -> seedProcessingStatusSmoke()
+                    ACTION_SEED_ACCOUNT_SWAP_SMOKE -> seedAccountSwapSmoke()
+                    ACTION_SEED_PRIVACY_SMOKE -> seedPrivacySmoke()
                 }
             }.onSuccess {
                 Timber.i("Debug action completed action=${intent.action}")
@@ -160,7 +188,7 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         userPrefsStore.setProcessingPaused(true)
         sessionStore.save(
             SupabaseSession(
-                accessToken = "debug-access-token",
+                accessToken = debugAccessToken(USER_ID),
                 refreshToken = "debug-refresh-token",
                 userId = USER_ID,
                 email = "debug.person.rendering@becalm.local",
@@ -378,16 +406,8 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
                 commitmentInteraction(PERSON_JIHOON, SourceType.MESSAGE_SCREENSHOT, "qa-cmt-old-email-import", oldEmailImportId, CommitmentItemType.ACTION, "give", "pending", now.minusHours(1), "이전 이메일을 가져와 사람 중심 interaction 채우기"),
             ),
         )
-        listOf(
-            PERSON_KIM_HYUNSOO,
-            PERSON_KIM_YOUNGKYUNG,
-            PERSON_KIM_CHAERIN,
-            PERSON_PARK_JINKYU,
-            PERSON_JIHOON,
-            PERSON_KYE,
-        ).forEach { personId ->
-            workScheduler.enqueueProfileMemory(personId, initialDelaySeconds = 0)
-        }
+        // Local debug seeds use issuer-shaped fake JWTs. Do not enqueue remote memory upload
+        // workers with those sessions; a backend 401 would intentionally clear the local session.
     }
 
     private suspend fun seedMeetingSpeakerJourney() {
@@ -405,7 +425,7 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         userPrefsStore.setThirdPartyProvisionConsent(true)
         sessionStore.save(
             SupabaseSession(
-                accessToken = "debug-access-token",
+                accessToken = debugAccessToken(USER_ID),
                 refreshToken = "debug-refresh-token",
                 userId = USER_ID,
                 email = "debug.meeting.speaker@becalm.local",
@@ -590,7 +610,380 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
                 ),
             ),
         )
-        workScheduler.enqueueProfileMemory(customerPersonId, initialDelaySeconds = 0)
+        // See seedDemoData: remote memory uploads are skipped for fake debug sessions.
+    }
+
+    private suspend fun seedScalePersonTimeline() {
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+        val expiresAt = Instant.fromEpochMilliseconds(System.currentTimeMillis() + 365L * 24L * 60L * 60L * 1000L)
+        val personId = PERSON_SCALE
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setCurrentUserId(USER_ID)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        sessionStore.save(
+            SupabaseSession(
+                accessToken = debugAccessToken(USER_ID),
+                refreshToken = "debug-refresh-token",
+                userId = USER_ID,
+                email = "debug.scale.timeline@becalm.local",
+                expiresAt = expiresAt,
+            ),
+        )
+
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(USER_ID))
+        val db = databaseProvider.current()
+        clearDemoRows(db)
+        seedConnectedSources(now)
+
+        db.personIndexDao().upsertPersons(
+            listOf(person(personId, "Scale Customer", "scale.customer@example.invalid", null, now)),
+        )
+        db.personIndexDao().upsertIdentities(
+            listOf(identity(personId, "email", "scale.customer@example.invalid", "Scale Customer", SourceType.GMAIL, now, true)),
+        )
+        db.personEnrichmentDao().upsertAll(
+            listOf(enrichment("scale.customer@example.invalid", "Scale Customer", "Scale QA", now)),
+        )
+
+        val rawEvents = (0 until SCALE_TIMELINE_COUNT).map { index ->
+            val eventTime = now.minusHours(index.toLong())
+            RawIngestionEventEntity(
+                id = "qa-scale-raw-$index",
+                userId = USER_ID,
+                clientEventId = "qa-scale-client-$index",
+                sourceType = SourceType.GMAIL,
+                sourceRef = "qa-scale-mail:$index",
+                counterpartyRef = "scale.customer@example.invalid",
+                eventTitle = "Scale mail $index",
+                eventSnippet = "Scale timeline item $index for device pagination smoke.",
+                folder = if (index % 2 == 0) "INBOX" else "SENT",
+                commitmentsExtractedCount = if (index % 5 == 0) 1 else 0,
+                timestamp = eventTime,
+                syncStatus = "synced",
+            )
+        }
+        db.rawIngestionEventDao().upsertSyncedFromServer(rawEvents)
+        db.personIndexDao().upsertSourceEventParticipants(
+            rawEvents.map { event ->
+                SourceEventParticipantEntity(
+                    id = UUID.nameUUIDFromBytes("qa-scale-participant:${event.id}".toByteArray()).toString(),
+                    userId = USER_ID,
+                    sourceEventId = event.id,
+                    sourceType = event.sourceType,
+                    sourceRef = event.sourceRef,
+                    personId = personId,
+                    role = "counterparty",
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    normalizedValue = "scale.customer@example.invalid",
+                    displayNameRaw = "Scale Customer",
+                    emailRaw = "scale.customer@example.invalid",
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = "Scale QA",
+                    evidence = "Scale timeline device smoke",
+                    confidence = 1.0,
+                    resolutionStatus = "resolved",
+                    createdAt = event.timestamp,
+                )
+            },
+        )
+        db.personIndexDao().upsertInteractions(
+            rawEvents.map { event ->
+                sourceInteraction(
+                    personId = personId,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:${event.id}",
+                    sourceEventId = event.id,
+                    kind = "email",
+                    role = "counterparty",
+                    direction = null,
+                    status = null,
+                    occurredAt = event.timestamp,
+                    title = event.eventTitle.orEmpty(),
+                    snippet = event.eventSnippet.orEmpty(),
+                )
+            },
+        )
+        // See seedDemoData: remote memory uploads are skipped for fake debug sessions.
+        Timber.i("Debug scale person timeline seeded personId=$personId count=$SCALE_TIMELINE_COUNT")
+    }
+
+    private suspend fun seedProcessingStatusSmoke() {
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+        val expiresAt = Instant.fromEpochMilliseconds(System.currentTimeMillis() + 365L * 24L * 60L * 60L * 1000L)
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setCurrentUserId(USER_ID)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        sessionStore.save(
+            SupabaseSession(
+                accessToken = debugAccessToken(USER_ID),
+                refreshToken = "debug-refresh-token",
+                userId = USER_ID,
+                email = "debug.processing.status@becalm.local",
+                expiresAt = expiresAt,
+            ),
+        )
+
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(USER_ID))
+        clearDemoRows(databaseProvider.current())
+        seedConnectedSources(now)
+        processingStatusRepository.recordError(
+            sourceType = SourceType.GMAIL,
+            message = ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED,
+        )
+        processingStatusRepository.recordBlocked(
+            sourceType = SourceType.MEETING,
+            message = ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED,
+        )
+        processingStatusRepository.recordError(
+            sourceType = SourceType.VOICE,
+            message = ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING,
+        )
+        Timber.i("Debug processing status smoke seeded actionNeededCount=3")
+    }
+
+    private suspend fun seedSyncFailureUiSmoke() {
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+        val expiresAt = Instant.fromEpochMilliseconds(System.currentTimeMillis() + 365L * 24L * 60L * 60L * 1000L)
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setCurrentUserId(USER_ID)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        sessionStore.save(
+            SupabaseSession(
+                accessToken = debugAccessToken(USER_ID),
+                refreshToken = "debug-refresh-token",
+                userId = USER_ID,
+                email = "debug.sync.failure.ui@becalm.local",
+                expiresAt = expiresAt,
+            ),
+        )
+
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(USER_ID))
+        clearDemoRows(databaseProvider.current())
+        seedConnectedSources(now)
+        sourceStatusRepository.recordSyncError(
+            sourceType = SourceType.OUTLOOK_MAIL,
+            error = "oauth_reauth_required",
+            at = now,
+        )
+        processingStatusRepository.recordGemini(SourceType.GMAIL)
+        processingStatusRepository.recordError(SourceType.OUTLOOK_MAIL)
+        Timber.i("Debug sync failure UI smoke seeded activeSource=gmail actionSource=outlook_mail")
+    }
+
+    private suspend fun seedAccountSwapSmoke() {
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+        val expiresAt = Instant.fromEpochMilliseconds(System.currentTimeMillis() + 365L * 24L * 60L * 60L * 1000L)
+        val pid = android.os.Process.myPid()
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setCurrentUserId(ACCOUNT_SWAP_USER_A)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        sessionStore.save(
+            SupabaseSession(
+                accessToken = debugAccessToken(ACCOUNT_SWAP_USER_A),
+                refreshToken = "debug-refresh-token-a",
+                userId = ACCOUNT_SWAP_USER_A,
+                email = "debug.account.swap.a@becalm.local",
+                expiresAt = expiresAt,
+            ),
+        )
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(ACCOUNT_SWAP_USER_A))
+        clearMirrorRowsForUser(databaseProvider.current(), ACCOUNT_SWAP_USER_A)
+        seedAccountSwapPerson(
+            db = databaseProvider.current(),
+            userId = ACCOUNT_SWAP_USER_A,
+            personId = PERSON_ACCOUNT_SWAP_A,
+            displayName = "Account A Contact",
+            email = "account.a@example.invalid",
+            now = now.minusHours(1),
+        )
+
+        userPrefsStore.setCurrentUserId(ACCOUNT_SWAP_USER_B)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        sessionStore.save(
+            SupabaseSession(
+                accessToken = debugAccessToken(ACCOUNT_SWAP_USER_B),
+                refreshToken = "debug-refresh-token-b",
+                userId = ACCOUNT_SWAP_USER_B,
+                email = "debug.account.swap.b@becalm.local",
+                expiresAt = expiresAt,
+            ),
+        )
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(ACCOUNT_SWAP_USER_B))
+        clearMirrorRowsForUser(databaseProvider.current(), ACCOUNT_SWAP_USER_B)
+        seedAccountSwapPerson(
+            db = databaseProvider.current(),
+            userId = ACCOUNT_SWAP_USER_B,
+            personId = PERSON_ACCOUNT_SWAP_B,
+            displayName = "Account B Contact",
+            email = "account.b@example.invalid",
+            now = now,
+        )
+        Timber.i(
+            "Debug account swap smoke seeded pid=$pid " +
+                "fromHash=${BeCalmDatabase.deriveUserIdHash(ACCOUNT_SWAP_USER_A).take(4)} " +
+                "toHash=${BeCalmDatabase.deriveUserIdHash(ACCOUNT_SWAP_USER_B).take(4)}",
+        )
+    }
+
+    private suspend fun seedPrivacySmoke() {
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+        val expiresAt = Instant.fromEpochMilliseconds(System.currentTimeMillis() + 365L * 24L * 60L * 60L * 1000L)
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setCurrentUserId(USER_ID)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        userPrefsStore.setThirdPartyProvisionConsent(true)
+        userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
+        sessionStore.save(
+            SupabaseSession(
+                accessToken = debugAccessToken(USER_ID),
+                refreshToken = "debug-refresh-token",
+                userId = USER_ID,
+                email = "debug.privacy@becalm.local",
+                expiresAt = expiresAt,
+            ),
+        )
+
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(USER_ID))
+        val db = databaseProvider.current()
+        clearDemoRows(db)
+        db.rawIngestionEventDao().insert(
+            RawIngestionEventEntity(
+                id = "qa-privacy-voice-raw",
+                userId = USER_ID,
+                clientEventId = "qa-privacy-voice-client",
+                sourceType = SourceType.VOICE,
+                sourceRef = "qa-privacy-voice.wav",
+                counterpartyRef = null,
+                eventTitle = "Privacy smoke voice item",
+                eventSnippet = "Voice item parked when consent is withdrawn.",
+                durationSeconds = 30,
+                timestamp = now,
+                syncStatus = "pending",
+            ),
+        )
+        Timber.i("Debug privacy smoke seeded voiceConsent=true pendingVoiceRows=1")
+    }
+
+    private suspend fun seedAccountSwapPerson(
+        db: BeCalmDatabase,
+        userId: String,
+        personId: String,
+        displayName: String,
+        email: String,
+        now: Instant,
+    ) {
+        val rawEventId = "qa-account-swap-raw-$personId"
+        db.personIndexDao().upsertPersons(
+            listOf(person(personId, displayName, email, null, now, userId = userId)),
+        )
+        db.personIndexDao().upsertIdentities(
+            listOf(identity(personId, "email", email, displayName, SourceType.GMAIL, now, true, userId = userId)),
+        )
+        db.personIndexDao().upsertInteractions(
+            listOf(
+                sourceInteraction(
+                    personId = personId,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:$rawEventId",
+                    sourceEventId = rawEventId,
+                    kind = "email",
+                    role = "counterparty",
+                    direction = null,
+                    status = null,
+                    occurredAt = now,
+                    title = "Account swap proof for $displayName",
+                    snippet = "Only the current account should render this relationship.",
+                    userId = userId,
+                ),
+            ),
+        )
+    }
+
+    private suspend fun prepareStagingMirrorSmoke(intent: Intent) {
+        val userId = ensureE2eSession(intent)
+        val sourceType = intent.getStringExtra(EXTRA_SOURCE_TYPE)?.takeIf { it.isNotBlank() } ?: SourceType.GMAIL
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        if (sourceType == SourceType.GMAIL) {
+            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.GMAIL, true)
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true)
+            userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, true)
+        }
+        if (sourceType == SourceType.OUTLOOK_MAIL) {
+            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL, true)
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.OUTLOOK_MAIL, true)
+            userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.OUTLOOK_MAIL, true)
+        }
+        if (sourceType != SourceType.GMAIL && sourceType != SourceType.OUTLOOK_MAIL) {
+            userPrefsStore.setSourceEnabled(sourceType, true)
+        }
+
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
+        val db = databaseProvider.current()
+        clearMirrorRowsForUser(db, userId)
+        SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+        sourceStatusRepository.recordSyncSuccess(sourceType, now)
+        workScheduler.enqueueSourceRelationRefresh(sourceType, initialDelaySeconds = 0L)
+        Timber.i(
+            "Debug staging mirror smoke prepared sourceType=$sourceType " +
+                "userHash=${userId.shortHash()}",
+        )
+    }
+
+    private suspend fun reportStagingMirrorSmoke(intent: Intent) {
+        val sourceType = intent.getStringExtra(EXTRA_SOURCE_TYPE)?.takeIf { it.isNotBlank() } ?: SourceType.GMAIL
+        val userId = intent.getStringExtra(EXTRA_USER_ID)?.takeIf { it.isNotBlank() }
+            ?: userPrefsStore.observeCurrentUserId().first()
+            ?: error("No active userId for staging mirror smoke report")
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
+        val db = databaseProvider.current()
+        val rawCount = db.countRows(
+            "SELECT COUNT(*) FROM raw_ingestion_events WHERE user_id = ? AND source_type = ?",
+            arrayOf(userId, sourceType),
+        )
+        val sourceParticipantCount = db.countRows(
+            "SELECT COUNT(*) FROM source_event_participants WHERE user_id = ? AND source_type = ?",
+            arrayOf(userId, sourceType),
+        )
+        val commitmentCount = db.countRows(
+            "SELECT COUNT(*) FROM commitments WHERE user_id = ? AND source_type = ?",
+            arrayOf(userId, sourceType),
+        )
+        val commitmentParticipantCount = db.countRows(
+            "SELECT COUNT(*) FROM commitment_participants WHERE user_id = ?",
+            arrayOf(userId),
+        )
+        val rawCursorPresent = syncCursorStore.observeCursor("raw_ingestion_events:$sourceType").first() != null
+        val sourceParticipantCursorPresent =
+            syncCursorStore.observeCursor("source_event_participants:$sourceType").first() != null
+        val commitmentCursorPresent = syncCursorStore.observeCursor("commitments_cursor").first() != null
+        val commitmentParticipantCursorPresent = syncCursorStore.observeCursor("commitment_participants").first() != null
+        Timber.i(
+            "Debug staging mirror smoke report sourceType=$sourceType " +
+                "userHash=${userId.shortHash()} rawCount=$rawCount " +
+                "sourceParticipantCount=$sourceParticipantCount commitmentCount=$commitmentCount " +
+                "commitmentParticipantCount=$commitmentParticipantCount " +
+                "rawCursorPresent=$rawCursorPresent " +
+                "sourceParticipantCursorPresent=$sourceParticipantCursorPresent " +
+                "commitmentCursorPresent=$commitmentCursorPresent " +
+                "commitmentParticipantCursorPresent=$commitmentParticipantCursorPresent",
+        )
     }
 
     private suspend fun seedConnectedSources(now: Instant) {
@@ -629,6 +1022,28 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         sql.execSQL("DELETE FROM raw_ingestion_events WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM persons_enrichment")
     }
+
+    private fun clearMirrorRowsForUser(db: BeCalmDatabase, userId: String) {
+        val sql = db.openHelper.writableDatabase
+        val args = arrayOf(userId)
+        sql.execSQL("DELETE FROM email_body WHERE raw_event_id IN (SELECT id FROM raw_ingestion_events WHERE user_id = ?)", args)
+        sql.execSQL("DELETE FROM commitments WHERE user_id = ?", args)
+        sql.execSQL("DELETE FROM commitment_participants WHERE user_id = ?", args)
+        sql.execSQL("DELETE FROM source_event_participants WHERE user_id = ?", args)
+        sql.execSQL("DELETE FROM person_interactions WHERE user_id = ?", args)
+        runCatching { sql.execSQL("DELETE FROM unmatched_person_interactions WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_index_dirty_sources WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_memory_semantic_index WHERE user_id = ?", args) }
+        sql.execSQL("DELETE FROM person_identities WHERE user_id = ?", args)
+        sql.execSQL("DELETE FROM persons WHERE user_id = ?", args)
+        sql.execSQL("DELETE FROM raw_ingestion_events WHERE user_id = ?", args)
+        sql.execSQL("DELETE FROM persons_enrichment")
+    }
+
+    private fun BeCalmDatabase.countRows(sql: String, args: Array<String>): Int =
+        openHelper.readableDatabase.query(sql, args).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
 
     private fun rawEvent(
         id: String,
@@ -761,10 +1176,11 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         email: String?,
         phone: String?,
         now: Instant,
+        userId: String = USER_ID,
     ): PersonEntity =
         PersonEntity(
             id = id,
-            userId = USER_ID,
+            userId = userId,
             displayName = displayName,
             kind = "contact",
             primaryEmail = email,
@@ -783,14 +1199,15 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         sourceType: String,
         now: Instant,
         primary: Boolean,
+        userId: String = USER_ID,
     ): PersonIdentityEntity {
         val normalized = when (type) {
             "email" -> value.lowercase()
             else -> value
         }
         return PersonIdentityEntity(
-            id = UUID.nameUUIDFromBytes("debug-identity:$USER_ID:$personId:$type:$normalized".toByteArray()).toString(),
-            userId = USER_ID,
+            id = UUID.nameUUIDFromBytes("debug-identity:$userId:$personId:$type:$normalized".toByteArray()).toString(),
+            userId = userId,
             personId = personId,
             identityKey = "$type:$normalized",
             identityType = type,
@@ -816,10 +1233,11 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         occurredAt: Instant,
         title: String,
         snippet: String,
+        userId: String = USER_ID,
     ): PersonInteractionEntity =
         PersonInteractionEntity(
             id = UUID.nameUUIDFromBytes("debug-interaction:$sourceRef:$kind:$personId".toByteArray()).toString(),
-            userId = USER_ID,
+            userId = userId,
             personId = personId,
             sourceType = sourceType,
             sourceRef = sourceRef,
@@ -866,10 +1284,42 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
     private fun Instant.minusHours(hours: Long): Instant =
         Instant.fromEpochMilliseconds(toEpochMilliseconds() - hours * 60L * 60L * 1000L)
 
+    private fun String.shortHash(): Int = hashCode()
+
+    private fun debugAccessToken(userId: String): String {
+        val nowSeconds = System.currentTimeMillis() / 1000L
+        val issuer = BuildConfig.SUPABASE_URL
+            .trim()
+            .trimEnd('/')
+            .takeIf { it.isNotBlank() }
+            ?.let { "$it/auth/v1" }
+            ?: "debug"
+        val header = """{"alg":"none","typ":"JWT"}"""
+        val payload = """
+            {"iss":"${issuer.jsonEscaped()}","sub":"${userId.jsonEscaped()}","aud":"authenticated","iat":$nowSeconds,"exp":${nowSeconds + 365L * 24L * 60L * 60L}}
+        """.trimIndent()
+        return "${header.base64Url()}." +
+            "${payload.base64Url()}." +
+            AuthInterceptor.DEBUG_LOCAL_ONLY_TOKEN_SIGNATURE
+    }
+
+    private fun String.base64Url(): String =
+        Base64.getUrlEncoder().withoutPadding().encodeToString(toByteArray(Charsets.UTF_8))
+
+    private fun String.jsonEscaped(): String =
+        replace("\\", "\\\\").replace("\"", "\\\"")
+
     private companion object {
         const val ACTION = "com.becalm.android.DEBUG_SEED_PERSON_RENDERING"
+        const val ACTION_SEED_SCALE_PERSON_TIMELINE = "com.becalm.android.DEBUG_SEED_SCALE_PERSON_TIMELINE"
+        const val ACTION_PREPARE_STAGING_MIRROR_SMOKE = "com.becalm.android.DEBUG_PREPARE_STAGING_MIRROR_SMOKE"
+        const val ACTION_REPORT_STAGING_MIRROR_SMOKE = "com.becalm.android.DEBUG_REPORT_STAGING_MIRROR_SMOKE"
         const val ACTION_ENQUEUE_CLOVA_AUDIO_E2E = "com.becalm.android.DEBUG_ENQUEUE_CLOVA_AUDIO_E2E"
         const val ACTION_SEED_MEETING_SPEAKER_JOURNEY = "com.becalm.android.DEBUG_SEED_MEETING_SPEAKER_JOURNEY"
+        const val ACTION_SEED_SYNC_FAILURE_UI_SMOKE = "com.becalm.android.DEBUG_SEED_SYNC_FAILURE_UI_SMOKE"
+        const val ACTION_SEED_PROCESSING_STATUS_SMOKE = "com.becalm.android.DEBUG_SEED_PROCESSING_STATUS_SMOKE"
+        const val ACTION_SEED_ACCOUNT_SWAP_SMOKE = "com.becalm.android.DEBUG_SEED_ACCOUNT_SWAP_SMOKE"
+        const val ACTION_SEED_PRIVACY_SMOKE = "com.becalm.android.DEBUG_SEED_PRIVACY_SMOKE"
         const val EXTRA_AUDIO_PATH = "audio_path"
         const val EXTRA_DURATION_SECONDS = "duration_seconds"
         const val EXTRA_SOURCE_TYPE = "source_type"
@@ -881,11 +1331,17 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         const val EXTRA_EMAIL = "email"
         const val EXTRA_EXPIRES_AT_EPOCH_MS = "expires_at_epoch_ms"
         const val USER_ID = "00000000-0000-4000-8000-000000000001"
+        const val ACCOUNT_SWAP_USER_A = "debug-account-swap-user-a"
+        const val ACCOUNT_SWAP_USER_B = "debug-account-swap-user-b"
         const val PERSON_KIM_HYUNSOO = "qa-person-kim-hyunsoo"
         const val PERSON_KIM_YOUNGKYUNG = "qa-person-kim-youngkyung"
         const val PERSON_KIM_CHAERIN = "qa-person-kim-chaerin"
         const val PERSON_PARK_JINKYU = "qa-person-park-jinkyu"
         const val PERSON_JIHOON = "qa-person-jihoon-kang"
         const val PERSON_KYE = "qa-person-kye-lim"
+        const val PERSON_SCALE = "qa-scale-person"
+        const val PERSON_ACCOUNT_SWAP_A = "qa-account-swap-a"
+        const val PERSON_ACCOUNT_SWAP_B = "qa-account-swap-b"
+        const val SCALE_TIMELINE_COUNT = 220
     }
 }

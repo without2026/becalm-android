@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,6 +29,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -35,25 +40,36 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.RawIngestionSyncStatus
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.AudioProcessingConfirmationRepository
+import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.isActive
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EvidenceCard
+import com.becalm.android.ui.components.localizedProcessingStatusMessage
 import com.becalm.android.ui.components.sourcePresentationFor
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -71,24 +87,53 @@ public data class ProcessingStatusRow(
     val itemCount: Int,
     val message: String?,
     val updatedAt: Instant?,
+    val items: List<ProcessingStatusItem> = emptyList(),
     val opensSourceDetail: Boolean = true,
+)
+
+@Immutable
+public data class ProcessingStatusItem(
+    val id: String,
+    val sourceType: String,
+    val title: String?,
+    val sourceRef: String?,
+    val durationSeconds: Int?,
+    val syncStatus: String,
+    val updatedAt: Instant?,
 )
 
 @HiltViewModel
 public class ProcessingStatusViewModel @Inject constructor(
     processingStatusRepository: ProcessingStatusRepository,
     sourceStatusRepository: SourceStatusRepository,
+    rawIngestionRepository: RawIngestionRepository,
+    private val audioProcessingConfirmationRepository: AudioProcessingConfirmationRepository,
+    authRepository: AuthRepository,
 ) : ViewModel() {
+    private val processingItemsFlow = flow {
+        val userId = authRepository.currentSession()?.userId
+        if (userId.isNullOrBlank()) {
+            emit(emptyList())
+        } else {
+            emitAll(rawIngestionRepository.observeActiveProcessingItems(userId))
+        }
+    }
+
     public val state: StateFlow<ProcessingStatusUiState> =
         combine(
             processingStatusRepository.observeAll(),
             sourceStatusRepository.observeSources(),
-        ) { states, sourceStatuses ->
+            processingItemsFlow,
+        ) { states, sourceStatuses, activeItems ->
+                val itemsBySource = activeItems
+                    .map(RawIngestionEventEntity::toProcessingStatusItem)
+                    .groupBy { item -> item.sourceType }
                 ProcessingStatusUiState(
                     rows = states.mapNotNull { state ->
                         toRow(
                             state = state,
                             sourceStatus = sourceStatuses[state.sourceType],
+                            items = itemsBySource[state.sourceType].orEmpty(),
                         )
                     },
                 )
@@ -102,6 +147,7 @@ public class ProcessingStatusViewModel @Inject constructor(
     private fun toRow(
         state: ProcessingSourceState,
         sourceStatus: SourceStatus?,
+        items: List<ProcessingStatusItem>,
     ): ProcessingStatusRow? {
         val isManualEvidence = state.sourceType == SourceType.MESSAGE_SCREENSHOT
         if (
@@ -117,10 +163,34 @@ public class ProcessingStatusViewModel @Inject constructor(
             itemCount = state.itemCount,
             message = state.message,
             updatedAt = state.updatedAt,
-            opensSourceDetail = !isManualEvidence,
+            items = items,
+            opensSourceDetail = !isManualEvidence && state.phase != ProcessingPhase.AWAITING_CONFIRMATION,
         )
     }
+
+    public fun onConfirmAudioItem(rawEventId: String) {
+        viewModelScope.launch {
+            audioProcessingConfirmationRepository.confirm(rawEventId)
+        }
+    }
+
+    public fun onSkipAudioItem(rawEventId: String) {
+        viewModelScope.launch {
+            audioProcessingConfirmationRepository.skip(rawEventId)
+        }
+    }
 }
+
+private fun RawIngestionEventEntity.toProcessingStatusItem(): ProcessingStatusItem =
+    ProcessingStatusItem(
+        id = id,
+        sourceType = sourceType,
+        title = eventTitle,
+        sourceRef = sourceRef,
+        durationSeconds = durationSeconds,
+        syncStatus = syncStatus,
+        updatedAt = lastAttemptAt ?: timestamp,
+    )
 
 @Composable
 public fun ProcessingStatusScreen(
@@ -134,6 +204,8 @@ public fun ProcessingStatusScreen(
         onOpenSource = { sourceType ->
             navController.navigate(BecalmRoute.SourceDetail(sourceType).path)
         },
+        onConfirmAudioItem = viewModel::onConfirmAudioItem,
+        onSkipAudioItem = viewModel::onSkipAudioItem,
     )
 }
 
@@ -143,12 +215,14 @@ internal fun ProcessingStatusContent(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenSource: (String) -> Unit = {},
+    onConfirmAudioItem: (String) -> Unit = {},
+    onSkipAudioItem: (String) -> Unit = {},
 ) {
     val visibleRows = state.rows.filter { it.phase != ProcessingPhase.IDLE }
     val activeRows = visibleRows.filter { it.phase.isActive }
-    val actionRows = visibleRows.filter { it.phase == ProcessingPhase.BLOCKED || it.phase == ProcessingPhase.ERROR }
+    val actionRows = visibleRows.filter { it.phase.isActionRowPhase() }
     val quietRows = visibleRows.filter { row ->
-        !row.phase.isActive && row.phase != ProcessingPhase.BLOCKED && row.phase != ProcessingPhase.ERROR
+        !row.phase.isActive && !row.phase.isActionRowPhase()
     }
     val activeTitle = stringResource(R.string.processing_status_group_active)
     val actionTitle = stringResource(R.string.processing_status_group_action_needed)
@@ -189,18 +263,24 @@ internal fun ProcessingStatusContent(
                     title = activeTitle,
                     rows = activeRows,
                     onOpenSource = onOpenSource,
+                    onConfirmAudioItem = onConfirmAudioItem,
+                    onSkipAudioItem = onSkipAudioItem,
                 )
                 processingGroup(
                     key = "action",
                     title = actionTitle,
                     rows = actionRows,
                     onOpenSource = onOpenSource,
+                    onConfirmAudioItem = onConfirmAudioItem,
+                    onSkipAudioItem = onSkipAudioItem,
                 )
                 processingGroup(
                     key = "quiet",
                     title = quietTitle,
                     rows = quietRows,
                     onOpenSource = onOpenSource,
+                    onConfirmAudioItem = onConfirmAudioItem,
+                    onSkipAudioItem = onSkipAudioItem,
                 )
             }
         }
@@ -212,6 +292,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.processingGroup(
     title: String,
     rows: List<ProcessingStatusRow>,
     onOpenSource: (String) -> Unit,
+    onConfirmAudioItem: (String) -> Unit,
+    onSkipAudioItem: (String) -> Unit,
 ) {
     if (rows.isEmpty()) return
     item(key = "$key-title") {
@@ -223,11 +305,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.processingGroup(
         )
     }
     items(rows, key = { "$key-${it.sourceType}" }) { row ->
-        ProcessingStatusItem(
+        ProcessingStatusRowCard(
             row = row,
             onClick = {
                 if (row.opensSourceDetail) onOpenSource(row.sourceType)
             },
+            onConfirmAudioItem = onConfirmAudioItem,
+            onSkipAudioItem = onSkipAudioItem,
         )
     }
 }
@@ -254,20 +338,38 @@ private fun ProcessingSummary(activeCount: Int, actionCount: Int) {
 }
 
 @Composable
-private fun ProcessingStatusItem(
+private fun ProcessingStatusRowCard(
     row: ProcessingStatusRow,
     onClick: () -> Unit,
+    onConfirmAudioItem: (String) -> Unit,
+    onSkipAudioItem: (String) -> Unit,
 ) {
+    val sourceLabel = stringResource(sourcePresentationFor(row.sourceType).labelRes)
+    val statusText = row.statusText()
+    val openDetailLabel = stringResource(R.string.processing_status_open_source_detail_a11y)
+    val itemDescription = if (row.opensSourceDetail) {
+        "$sourceLabel, $statusText, $openDetailLabel"
+    } else {
+        "$sourceLabel, $statusText"
+    }
     EvidenceCard(
         modifier = Modifier
             .fillMaxWidth()
             .then(
                 if (row.opensSourceDetail) {
-                    Modifier.clickable(onClick = onClick)
+                    Modifier.clickable(
+                        onClickLabel = openDetailLabel,
+                        role = Role.Button,
+                        onClick = onClick,
+                    )
                 } else {
                     Modifier
                 },
-            ),
+            )
+            .semantics {
+                contentDescription = itemDescription
+                stateDescription = statusText
+            },
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -275,14 +377,19 @@ private fun ProcessingStatusItem(
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(sourcePresentationFor(row.sourceType).labelRes),
+                    text = sourceLabel,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = row.statusText(),
+                    text = statusText,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ProcessingItemPreviewList(
+                    row = row,
+                    onConfirmAudioItem = onConfirmAudioItem,
+                    onSkipAudioItem = onSkipAudioItem,
                 )
             }
             if (row.opensSourceDetail) {
@@ -298,21 +405,136 @@ private fun ProcessingStatusItem(
 }
 
 @Composable
+private fun ProcessingItemPreviewList(
+    row: ProcessingStatusRow,
+    onConfirmAudioItem: (String) -> Unit,
+    onSkipAudioItem: (String) -> Unit,
+) {
+    if (row.items.isEmpty()) return
+    val awaitingConfirmation = row.phase == ProcessingPhase.AWAITING_CONFIRMATION
+    val previewItems = row.items.take(PROCESSING_ITEM_PREVIEW_LIMIT)
+    Text(
+        text = stringResource(
+            if (awaitingConfirmation) {
+                R.string.processing_status_audio_confirmation_heading
+            } else {
+                R.string.processing_status_items_heading
+            },
+        ),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+    if (awaitingConfirmation) {
+        Text(
+            text = stringResource(R.string.processing_status_audio_confirmation_notice),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+        )
+    }
+    previewItems.forEach { item ->
+        ProcessingItemPreviewRow(
+            item = item,
+            awaitingConfirmation = awaitingConfirmation,
+            onConfirmAudioItem = onConfirmAudioItem,
+            onSkipAudioItem = onSkipAudioItem,
+        )
+    }
+    val remaining = row.items.size - previewItems.size
+    if (remaining > 0) {
+        Text(
+            text = stringResource(R.string.processing_status_items_more_fmt, remaining),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun ProcessingItemPreviewRow(
+    item: ProcessingStatusItem,
+    awaitingConfirmation: Boolean,
+    onConfirmAudioItem: (String) -> Unit,
+    onSkipAudioItem: (String) -> Unit,
+) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        Text(
+            text = "${item.sourceEmoji()} ${item.displayTitle()}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        item.durationText()?.let { duration ->
+            Text(
+                text = stringResource(R.string.processing_status_audio_duration_fmt, duration),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (awaitingConfirmation && item.syncStatus == RawIngestionSyncStatus.DETECTED_PENDING_CONFIRMATION) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                BecalmButton(
+                    text = stringResource(R.string.processing_status_audio_confirm),
+                    onClick = { onConfirmAudioItem(item.id) },
+                    modifier = Modifier.weight(1f),
+                )
+                BecalmButton(
+                    text = stringResource(R.string.processing_status_audio_skip),
+                    onClick = { onSkipAudioItem(item.id) },
+                    variant = BecalmButtonVariant.Secondary,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PhaseIndicator(phase: ProcessingPhase) {
     if (phase.isActive) {
         CircularProgressIndicator(
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(20.dp).testTag("processing-phase-active"),
             strokeWidth = 2.dp,
+        )
+    } else if (phase.isActionRowPhase()) {
+        Icon(
+            imageVector = Icons.Filled.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier
+                .size(20.dp)
+                .testTag(
+                    if (phase == ProcessingPhase.AWAITING_CONFIRMATION) {
+                        "processing-phase-awaiting-confirmation"
+                    } else if (phase == ProcessingPhase.ERROR) {
+                        "processing-phase-error"
+                    } else {
+                        "processing-phase-blocked"
+                    },
+                ),
         )
     } else {
         Icon(
             imageVector = Icons.Filled.Check,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(20.dp).testTag("processing-phase-success"),
         )
     }
 }
+
+private const val PROCESSING_ITEM_PREVIEW_LIMIT = 3
+
+private fun ProcessingPhase.isActionRowPhase(): Boolean =
+    this == ProcessingPhase.AWAITING_CONFIRMATION ||
+        this == ProcessingPhase.BLOCKED ||
+        this == ProcessingPhase.ERROR
 
 @Composable
 private fun ProcessingStatusRow.statusText(): String {
@@ -327,20 +549,26 @@ private fun ProcessingStatusRow.statusText(): String {
 }
 
 @Composable
-private fun ProcessingStatusRow.userFacingMessage(): String? =
-    when {
+private fun ProcessingStatusRow.userFacingMessage(): String? {
+    localizedProcessingStatusMessage(message)?.let { return uiMessageStringResource(it) }
+    return when {
         phase == ProcessingPhase.ERROR && message?.startsWith("HTTP ") == true ->
             stringResource(R.string.processing_status_error_server_temporary)
+        phase == ProcessingPhase.AWAITING_CONFIRMATION ->
+            message?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.processing_status_audio_confirmation_required)
         phase == ProcessingPhase.BLOCKED || phase == ProcessingPhase.ERROR ->
             message?.takeIf { it.isNotBlank() }
-                ?: stringResource(R.string.processing_status_error_reconnect_needed)
+            ?: stringResource(R.string.processing_status_error_reconnect_needed)
         else -> message?.takeIf { it.isNotBlank() }
     }
+}
 
 private fun phaseLabelRes(phase: ProcessingPhase): Int = when (phase) {
     ProcessingPhase.IDLE -> R.string.processing_phase_idle
     ProcessingPhase.SCANNING -> R.string.processing_phase_scanning
     ProcessingPhase.NEW_ITEMS -> R.string.processing_phase_new_items
+    ProcessingPhase.AWAITING_CONFIRMATION -> R.string.processing_phase_audio_confirmation
     ProcessingPhase.GEMINI -> R.string.processing_phase_memory
     ProcessingPhase.UPLOADING -> R.string.processing_phase_uploading
     ProcessingPhase.NO_NEW_ITEMS -> R.string.processing_phase_no_new_items
@@ -348,6 +576,34 @@ private fun phaseLabelRes(phase: ProcessingPhase): Int = when (phase) {
     ProcessingPhase.BLOCKED,
     ProcessingPhase.ERROR,
     -> R.string.processing_phase_attention_needed
+}
+
+@Composable
+private fun ProcessingStatusItem.displayTitle(): String =
+    title?.takeIf { it.isNotBlank() }
+        ?: sourceRef
+            ?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.processing_status_item_untitled)
+
+private fun ProcessingStatusItem.sourceEmoji(): String =
+    when (sourceType) {
+        SourceType.VOICE -> "🎙️"
+        SourceType.CALL_RECORDING -> "📞"
+        SourceType.MEETING -> "🗣️"
+        else -> "📎"
+    }
+
+@Composable
+private fun ProcessingStatusItem.durationText(): String? {
+    val seconds = durationSeconds?.takeIf { it > 0 } ?: return null
+    val minutes = seconds / 60
+    val remainingSeconds = seconds % 60
+    return if (minutes > 0) {
+        stringResource(R.string.processing_status_audio_duration_min_sec_fmt, minutes, remainingSeconds)
+    } else {
+        stringResource(R.string.processing_status_audio_duration_sec_fmt, remainingSeconds)
+    }
 }
 
 private fun formatTimeHHmm(at: Instant): String {

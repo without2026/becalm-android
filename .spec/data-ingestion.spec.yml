@@ -18,9 +18,9 @@ version: 1
 behaviors:
   - id: ING-001
     type: lifecycle
-    description: "ContentObserver가 Samsung One UI Recordings/ 하위 신규 녹음 파일 저장을 감지하면 Room raw_ingestion_events에 pending 레코드를 INSERT한다. 상위 Recordings/ 폴더의 단일 SAF URI grant 하에 두 서브디렉토리('Voice Recorder/'=음성 메모, 'Call/'=통화 녹음)를 동시에 감시한다. source_type은 저장 경로로 구분: 'Voice Recorder/' 하위면 source_type='voice', 'Call/' 하위면 source_type='call_recording'. ContentObserver는 앱 프로세스가 살아있는 동안만 작동한다 — 프로세스 종료 중 발생한 이벤트는 ING-011 foreground catch-up이 MediaStore timestamp cursor로 보완한다"
-    trigger: "Samsung Voice Recorder 또는 Samsung Phone(통화 녹음)이 새 .m4a 파일을 SAF-granted Recordings/ URI 하위에 저장, 앱 프로세스가 FOREGROUND 또는 BACKGROUND에서 살아있음"
-    precondition: "앱 프로세스가 FOREGROUND 또는 BACKGROUND 상태, SAF tree URI 권한 보유(상위 Recordings/), Room DB 초기화 완료, ContentObserver 등록됨"
+    description: "ContentObserver가 MediaStore.Audio 변경을 감지하면 MediaStoreWorker가 앱 내부 Recordings preset 경로만 쿼리해 Room raw_ingestion_events에 pending 레코드를 INSERT한다. source_type은 저장 경로로 구분: 'Voice Recorder/' 또는 Recordings voice preset 하위면 source_type='voice', 'Call/' 하위면 source_type='call_recording'. ContentObserver는 앱 프로세스가 살아있는 동안만 작동한다 — 프로세스 종료 중 발생한 이벤트는 ING-011 foreground catch-up이 MediaStore timestamp cursor로 보완한다"
+    trigger: "Samsung Voice Recorder 또는 Samsung Phone(통화 녹음)이 새 .m4a 파일을 MediaStore.Audio에 등록, 앱 프로세스가 FOREGROUND 또는 BACKGROUND에서 살아있음"
+    precondition: "앱 프로세스가 FOREGROUND 또는 BACKGROUND 상태, READ_MEDIA_AUDIO 권한 부여, 앱 내부 recording path selection 저장, Room DB 초기화 완료, ContentObserver 등록됨"
     expected: "Room raw_ingestion_events에 {source_type:'voice'|'call_recording', sync_status:'pending', retry_count:0, person_ref: 통화 녹음의 경우 MediaStore 메타데이터에서 추출 가능한 상대 번호를 E.164 정규화하여 설정(없으면 null), 음성 메모는 null, event_title: MediaStore TITLE, duration_seconds: MediaStore DURATION/1000, commitments_extracted_count:0} 레코드 1건 INSERT됨. event_snippet은 VOI-001 draft extraction 완료 후 Android가 첫 commitment.quote로 로컬 갱신"
     source: phase2-acceptance
     tests: []
@@ -47,8 +47,8 @@ behaviors:
     type: lifecycle
     description: "Meeting 전용 scanner는 Recordings/BeCalm Meetings/Audio 및 Transcripts 하위 파일을 자동 감지해 source_type='meeting' raw_ingestion_events로 수집한다"
     trigger: "ContentObserver audio/files table 변경 또는 ING-011 foreground catch-up"
-    precondition: "인증 완료, source_type='meeting' enabled, Recordings SAF tree URI grant 존재"
-    expected: "오디오는 MediaStore.Audio.Media에서 Recordings/BeCalm Meetings/Audio/% 경로만 source_type='meeting'으로 INSERT하고 VoiceUploadWorker를 enqueue한다. 전사본은 SAF DocumentsContract로 Recordings/BeCalm Meetings/Transcripts/를 traverse하여 .txt/.md/.pdf/.docx allowlist 파일만 INSERT한다. voice scanner는 Recordings/BeCalm Meetings/%를 제외해 동일 파일이 source_type='voice'로 중복 저장되지 않는다"
+    precondition: "인증 완료, source_type='meeting' enabled, READ_MEDIA_AUDIO 권한 부여, 앱 내부 meeting recording path selection 저장"
+    expected: "오디오는 MediaStore.Audio.Media에서 Recordings/BeCalm Meetings/Audio/% 경로만 source_type='meeting'으로 INSERT하고 VoiceUploadWorker를 enqueue한다. 전사본 자동 traverse는 SAF 의존이므로 이 MediaStore 자동 감지 경로에서 수행하지 않는다. voice scanner는 Recordings/BeCalm Meetings/%를 제외해 동일 파일이 source_type='voice'로 중복 저장되지 않는다"
     source: user-request
     tests: []
 

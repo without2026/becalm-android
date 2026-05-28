@@ -34,7 +34,7 @@ behaviors:
 
   - id: SMG-003
     type: ui_interaction
-    description: "미연결 또는 오류 상태 소스 탭 시 해당 소스의 재연결 플로우로 이동한다 — OAuth 소스는 OAuth 재인증, IMAP 소스는 앱 비밀번호 재입력, voice/meeting은 SAF Recordings 폴더 재선택"
+    description: "미연결 또는 오류 상태 소스 탭 시 해당 소스의 재연결 플로우로 이동한다 — OAuth 소스는 OAuth 재인증, IMAP 소스는 앱 비밀번호 재입력, voice/call recording/meeting 자동 녹음 경로는 앱 내부 Recordings preset 선택"
     screen: "SourceDetailScreen"
     interaction: "disconnected 또는 error 소스 카드 탭"
     precondition: "SourcesListScreen에서 Outlook Mail(error) 카드 탭"

@@ -193,7 +193,6 @@ class SourceConnectionsCheckpoint2E2eTest {
                     voiceFolderDetected = true,
                     callFolderDetected = true,
                     meetingFolderDetected = true,
-                    requiresManualPicker = false,
                     onGrant = { grants += 1 },
                     onSkip = { skips += 1 },
                 )
@@ -203,7 +202,7 @@ class SourceConnectionsCheckpoint2E2eTest {
         composeTestRule.onNodeWithText(
             string(R.string.onb_recording_folder_detected_path_fmt, "/storage/emulated/0/Recordings"),
         ).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.action_grant)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.onb_recording_folder_use_selected)).performClick()
         composeTestRule.onNodeWithText(string(R.string.action_skip)).performClick()
 
         composeTestRule.runOnIdle {

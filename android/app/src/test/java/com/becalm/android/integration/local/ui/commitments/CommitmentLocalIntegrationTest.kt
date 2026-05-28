@@ -8,6 +8,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
@@ -100,7 +101,7 @@ class CommitmentLocalIntegrationTest {
                     id = "pending-row",
                     title = "활성 약속",
                     actionState = "pending",
-                    sourceType = SourceType.GMAIL,
+                    sourceType = SourceType.MANUAL,
                     dueAt = Instant.parse("2026-04-24T00:00:00Z"),
                 ),
                 commitment(
@@ -114,7 +115,7 @@ class CommitmentLocalIntegrationTest {
                     id = "cancelled-row",
                     title = "취소 약속",
                     actionState = "cancelled",
-                    sourceType = SourceType.OUTLOOK_MAIL,
+                    sourceType = SourceType.MANUAL,
                     dueAt = null,
                 ),
             ),
@@ -152,7 +153,7 @@ class CommitmentLocalIntegrationTest {
     }
 
     @Test
-    fun `management screen hides non person lifecycle actions but keeps schedules`() = runTest {
+    fun `management screen hides non person lifecycle actions and schedules`() = runTest {
         db.commitmentDao().insertAll(
             listOf(
                 commitment(
@@ -183,22 +184,69 @@ class CommitmentLocalIntegrationTest {
             ),
         )
 
-        val viewModel = CommitmentManagementViewModel(
-            commitmentRepository = commitmentRepository,
-            sourceEventParticipantRepository = sourceEventParticipantRepository,
-            commitmentParticipantRepository = commitmentParticipantRepository,
-            workScheduler = workScheduler,
-            reminderScheduler = reminderScheduler,
-            userPrefsStore = userPrefsStore,
-            logger = logger,
+        commitmentRepository.observeManagementRowsForUser(USER_ID).test {
+            assertTrue(awaitItem().isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `management screen hides user-confirmed source actions until counterparty is confirmed`() = runTest {
+        db.commitmentDao().insertAll(
+            listOf(
+                commitment(
+                    id = "gmail-unconfirmed-action",
+                    title = "상대방 미확인 약속",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-04-25T01:00:00Z"),
+                ),
+                commitment(
+                    id = "gmail-confirmed-action",
+                    title = "상대방 확인 약속",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-04-26T01:00:00Z"),
+                ),
+                commitment(
+                    id = "gmail-schedule",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    title = "메일에서 찾은 일정",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-04-27T01:00:00Z"),
+                ),
+                commitment(
+                    id = "manual-action",
+                    title = "직접 입력 약속",
+                    actionState = "pending",
+                    sourceType = SourceType.MANUAL,
+                    dueAt = Instant.parse("2026-04-28T01:00:00Z"),
+                ),
+            ),
+        )
+        db.personIndexDao().upsertCommitmentParticipants(
+            listOf(
+                CommitmentParticipantEntity(
+                    id = "cp-gmail-confirmed-action",
+                    userId = USER_ID,
+                    commitmentId = "gmail-confirmed-action",
+                    personId = "person-confirmed",
+                    role = "counterparty",
+                    evidence = "사용자가 상대방으로 확인",
+                    confidence = 1.0,
+                    createdAt = Instant.parse("2026-04-18T05:30:00Z"),
+                ),
+            ),
         )
 
-        viewModel.uiState.test {
-            var state = awaitItem()
-            while (state.items.isEmpty()) state = awaitItem()
-
-            assertEquals(listOf("asan-schedule"), state.items.map { it.id })
-            assertEquals(listOf("asan-schedule"), state.activeItems.map { it.id })
+        commitmentRepository.observeManagementRowsForUser(USER_ID).test {
+            val rows = awaitItem()
+            assertEquals(
+                setOf("gmail-confirmed-action", "manual-action"),
+                rows.map { it.id }.toSet(),
+            )
+            assertFalse(rows.any { it.id == "gmail-unconfirmed-action" })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -264,7 +312,7 @@ class CommitmentLocalIntegrationTest {
                     id = "no-due",
                     title = "시간 없는 약속",
                     actionState = "pending",
-                    sourceType = SourceType.GMAIL,
+                    sourceType = SourceType.MANUAL,
                     dueAt = null,
                     sourceEventOccurredAt = Instant.parse("2026-04-29T04:00:00Z"),
                 ),
@@ -272,7 +320,7 @@ class CommitmentLocalIntegrationTest {
                     id = "late-exact",
                     title = "늦은 정확한 약속",
                     actionState = "pending",
-                    sourceType = SourceType.GMAIL,
+                    sourceType = SourceType.MANUAL,
                     dueAt = Instant.parse("2026-04-25T01:00:00Z"),
                     sourceEventOccurredAt = Instant.parse("2026-04-29T03:00:00Z"),
                 ),
@@ -280,7 +328,7 @@ class CommitmentLocalIntegrationTest {
                     id = "approx",
                     title = "대략적인 약속",
                     actionState = "pending",
-                    sourceType = SourceType.GMAIL,
+                    sourceType = SourceType.MANUAL,
                     dueAt = Instant.parse("2026-04-23T01:00:00Z"),
                     dueIsApproximate = true,
                     sourceEventOccurredAt = Instant.parse("2026-04-29T02:00:00Z"),
@@ -289,7 +337,7 @@ class CommitmentLocalIntegrationTest {
                     id = "early-exact",
                     title = "빠른 정확한 약속",
                     actionState = "pending",
-                    sourceType = SourceType.GMAIL,
+                    sourceType = SourceType.MANUAL,
                     dueAt = Instant.parse("2026-04-24T01:00:00Z"),
                     sourceEventOccurredAt = Instant.parse("2026-04-29T01:00:00Z"),
                 ),

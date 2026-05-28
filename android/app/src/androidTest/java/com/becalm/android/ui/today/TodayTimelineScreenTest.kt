@@ -5,6 +5,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -24,6 +25,7 @@ import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -38,9 +40,8 @@ class TodayTimelineScreenTest {
     @Test
     // spec: ERR-002
     // spec: ERR-003
-    fun today_content_shows_processing_banner_active_source_chips_source_warning_and_settings_action() {
+    fun today_content_keeps_processing_banner_and_settings_action_without_source_management_header() {
         var openSettingsCount = 0
-        var openSourcesCount = 0
         var openProcessingCount = 0
 
         composeTestRule.setContent {
@@ -81,7 +82,6 @@ class TodayTimelineScreenTest {
                         ),
                     ),
                     onOpenSettings = { openSettingsCount += 1 },
-                    onOpenSources = { openSourcesCount += 1 },
                     onOpenProcessingStatus = { openProcessingCount += 1 },
                     onPullRefresh = {},
                 )
@@ -91,18 +91,17 @@ class TodayTimelineScreenTest {
         composeTestRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_processing_active_items_fmt, 3)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_processing_open)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.today_source_attention_action)).performClick()
-        composeTestRule.onNodeWithTag("source-chip-voice").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("source-chip-gmail").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.today_syncing_fmt, 1, 7)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.today_source_attention_action)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithTag("source-chip-voice").assertCountEquals(0)
+        composeTestRule.onAllNodesWithTag("source-chip-gmail").assertCountEquals(0)
         composeTestRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
         composeTestRule.onAllNodesWithText("Naver Email").assertCountEquals(0)
         composeTestRule.onNodeWithContentDescription(string(R.string.label_settings)).performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, openSettingsCount)
-            assertEquals(1, openSourcesCount)
             assertEquals(1, openProcessingCount)
         }
     }
@@ -153,6 +152,56 @@ class TodayTimelineScreenTest {
 
         composeTestRule.runOnIdle {
             assertEquals(1, screenshotImports)
+        }
+    }
+
+    @Test
+    fun schedule_content_groups_upcoming_sections_and_exposes_range_chips() {
+        var selectedFilter: ScheduleRangeFilter? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        today = LocalDate(2026, 4, 23),
+                        scheduleRangeFilter = ScheduleRangeFilter.UPCOMING,
+                        timeline = listOf(
+                            TimelineItem.Meeting(
+                                id = "today",
+                                title = "오늘 미팅",
+                                attendeesRaw = "team@example.com",
+                                sortKey = Instant.parse("2026-04-23T02:00:00Z"),
+                            ),
+                            TimelineItem.CalendarEvent(
+                                id = "week",
+                                title = "금요일 리뷰",
+                                sortKey = Instant.parse("2026-04-24T02:00:00Z"),
+                            ),
+                            TimelineItem.CalendarEvent(
+                                id = "past",
+                                title = "지난 미팅",
+                                sortKey = Instant.parse("2026-04-01T02:00:00Z"),
+                            ),
+                        ),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onScheduleRangeChange = { selectedFilter = it },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.schedule_section_today)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("오늘 미팅").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.schedule_section_this_week)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("금요일 리뷰").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("지난 미팅").assertCountEquals(0)
+
+        composeTestRule.onNodeWithTag("schedule-range-past").performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(ScheduleRangeFilter.PAST, selectedFilter)
         }
     }
 

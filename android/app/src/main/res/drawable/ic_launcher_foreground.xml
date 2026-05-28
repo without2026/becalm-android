@@ -1,15 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    TODO(BECALM-ASSET-001): replace with final brand launcher icon (designer deliverable)
-    Placeholder: monochrome white circle centred in the safe-zone inset (72dp of 108dp canvas).
-    No text, no branding — neutral placeholder to keep the build green.
--->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#EAEAEA"
-        android:pathData="M54,36 a18,18 0 1,0 0.001,0 Z" />
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M30.71,25H55.13Q61.54,25 66.02,26.8Q70.5,28.6 72.77,31.88Q75.04,35.16 75.04,39.63Q75.04,42.82 73.66,45.44Q72.28,48.06 69.82,49.81Q67.36,51.56 64.09,52.22V52.78Q67.71,52.94 70.74,54.7Q73.77,56.46 75.53,59.57Q77.29,62.67 77.29,66.73Q77.29,71.42 74.88,75.11Q72.46,78.79 67.89,80.9Q63.32,83 57.08,83H30.71ZM62.09,64.95Q62.09,62.81 61.09,61.2Q60.08,59.6 58.2,58.77Q56.31,57.94 53.73,57.94H45.13V71.35H53.46Q56.37,71.35 58.29,70.59Q60.21,69.83 61.15,68.41Q62.09,66.99 62.09,64.95ZM60.26,42.5Q60.26,40.61 59.34,39.24Q58.41,37.88 56.75,37.16Q55.08,36.44 52.82,36.44H45.13V48.76H52.58Q54.82,48.76 56.57,48Q58.32,47.23 59.29,45.84Q60.26,44.45 60.26,42.5Z" />
 </vector>

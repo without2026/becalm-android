@@ -13,8 +13,10 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonIndexDirtySources
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
+import com.becalm.android.worker.ContactBaselineScanRow
 import com.becalm.android.worker.PersonInteractionIndexWorker
 import com.becalm.android.worker.WorkScheduler
+import com.becalm.android.worker.buildContactBaselineEntities
 import javax.inject.Provider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -110,7 +112,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     }
 
     @Test
-    fun `source local speaker labels do not create unmatched person review rows`() = runTest {
+    fun `source local speaker labels create review rows without leaking speaker labels`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.rawIngestionEventDao().insert(
             rawEvent(
@@ -144,7 +146,10 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         val result = newWorker().doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
-        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20).isEmpty())
+        val unmatched = db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20)
+        assertEquals(1, unmatched.size)
+        assertEquals(SourceType.CALL_RECORDING, unmatched.single().sourceType)
+        assertEquals(null, unmatched.single().suggestedLabel)
         assertTrue(scheduler.profileMemoryPersonIds.isEmpty())
     }
 
@@ -418,7 +423,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     }
 
     @Test
-    fun `unresolved source participants go to review without creating people rows`() = runTest {
+    fun `referenced-only source participants do not create people or review rows`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.rawIngestionEventDao().insert(
             rawEvent(
@@ -448,8 +453,82 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 20).first().isEmpty())
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20).isEmpty())
+    }
+
+    @Test
+    fun `unresolved source participants stay in review even when contacts baseline has a candidate`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personEnrichmentDao().upsertAll(
+            buildContactBaselineEntities(
+                rows = listOf(
+                    ContactBaselineScanRow(
+                        contactId = "contact-42",
+                        displayName = "김민홍",
+                        email = "minhong@example.com",
+                        phone = "010-1234-5678",
+                    ),
+                ),
+                now = Instant.parse("2026-04-29T03:00:00Z"),
+            ),
+        )
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-contact-baseline-1",
+                sourceType = SourceType.CALL_RECORDING,
+                counterpartyRef = null,
+                eventSnippet = "금요일 일정으로 바꿔주세요.",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-contact-baseline",
+                    sourceEventId = "raw-contact-baseline-1",
+                    sourceType = SourceType.CALL_RECORDING,
+                    sourceRef = "call-file-contact-baseline",
+                    personId = null,
+                    email = null,
+                    phone = "010-1234-5678",
+                    displayName = "민홍",
+                    role = "caller",
+                    relationToUser = "counterparty",
+                    resolutionStatus = "unresolved",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 20).first().isEmpty())
         val unmatched = db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20)
-        assertEquals(listOf("Steve"), unmatched.map { it.suggestedLabel })
+        assertEquals(1, unmatched.size)
+        assertEquals("민홍", unmatched.single().suggestedLabel)
+    }
+
+    @Test
+    fun `contacts baseline rows without source interactions do not render people`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personEnrichmentDao().upsertAll(
+            buildContactBaselineEntities(
+                rows = listOf(
+                    ContactBaselineScanRow(
+                        contactId = "contact-baseline-only",
+                        displayName = "렌더링 안됨",
+                        email = "baseline-only@example.com",
+                        phone = "010-2222-3333",
+                    ),
+                ),
+                now = Instant.parse("2026-04-29T03:00:00Z"),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 20).first().isEmpty())
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20).isEmpty())
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.becalm.android.data.remote.interceptor
 
+import com.becalm.android.BuildConfig
 import com.becalm.android.data.auth.AuthFailureSessionInvalidator
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -61,7 +62,9 @@ public class AuthInterceptor(
         }
 
         // Step 2: attach current access token
-        val token = authTokenProvider.currentAccessToken().orEmpty()
+        val rawToken = authTokenProvider.currentAccessToken().orEmpty()
+        val debugLocalOnlyToken = isDebugLocalOnlyToken(rawToken)
+        val token = if (debugLocalOnlyToken) "" else rawToken
         val hadToken = token.isNotBlank()
         val authenticatedRequest = if (hadToken) {
             originalRequest.newBuilder()
@@ -86,6 +89,10 @@ public class AuthInterceptor(
             .body(bodyBytes.toResponseBody(bodyContentType))
             .build()
         response.close()
+
+        if (debugLocalOnlyToken) {
+            return bufferedResponse
+        }
 
         // Pass the token we attached to the failing request so the provider can detect
         // "cache already advanced past this 401" and coalesce duplicate refreshes.
@@ -132,8 +139,15 @@ public class AuthInterceptor(
         }
     }
 
-    private companion object {
+    private fun isDebugLocalOnlyToken(token: String): Boolean =
+        BuildConfig.DEBUG &&
+            token.substringAfterLast('.', missingDelimiterValue = "") in DEBUG_LOCAL_ONLY_TOKEN_SIGNATURES
+
+    public companion object {
+        public const val DEBUG_LOCAL_ONLY_TOKEN_SIGNATURE: String = "debug-local-only"
+
         private const val AUTH_REFRESH_TIMEOUT_MS = 10_000L
         private const val AUTH_INVALIDATE_TIMEOUT_MS = 2_000L
+        private val DEBUG_LOCAL_ONLY_TOKEN_SIGNATURES = setOf(DEBUG_LOCAL_ONLY_TOKEN_SIGNATURE, "debug")
     }
 }

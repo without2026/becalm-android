@@ -3,13 +3,19 @@ package com.becalm.android.integration.local.ui.settings
 import android.content.Context
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -19,6 +25,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.ui.settings.ProcessingStatusContent
 import com.becalm.android.ui.settings.ProcessingStatusRow
 import com.becalm.android.ui.settings.ProcessingStatusUiState
@@ -128,6 +135,8 @@ class SettingsUiTest {
         var addAnchorClicks = 0
         var archivedAnchor: String? = null
         var ownershipChange: Pair<String, String>? = null
+        var disconnectedConnection: String? = null
+        var deletedConnection = 0
 
         composeRule.setContent {
             BecalmTheme {
@@ -171,6 +180,8 @@ class SettingsUiTest {
                     onAddAnchor = { addAnchorClicks += 1 },
                     onArchiveAnchor = { archivedAnchor = it },
                     onSetConnectionOwnership = { id, ownership -> ownershipChange = id to ownership },
+                    onDisconnectConnection = { disconnectedConnection = it },
+                    onRequestDeleteConnection = { deletedConnection += 1 },
                 )
             }
         }
@@ -193,13 +204,63 @@ class SettingsUiTest {
         composeRule.onNodeWithText(string(R.string.settings_identity_connection_shared)).assertExists()
         composeRule.onNodeWithText(string(R.string.settings_identity_connection_delegated)).assertExists()
         composeRule.onNodeWithText(string(R.string.settings_identity_connection_unknown)).assertExists()
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_status_connected)).assertExists()
         composeRule.onNodeWithText(string(R.string.settings_identity_connection_self)).performClick()
+        composeRule.onNodeWithTag("settings-identity-connection-disconnect-conn-1").performClick()
+        composeRule.onNodeWithTag("settings-identity-connection-delete-conn-1").performClick()
 
         composeRule.runOnIdle {
             assertEquals(1, saveClicks)
             assertEquals(1, addAnchorClicks)
             assertEquals("anchor-1", archivedAnchor)
             assertEquals("conn-1" to "self", ownershipChange)
+            assertEquals("conn-1", disconnectedConnection)
+            assertEquals(1, deletedConnection)
+        }
+    }
+
+    @Test
+    fun `identity content confirms source connection delete`() {
+        var confirmClicks = 0
+        var dismissClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                SettingsIdentityContent(
+                    state = SettingsIdentityUiState(
+                        loading = false,
+                        confirmingDeleteConnectionId = "conn-1",
+                        connections = listOf(
+                            SourceConnectionOwnershipUi(
+                                id = "conn-1",
+                                title = "Gmail",
+                                accountLabel = "work@example.com",
+                                ownership = "self",
+                                status = "connected",
+                            ),
+                        ),
+                    ),
+                    onDisplayNameChange = {},
+                    onPhoneChange = {},
+                    onSaveProfile = {},
+                    onAnchorTypeChange = {},
+                    onAnchorValueChange = {},
+                    onAddAnchor = {},
+                    onArchiveAnchor = {},
+                    onSetConnectionOwnership = { _, _ -> },
+                    onConfirmDeleteConnection = { confirmClicks += 1 },
+                    onDismissDeleteConnection = { dismissClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_delete_title)).assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-identity-connection-delete-confirm").performClick()
+        composeRule.onNodeWithTag("settings-identity-connection-delete-cancel").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, confirmClicks)
+            assertEquals(1, dismissClicks)
         }
     }
 
@@ -339,6 +400,145 @@ class SettingsUiTest {
         composeRule.onNodeWithTag("processing-status-list")
             .performScrollToNode(hasText(string(R.string.processing_status_group_quiet)))
         composeRule.onNodeWithText(string(R.string.processing_status_group_quiet)).assertExists()
+    }
+
+    @Test
+    fun `processing status action needed row exposes recovery semantics and non-success icon`() {
+        var openedSourceType: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                ProcessingStatusContent(
+                    state = ProcessingStatusUiState(
+                        rows = listOf(
+                            ProcessingStatusRow(
+                                sourceType = SourceType.GMAIL,
+                                phase = ProcessingPhase.ERROR,
+                                itemCount = 0,
+                                message = null,
+                                updatedAt = null,
+                            ),
+                        ),
+                    ),
+                    onBack = {},
+                    onOpenSource = { openedSourceType = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("processing-phase-error", useUnmergedTree = true).assertExists()
+        composeRule.onAllNodesWithTag("processing-phase-success", useUnmergedTree = true).assertCountEquals(0)
+        composeRule
+            .onNodeWithContentDescription(
+                "${string(R.string.raw_event_source_badge_gmail)}, " +
+                    "${string(R.string.processing_phase_attention_needed)} · " +
+                    "${string(R.string.processing_status_error_reconnect_needed)}, " +
+                    string(R.string.processing_status_open_source_detail_a11y),
+            )
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.StateDescription,
+                    "${string(R.string.processing_phase_attention_needed)} · " +
+                        string(R.string.processing_status_error_reconnect_needed),
+                ),
+            )
+            .assertIsDisplayed()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(SourceType.GMAIL, openedSourceType)
+        }
+    }
+
+    @Test
+    fun `processing status manual evidence row stays read only in semantics`() {
+        composeRule.setContent {
+            BecalmTheme {
+                ProcessingStatusContent(
+                    state = ProcessingStatusUiState(
+                        rows = listOf(
+                            ProcessingStatusRow(
+                                sourceType = SourceType.MESSAGE_SCREENSHOT,
+                                phase = ProcessingPhase.SYNCED,
+                                itemCount = 1,
+                                message = null,
+                                updatedAt = null,
+                                opensSourceDetail = false,
+                            ),
+                        ),
+                    ),
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule
+            .onNodeWithContentDescription(
+                "${string(R.string.raw_event_source_badge_message_screenshot)}, " +
+                    "${string(R.string.processing_phase_synced)} · " +
+                    string(R.string.processing_status_item_count_fmt, 1),
+            )
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.StateDescription,
+                    "${string(R.string.processing_phase_synced)} · " +
+                        string(R.string.processing_status_item_count_fmt, 1),
+                ),
+            )
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithContentDescription(
+            string(R.string.processing_status_open_source_detail_a11y),
+            substring = true,
+        ).assertCountEquals(0)
+    }
+
+    @Test
+    fun `processing status renders known retry and budget codes as localized user messages`() {
+        composeRule.setContent {
+            BecalmTheme {
+                ProcessingStatusContent(
+                    state = ProcessingStatusUiState(
+                        rows = listOf(
+                            ProcessingStatusRow(
+                                sourceType = SourceType.GMAIL,
+                                phase = ProcessingPhase.ERROR,
+                                itemCount = 0,
+                                message = ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED,
+                                updatedAt = null,
+                            ),
+                            ProcessingStatusRow(
+                                sourceType = SourceType.MEETING,
+                                phase = ProcessingPhase.BLOCKED,
+                                itemCount = 0,
+                                message = ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED,
+                                updatedAt = null,
+                            ),
+                            ProcessingStatusRow(
+                                sourceType = SourceType.VOICE,
+                                phase = ProcessingPhase.ERROR,
+                                itemCount = 0,
+                                message = ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING,
+                                updatedAt = null,
+                            ),
+                        ),
+                    ),
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.processing_status_source_sync_delayed), substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.processing_status_llm_daily_budget_exceeded), substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.processing_status_llm_rate_limited_retrying), substring = true)
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithText(ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED, substring = true)
+            .assertCountEquals(0)
+        composeRule.onAllNodesWithText(ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED, substring = true)
+            .assertCountEquals(0)
+        composeRule.onAllNodesWithText(ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING, substring = true)
+            .assertCountEquals(0)
     }
 
     @Test

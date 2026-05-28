@@ -3,6 +3,9 @@ package com.becalm.android.integration.local.worker
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
+import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
@@ -70,6 +73,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
@@ -125,6 +130,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -159,6 +166,71 @@ class PersonManualMatchPipelineLocalIntegrationTest {
     }
 
     @Test
+    fun `manual match creates commitment participant for message screenshot commitments`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val raw = rawEvent(id = "raw-message-1", snippet = "금요일까지 제안서를 보내주세요.").copy(
+            sourceType = SourceType.MESSAGE_SCREENSHOT,
+            sourceRef = "file:///message-screenshot-1.jpg",
+            eventTitle = "메신저 캡쳐",
+        )
+        db.rawIngestionEventDao().insert(raw)
+        db.commitmentDao().insertAll(
+            listOf(
+                commitment(
+                    id = "commitment-message-1",
+                    sourceType = SourceType.MESSAGE_SCREENSHOT,
+                    sourceRef = requireNotNull(raw.sourceRef),
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-message-1",
+                    sourceEventId = raw.id,
+                    sourceType = SourceType.MESSAGE_SCREENSHOT,
+                    sourceRef = requireNotNull(raw.sourceRef),
+                    displayName = "김민지",
+                ),
+            ),
+        )
+        newWorker().doWork()
+        assertTrue(db.commitmentDao().observeManagementRowsForUser(USER_ID).first().isEmpty())
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
+            workScheduler = scheduler,
+            apiProvider = Provider { error("RailwayApi is not configured for this test repository") },
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.MESSAGE_SCREENSHOT,
+            sourceRef = "raw:${raw.id}",
+            interactionKind = "message",
+            personAnchor = CUSTOMER_EMAIL,
+            nickname = "김민지",
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        val participant = db.personIndexDao().findCommitmentParticipantsForUser(USER_ID).single()
+        assertEquals("commitment-message-1", participant.commitmentId)
+        assertEquals(personId, participant.personId)
+
+        newWorker().doWork()
+
+        val commitmentRows = db.commitmentDao().observeManagementRowsForUser(USER_ID).first()
+        assertEquals(listOf("commitment-message-1"), commitmentRows.map { it.id })
+        val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first()
+        assertTrue(interactions.any { it.sourceRef == "commitment:commitment-message-1" })
+    }
+
+    @Test
     fun `manual match is reused for later unresolved participant with same email`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
@@ -187,6 +259,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -275,11 +349,15 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         )
 
         newWorker().doWork()
-        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+        val unmatched = db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10)
+        assertEquals(1, unmatched.size)
+        assertEquals(null, unmatched.single().suggestedLabel)
 
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
@@ -335,6 +413,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
@@ -393,6 +473,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -458,6 +540,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
@@ -525,6 +609,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
@@ -580,6 +666,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -640,6 +728,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -716,6 +806,34 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             syncStatus = "synced",
         )
 
+    private fun commitment(id: String, sourceType: String, sourceRef: String): CommitmentEntity =
+        CommitmentEntity(
+            id = id,
+            userId = USER_ID,
+            itemType = CommitmentItemType.ACTION,
+            direction = "take",
+            scheduleStatus = null,
+            decisionStatus = null,
+            counterpartyRaw = null,
+            counterpartyRef = null,
+            title = "제안서 보내기",
+            description = null,
+            quote = "금요일까지 제안서를 보내주세요.",
+            sourceEventTitle = "메신저 캡쳐",
+            sourceEventOccurredAt = Instant.parse("2026-04-29T00:00:00Z"),
+            dueAt = null,
+            dueHint = "금요일",
+            dueIsApproximate = false,
+            actionState = "pending",
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            confidence = 0.91,
+            commitmentState = CommitmentLifecycleLegacy.DRAFT,
+            syncStatus = "synced",
+            createdAt = Instant.parse("2026-04-29T00:00:00Z"),
+            updatedAt = Instant.parse("2026-04-29T00:00:00Z"),
+        )
+
     private fun person(id: String, displayName: String, primaryEmail: String?): PersonEntity =
         PersonEntity(
             id = id,
@@ -766,8 +884,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             sourceType = sourceType,
             sourceRef = sourceRef,
             personId = null,
-            role = "mentioned",
-            relationToUser = "referenced",
+            role = "counterparty",
+            relationToUser = "counterparty",
             identityType = null,
             normalizedValue = null,
             displayNameRaw = displayName,
@@ -789,8 +907,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
                 sourceType = SourceType.GMAIL,
                 sourceRef = "gmail-message-1",
                 personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId,
-                role = "mentioned",
-                relationToUser = "referenced",
+                role = "counterparty",
+                relationToUser = "counterparty",
                 identityType = "email",
                 normalizedValue = CUSTOMER_EMAIL,
                 displayNameRaw = "Customer",

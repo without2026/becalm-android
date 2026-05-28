@@ -15,11 +15,17 @@ import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
+import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.RawIngestionSyncStatus
 import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -31,6 +37,7 @@ import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
@@ -44,7 +51,7 @@ import okio.BufferedSink
  *
  * ## Inputs ([androidx.work.Data])
  * - [KEY_RAW_EVENT_ID] — String UUID of the [RawIngestionEventEntity] to process.
- * - [KEY_AUDIO_URI]    — String content URI of the audio file (read-only SAF access).
+ * - [KEY_AUDIO_URI]    — String content URI of the audio file (read-only content access).
  *
  * ## Lifecycle (VOI-001)
  * 1. Validate input keys; absent → [Result.failure].
@@ -90,6 +97,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
     private val commitmentDaoProvider: Provider<CommitmentDao>,
     private val commitmentProgressEventDaoProvider: Provider<CommitmentProgressEventDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
+    private val meetingSpeakerPreviewDaoProvider: Provider<MeetingSpeakerPreviewDao>,
     private val selfIdentityAnchorDaoProvider: Provider<SelfIdentityAnchorDao>,
     private val sourceExtractionApiProvider: Provider<SourceExtractionApi>,
     private val rawIngestionRepository: RawIngestionRepository,
@@ -112,6 +120,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         commitmentDao: CommitmentDao,
         commitmentProgressEventDao: CommitmentProgressEventDao,
         personIndexDao: PersonIndexDao,
+        meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao,
         sourceExtractionApi: SourceExtractionApi,
         rawIngestionRepository: RawIngestionRepository,
         userPrefsStore: UserPrefsStore,
@@ -132,6 +141,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         commitmentDaoProvider = Provider { commitmentDao },
         commitmentProgressEventDaoProvider = Provider { commitmentProgressEventDao },
         personIndexDaoProvider = Provider { personIndexDao },
+        meetingSpeakerPreviewDaoProvider = Provider { meetingSpeakerPreviewDao },
         selfIdentityAnchorDaoProvider = Provider { selfIdentityAnchorDao },
         sourceExtractionApiProvider = Provider { sourceExtractionApi },
         rawIngestionRepository = rawIngestionRepository,
@@ -158,6 +168,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
     private val personIndexDao: PersonIndexDao
         get() = personIndexDaoProvider.get()
+
+    private val meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao
+        get() = meetingSpeakerPreviewDaoProvider.get()
 
     private val selfIdentityAnchorDao: SelfIdentityAnchorDao
         get() = selfIdentityAnchorDaoProvider.get()
@@ -212,6 +225,29 @@ public class VoiceUploadWorker @AssistedInject constructor(
             is LocalSourceExtractionLoadResult.Terminal -> return@withContext load.result
         }
         val entity = context.entity
+        if (entity.syncStatus == RawIngestionSyncStatus.SKIPPED_BY_USER) {
+            logger.d(TAG, "audio processing skipped by user id=${redact(rawEventId)}")
+            return@withContext Result.success()
+        }
+        if (entity.requiresExplicitAudioProcessingConfirmation()) {
+            val now = Clock.System.now()
+            rawIngestionEventDao.updateSyncStatus(
+                id = rawEventId,
+                status = RawIngestionSyncStatus.DETECTED_PENDING_CONFIRMATION,
+                now = now,
+                lastError = null,
+            )
+            val pendingCount = rawIngestionEventDao.countDetectedAudioConfirmationsForSource(
+                userId = context.userId,
+                sourceType = entity.sourceType,
+            ).coerceAtLeast(1)
+            processingStatusRepository.recordAwaitingConfirmation(
+                sourceType = entity.sourceType,
+                itemCount = pendingCount,
+                message = ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
+            )
+            return@withContext Result.success()
+        }
         processingStatusRepository.recordUploading(entity.sourceType, "Queued audio analysis")
 
         // VOI-004: PIPA consent gate (first check — pre-upload).
@@ -255,9 +291,17 @@ public class VoiceUploadWorker @AssistedInject constructor(
                             speakerPreviewId = speakerPreviewId,
                         )
                     },
+                    onRestartSpeakerPreview = {
+                        restartSpeakerPreviewAfterCacheMiss(
+                            entity = entity,
+                            rawEventId = rawEventId,
+                            audioUri = audioUriString,
+                        )
+                    },
                     selfSpeakerId = selfSpeakerId,
                     speakerMappingsJson = speakerMappingsJson,
                     speakerPreviewId = speakerPreviewId,
+                    processingConfirmed = true,
                 ),
                 jobId = extractionJobId.orEmpty(),
             )
@@ -339,9 +383,17 @@ public class VoiceUploadWorker @AssistedInject constructor(
                         speakerPreviewId = speakerPreviewId,
                     )
                 },
+                onRestartSpeakerPreview = {
+                    restartSpeakerPreviewAfterCacheMiss(
+                        entity = entity,
+                        rawEventId = rawEventId,
+                        audioUri = audioUriString,
+                    )
+                },
                 selfSpeakerId = selfSpeakerId,
                 speakerMappingsJson = speakerMappingsJson,
                 speakerPreviewId = speakerPreviewId,
+                processingConfirmed = true,
             )
         )
     }
@@ -355,6 +407,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             commitmentProgressEventDao = commitmentProgressEventDao,
             personIndexDao = personIndexDao,
             selfIdentityAnchorDao = selfIdentityAnchorDao,
+            meetingSpeakerPreviewDao = meetingSpeakerPreviewDao,
             sourceExtractionApi = sourceExtractionApi,
             rawIngestionRepository = rawIngestionRepository,
             userPrefsStore = userPrefsStore,
@@ -561,9 +614,36 @@ public class VoiceUploadWorker @AssistedInject constructor(
         return Result.success()
     }
 
+    private suspend fun restartSpeakerPreviewAfterCacheMiss(
+        entity: RawIngestionEventEntity,
+        rawEventId: String,
+        audioUri: String,
+    ): Result {
+        val now = Clock.System.now()
+        rawIngestionEventDao.updateSyncStatus(
+            id = rawEventId,
+            status = MeetingSpeakerPreviewStatus.PENDING,
+            now = now,
+            lastError = SourceExtractionErrorEnvelope.SPEAKER_PREVIEW_UNAVAILABLE,
+        )
+        meetingSpeakerPreviewDao.markStatus(
+            rawEventId = rawEventId,
+            status = MeetingSpeakerPreviewStatus.PENDING,
+            lastError = SourceExtractionErrorEnvelope.SPEAKER_PREVIEW_UNAVAILABLE,
+            updatedAt = now,
+        )
+        processingStatusRepository.recordGemini(entity.sourceType, "화자 확인을 다시 준비 중")
+        workScheduler.enqueueMeetingSpeakerPreview(rawEventId = rawEventId, audioUri = audioUri)
+        return Result.success()
+    }
+
     private fun extractionJobPollDelaySeconds(retryAfterSec: Long?): Long =
         (retryAfterSec ?: ASYNC_JOB_DEFAULT_POLL_DELAY_SECONDS)
             .coerceIn(MIN_EXTRACTION_JOB_POLL_DELAY_SECONDS, MAX_EXTRACTION_JOB_POLL_DELAY_SECONDS)
+
+    private fun RawIngestionEventEntity.requiresExplicitAudioProcessingConfirmation(): Boolean =
+        processingConfirmedAt == null &&
+            (sourceType == SourceType.VOICE || sourceType == SourceType.CALL_RECORDING || sourceType == SourceType.MEETING)
 
     /**
      * Permanently quarantines the entity by setting [RawIngestionEventEntity.syncStatus] to

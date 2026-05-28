@@ -59,7 +59,7 @@ import javax.inject.Inject
  * - [ALL]      — no filter; shows every trackable item for the current user.
  * - [GIVE]     — open action rows where the wire direction is give.
  * - [TAKE]     — open action rows where the wire direction is take.
- * - [SCHEDULE] — schedule rows only.
+ * - [SCHEDULE] — legacy value normalized to [ALL]; schedules live in the Schedule tab.
  * - [CLOSED]   — completed or cancelled action rows.
  *
  * Action-specific lifecycle (due-today / overdue / completed / cancelled) is surfaced
@@ -492,23 +492,15 @@ public class CommitmentManagementViewModel @Inject constructor(
         }
     }
 
-    public fun onTogglePastSection() {
-        _uiState.update { state ->
-            if (state.filter == CommitmentFilter.SCHEDULE) {
-                state.copy(
-                    schedulePastSection = state.schedulePastSection.copy(
-                        expanded = !state.schedulePastSection.expanded,
-                    ),
-                )
-            } else {
-                state.copy(
-                    pastSection = state.pastSection.copy(
-                        expanded = !state.pastSection.expanded,
-                    ),
-                )
-            }
-        }
-    }
+	public fun onTogglePastSection() {
+	    _uiState.update { state ->
+	        state.copy(
+	            pastSection = state.pastSection.copy(
+	                expanded = !state.pastSection.expanded,
+	            ),
+	        )
+	    }
+	}
 
     /**
      * Handles pull-to-refresh from [CommitmentManagementScreen] (CMT-010).

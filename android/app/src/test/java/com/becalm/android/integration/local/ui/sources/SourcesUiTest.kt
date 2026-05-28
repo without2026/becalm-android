@@ -14,11 +14,14 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import com.becalm.android.ui.sources.RecentEventSummary
 import com.becalm.android.ui.sources.SourceDetailScreenContent
+import com.becalm.android.ui.sources.SourceDetailRouteErrorState
 import com.becalm.android.ui.sources.SourceDetailUiState
 import com.becalm.android.ui.sources.SourceStatusRow
 import com.becalm.android.ui.sources.SourcesListScreenContent
 import com.becalm.android.ui.sources.SourcesListUiState
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -51,6 +54,13 @@ class SourcesUiTest {
                                 hasError = false,
                                 enrichedCount = 7,
                             ),
+                            SourceStatusRow(
+                                sourceType = "gmail",
+                                status = SourceSyncStatus.Connected,
+                                lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
+                                hasError = false,
+                                processingLabelRes = com.becalm.android.R.string.processing_phase_memory,
+                            ),
                         ),
                     ),
                     onBack = {},
@@ -61,6 +71,12 @@ class SourcesUiTest {
 
         composeRule.onNodeWithText(string(com.becalm.android.R.string.sources_contacts_title)).assertIsDisplayed()
         composeRule.onNodeWithText("7", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText(
+            string(
+                com.becalm.android.R.string.sources_processing_status_fmt,
+                string(com.becalm.android.R.string.processing_phase_memory),
+            ),
+        ).assertIsDisplayed()
         composeRule.onNodeWithTag("sources-row-contacts").performClick()
 
         composeRule.runOnIdle {
@@ -153,6 +169,7 @@ class SourcesUiTest {
                         status = SourceSyncStatus.Syncing,
                         lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
                         eventsSyncedCount = 3,
+                        processingPhase = ProcessingPhase.GEMINI,
                         showManualSyncButton = true,
                     ),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(),
@@ -170,7 +187,33 @@ class SourcesUiTest {
         composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_connected)).assertIsDisplayed()
         composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_checking)).assertIsDisplayed()
         composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_memory)).assertIsDisplayed()
+        composeRule.onNodeWithTag("source-detail-list")
+            .performScrollToNode(hasText(string(com.becalm.android.R.string.source_detail_flow_checking_active)))
         composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_checking_active)).assertIsDisplayed()
+        composeRule.onNodeWithTag("source-detail-list")
+            .performScrollToNode(hasText(string(com.becalm.android.R.string.source_detail_flow_memory_active)))
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_memory_active)).assertIsDisplayed()
+    }
+
+    @Test
+    fun `source detail route error exposes recovery action`() {
+        var recoveryClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                SourceDetailRouteErrorState(
+                    message = UiMessage.resource(com.becalm.android.R.string.source_detail_error_invalid_source),
+                    onRecover = { recoveryClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_route_recovery)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_route_recovery)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, recoveryClicks)
+        }
     }
 
     @Test
@@ -208,4 +251,7 @@ class SourcesUiTest {
 
     private fun string(resId: Int): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId)
+
+    private fun string(resId: Int, vararg args: Any): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
 }

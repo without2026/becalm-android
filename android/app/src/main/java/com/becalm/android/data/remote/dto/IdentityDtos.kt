@@ -9,6 +9,7 @@ public data class UserProfileDto(
     @field:Json(name = "user_id") val userId: String,
     @field:Json(name = "display_name") val displayName: String? = null,
     @field:Json(name = "display_name_override") val displayNameOverride: String? = null,
+    @field:Json(name = "display_name_source") val displayNameSource: String? = null,
     @field:Json(name = "phone_e164_self") val phoneE164Self: String? = null,
     @field:Json(name = "timezone") val timezone: String = "Asia/Seoul",
     @field:Json(name = "preferred_locale") val preferredLocale: String = "ko",
@@ -25,10 +26,46 @@ public data class UserProfileResponseDto(
 @JsonClass(generateAdapter = true)
 public data class UserProfilePatchRequestDto(
     @field:Json(name = "display_name") val displayName: String? = null,
+    @field:Json(name = "display_name_source") val displayNameSource: String? = null,
     @field:Json(name = "phone_e164_self") val phoneE164Self: String? = null,
     @field:Json(name = "timezone") val timezone: String? = null,
     @field:Json(name = "preferred_locale") val preferredLocale: String? = null,
     @field:Json(name = "onboarding_completed_at") val onboardingCompletedAt: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+public data class OnboardingSelfIdentityCommitRequestDto(
+    @field:Json(name = "display_name") val displayName: String,
+    @field:Json(name = "display_name_source") val displayNameSource: String? = null,
+    @field:Json(name = "display_name_read_only") val displayNameReadOnly: Boolean = false,
+    @field:Json(name = "email") val email: String? = null,
+    @field:Json(name = "email_read_only") val emailReadOnly: Boolean = false,
+    @field:Json(name = "phone_e164") val phoneE164: String? = null,
+    @field:Json(name = "phone_read_only") val phoneReadOnly: Boolean = false,
+    @field:Json(name = "phone_verified") val phoneVerified: Boolean = false,
+    @field:Json(name = "alias") val alias: String? = null,
+    @field:Json(name = "auth_provider") val authProvider: String? = null,
+    @field:Json(name = "timezone") val timezone: String? = null,
+    @field:Json(name = "preferred_locale") val preferredLocale: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+public data class OnboardingSelfIdentityCommitResponseDto(
+    @field:Json(name = "data") val data: OnboardingSelfIdentityCommitDataDto,
+)
+
+@JsonClass(generateAdapter = true)
+public data class OnboardingSelfIdentityCommitDataDto(
+    @field:Json(name = "profile") val profile: UserProfileDto,
+    @field:Json(name = "anchors") val anchors: List<SelfIdentityAnchorDto> = emptyList(),
+    @field:Json(name = "email_connection_recommendation")
+    val emailConnectionRecommendation: EmailConnectionRecommendationDto? = null,
+)
+
+@JsonClass(generateAdapter = true)
+public data class EmailConnectionRecommendationDto(
+    @field:Json(name = "provider") val provider: String,
+    @field:Json(name = "reason") val reason: String,
 )
 
 @JsonClass(generateAdapter = true)
@@ -91,6 +128,7 @@ public data class SourceConnectionDto(
     @field:Json(name = "linked_self_anchor_id") val linkedSelfAnchorId: String? = null,
     @field:Json(name = "last_sync_at") val lastSyncAt: Instant? = null,
     @field:Json(name = "last_error") val lastError: String? = null,
+    @field:Json(name = "deleted_at") val deletedAt: Instant? = null,
 )
 
 @JsonClass(generateAdapter = true)

@@ -75,7 +75,8 @@ class SourceImportRepositorySpecTest {
         val event = eventSlot.captured
         assertEquals(USER_ID, event.userId)
         assertEquals(SourceType.MESSAGE_SCREENSHOT, event.sourceType)
-        assertEquals("kakao-thread.png", event.eventTitle)
+        assertTrue(event.eventTitle.orEmpty().startsWith("캡처 이미지 · "))
+        assertEquals("원본 파일: kakao-thread.png", event.eventSnippet)
         assertEquals("pending", event.syncStatus)
         assertTrue(Uri.parse(event.sourceRef).path.orEmpty().contains("source_imports/message_screenshots"))
         assertTrue(Uri.parse(event.sourceRef).lastPathSegment.orEmpty().endsWith(".jpg"))
@@ -136,6 +137,29 @@ class SourceImportRepositorySpecTest {
         assertTrue(result is BecalmResult.Success)
         assertEquals("awaiting_consent", eventSlot.captured.syncStatus)
         verify(exactly = 0) { workScheduler.enqueueMessageScreenshotUpload(any()) }
+    }
+
+    @Test
+    fun `MSG-002 import message screenshot accepts file uri using path extension when provider metadata is absent`() = runTest {
+        val uri = Uri.parse("file:///sdcard/Download/kakao-thread.png")
+        val eventSlot = slot<RawIngestionEventEntity>()
+        arrangeContentWithoutOpenableMeta(
+            uri = uri,
+            mimeType = null,
+            bytes = pngBytes(width = 4, height = 4),
+        )
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf(USER_ID)
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+        coEvery { rawIngestionRepository.insertLocal(capture(eventSlot)) } answers {
+            BecalmResult.Success(eventSlot.captured.id)
+        }
+
+        val result = repository().importMessageScreenshot(uri)
+
+        assertTrue(result is BecalmResult.Success)
+        assertTrue(eventSlot.captured.eventTitle.orEmpty().startsWith("캡처 이미지 · "))
+        assertEquals("원본 파일: kakao-thread.png", eventSlot.captured.eventSnippet)
+        verify(exactly = 1) { workScheduler.enqueueMessageScreenshotUpload(eventSlot.captured.id) }
     }
 
     @Test
@@ -214,6 +238,20 @@ class SourceImportRepositorySpecTest {
                 addRow(arrayOf<Any?>(displayName, byteSize))
             }
         }
+    }
+
+    private fun arrangeContentWithoutOpenableMeta(
+        uri: Uri,
+        mimeType: String?,
+        bytes: ByteArray,
+    ) {
+        every { context.contentResolver } returns resolver
+        every { context.filesDir } returns temp.root
+        every { resolver.getType(uri) } returns mimeType
+        every { resolver.openInputStream(uri) } answers { ByteArrayInputStream(bytes) }
+        every {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+        } returns null
     }
 
     private fun pngBytes(width: Int, height: Int): ByteArray {

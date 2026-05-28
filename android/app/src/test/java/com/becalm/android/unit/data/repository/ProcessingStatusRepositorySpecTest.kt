@@ -11,6 +11,7 @@ class ProcessingStatusRepositorySpecTest {
     @Test
     fun `new items is not rendered as an active spinner phase`() {
         assertFalse(ProcessingPhase.NEW_ITEMS.isActive)
+        assertFalse(ProcessingPhase.AWAITING_CONFIRMATION.isActive)
     }
 
     @Test

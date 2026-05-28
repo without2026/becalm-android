@@ -1,6 +1,7 @@
 package com.becalm.android.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -19,7 +20,6 @@ import com.becalm.android.ui.commitments.CommitmentEditSheet
 import com.becalm.android.ui.commitments.CommitmentManagementScreen
 import com.becalm.android.ui.onboarding.BatteryOptimizationScreen
 import com.becalm.android.ui.onboarding.CallLogMatchingConsentScreen
-import com.becalm.android.ui.onboarding.ColdSyncScreen
 import com.becalm.android.ui.onboarding.ContactsPermissionScreen
 import com.becalm.android.ui.onboarding.PipaThirdPartyConsentScreen
 import com.becalm.android.ui.onboarding.GoogleCalendarOAuthScreen
@@ -27,6 +27,7 @@ import com.becalm.android.ui.onboarding.GmailOAuthScreen
 import com.becalm.android.ui.onboarding.ImapSetupScreen
 import com.becalm.android.ui.onboarding.NotificationPermissionScreen
 import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentScreen
+import com.becalm.android.ui.onboarding.OnboardingCompleteScreen
 import com.becalm.android.ui.onboarding.OnboardingSetupScreen
 import com.becalm.android.ui.onboarding.OnboardingSourcesScreen
 import com.becalm.android.ui.onboarding.OutlookCalendarOAuthScreen
@@ -92,6 +93,8 @@ public fun BecalmNavHost(
     startDestination: String,
     modifier: Modifier = Modifier,
     routeOverrides: Map<String, BecalmNavHostOverride> = emptyMap(),
+    showShareImportNotice: Boolean = false,
+    onShareImportNoticeShown: () -> Unit = {},
 ) {
     NavHost(
         navController = navController,
@@ -167,6 +170,106 @@ public fun BecalmNavHost(
                 override(backStackEntry)
             } else {
                 OnboardingSetupScreen(navController = navController)
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingSetupWelcome.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetupWelcome.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(
+                    navController = navController,
+                    setupRoutePath = BecalmRoute.OnboardingSetupWelcome.path,
+                )
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingSetupIdentity.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetupIdentity.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(
+                    navController = navController,
+                    setupRoutePath = BecalmRoute.OnboardingSetupIdentity.path,
+                )
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingSetupDeviceSources.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetupDeviceSources.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(
+                    navController = navController,
+                    setupRoutePath = BecalmRoute.OnboardingSetupDeviceSources.path,
+                )
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingSetupCalendar.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetupCalendar.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(
+                    navController = navController,
+                    setupRoutePath = BecalmRoute.OnboardingSetupCalendar.path,
+                )
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingSetupEmail.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetupEmail.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(
+                    navController = navController,
+                    setupRoutePath = BecalmRoute.OnboardingSetupEmail.path,
+                )
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingSetupGmailPreview.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetupGmailPreview.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(
+                    navController = navController,
+                    setupRoutePath = BecalmRoute.OnboardingSetupGmailPreview.path,
+                )
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingSetupFirstMemory.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetupFirstMemory.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(
+                    navController = navController,
+                    setupRoutePath = BecalmRoute.OnboardingSetupFirstMemory.path,
+                )
+            }
+        }
+
+        composable(
+            route = BecalmRoute.OnboardingComplete.PATH,
+            arguments = listOf(
+                navArgument(BecalmNavArgs.PERSON_ID) { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingComplete.PATH]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                val personId = backStackEntry.stringArg(BecalmNavArgs.PERSON_ID)
+                    ?: return@composable
+                OnboardingCompleteScreen(navController = navController, personId = personId)
             }
         }
 
@@ -312,7 +415,12 @@ public fun BecalmNavHost(
             if (override != null) {
                 override(backStackEntry)
             } else {
-                ColdSyncScreen(navController = navController)
+                LaunchedEffect(navController) {
+                    navController.navigate(BecalmNavigationDefaults.authenticatedHomeRoute) {
+                        popUpTo(BecalmRoute.OnboardingColdSync.path) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
             }
         }
 
@@ -323,7 +431,11 @@ public fun BecalmNavHost(
             if (override != null) {
                 override(backStackEntry)
             } else {
-                TodayTimelineScreen(navController = navController)
+                TodayTimelineScreen(
+                    navController = navController,
+                    showShareImportNotice = showShareImportNotice,
+                    onShareImportNoticeShown = onShareImportNoticeShown,
+                )
             }
         }
 
@@ -399,6 +511,9 @@ public fun BecalmNavHost(
                         navController.navigate(BecalmRoute.SettingsSources.path) {
                             launchSingleTop = true
                         }
+                    },
+                    onOpenProcessingStatus = {
+                        navController.navigate(BecalmRoute.ProcessingStatus.path)
                     },
                     onOpenUnassigned = {
                         navController.navigate(BecalmRoute.PersonsUnassigned.path)
@@ -539,6 +654,42 @@ public fun BecalmNavHost(
                 override(backStackEntry)
             } else {
                 ActivityLogScreen(navController = navController)
+            }
+        }
+
+        composable(
+            route = BecalmRoute.SettingsSources.OAUTH_RESULT_PATH,
+            arguments = listOf(
+                navArgument(BecalmRoute.SettingsSources.ARG_SOURCE_CONNECTION_RESULT) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument(BecalmRoute.SettingsSources.ARG_SOURCE_PROVIDER) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument(BecalmRoute.SettingsSources.ARG_SOURCE_FAMILY) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.SettingsSources.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                SourcesListScreen(
+                    navController = navController,
+                    sourceConnectionResult = backStackEntry.arguments
+                        ?.getString(BecalmRoute.SettingsSources.ARG_SOURCE_CONNECTION_RESULT),
+                    sourceProvider = backStackEntry.arguments
+                        ?.getString(BecalmRoute.SettingsSources.ARG_SOURCE_PROVIDER),
+                    sourceFamily = backStackEntry.arguments
+                        ?.getString(BecalmRoute.SettingsSources.ARG_SOURCE_FAMILY),
+                )
             }
         }
 

@@ -4,20 +4,17 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContract
 
 public data class MeetingOpenDocumentRequest(
     val mimeTypes: Array<String>,
-    val initialUri: Uri?,
 ) {
     override fun equals(other: Any?): Boolean =
         other is MeetingOpenDocumentRequest &&
-            mimeTypes.contentEquals(other.mimeTypes) &&
-            initialUri == other.initialUri
+            mimeTypes.contentEquals(other.mimeTypes)
 
     override fun hashCode(): Int =
-        31 * mimeTypes.contentHashCode() + (initialUri?.hashCode() ?: 0)
+        mimeTypes.contentHashCode()
 }
 
 public class MeetingOpenDocumentContract : ActivityResultContract<MeetingOpenDocumentRequest, Uri?>() {
@@ -26,7 +23,6 @@ public class MeetingOpenDocumentContract : ActivityResultContract<MeetingOpenDoc
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
             putExtra(Intent.EXTRA_MIME_TYPES, input.mimeTypes)
-            input.initialUri?.let { putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
         }
 
     override fun parseResult(resultCode: Int, intent: Intent?): Uri? =

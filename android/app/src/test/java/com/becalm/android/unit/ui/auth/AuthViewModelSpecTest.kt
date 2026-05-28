@@ -10,9 +10,11 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.ui.auth.AuthEffect
 import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.AuthViewModel
+import com.becalm.android.ui.auth.PhoneOtpUiState
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import io.mockk.coEvery
@@ -44,6 +46,7 @@ class AuthViewModelSpecTest {
     private val authRepositoryProvider: Provider<AuthRepository> = Provider { authRepository }
     private val sessionStore: SupabaseSessionStore = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val userProfileRepository: UserProfileRepository = mockk(relaxed = true)
     private val runtimeBootstrap: AuthenticatedRuntimeBootstrap = mockk(relaxed = true)
     private val runtimeBootstrapProvider: Provider<AuthenticatedRuntimeBootstrap> =
         Provider { runtimeBootstrap }
@@ -66,6 +69,8 @@ class AuthViewModelSpecTest {
         every { userPrefsStore.observeTermsAccepted() } returns flowOf(true)
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
         every { userPrefsStore.observeOnboardingStepStatuses() } returns flowOf(emptyMap())
+        coEvery { userProfileRepository.refreshFromServer(any()) } returns
+            BecalmResult.Failure(BecalmError.Network(0, "offline"))
         EmailPipaProvider.entries.forEach { provider ->
             every { userPrefsStore.observeEmailPipaConsent(provider) } returns flowOf(false)
         }
@@ -313,7 +318,7 @@ class AuthViewModelSpecTest {
             AuthUiState.SignedIn(
                 userId = "user-123",
                 onboardingCompleted = false,
-                onboardingResumeRoute = BecalmRoute.OnboardingSetup.path,
+                onboardingResumeRoute = BecalmRoute.OnboardingSetupEmail.path,
             ),
             viewModel.uiState.value,
         )
@@ -337,6 +342,80 @@ class AuthViewModelSpecTest {
             viewModel.uiState.value,
         )
         coVerify(exactly = 1) { authRepository.signInWithGoogle("id-token") }
+    }
+
+    @Test
+    fun `AUTH phone otp request normalizes korean number and exposes code entry state`() = runTest {
+        coEvery { authRepository.requestPhoneOtp("+821012345678") } returns BecalmResult.Success(Unit)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.requestPhoneOtp("010-1234-5678")
+        advanceUntilIdle()
+
+        assertEquals(
+            PhoneOtpUiState(
+                normalizedPhone = "+821012345678",
+                codeRequested = true,
+            ),
+            viewModel.phoneOtpState.value,
+        )
+        coVerify(exactly = 1) { authRepository.requestPhoneOtp("+821012345678") }
+    }
+
+    @Test
+    fun `AUTH phone otp request failure maps rate limit message without exposing phone`() = runTest {
+        coEvery { authRepository.requestPhoneOtp("+821012345678") } returns
+            BecalmResult.Failure(BecalmError.RateLimited(retryAfterSeconds = null))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.requestPhoneOtp("010-1234-5678")
+        advanceUntilIdle()
+
+        assertEquals("+821012345678", viewModel.phoneOtpState.value.normalizedPhone)
+        assertEquals(R.string.auth_error_rate_limited, viewModel.phoneOtpState.value.error?.resId)
+        coVerify(exactly = 1) { authRepository.requestPhoneOtp("+821012345678") }
+    }
+
+    @Test
+    fun `AUTH phone otp verify success delegates token and maps signed in session`() = runTest {
+        every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
+        coEvery { authRepository.verifyPhoneOtp("+821012345678", "123456") } returns
+            BecalmResult.Success(session.copy(phone = "+821012345678"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.verifyPhoneOtp("010-1234-5678", " 123456 ")
+        advanceUntilIdle()
+
+        assertEquals(
+            AuthUiState.SignedIn(userId = "user-123", onboardingCompleted = false),
+            viewModel.uiState.value,
+        )
+        coVerify(exactly = 1) { authRepository.verifyPhoneOtp("+821012345678", "123456") }
+    }
+
+    @Test
+    fun `AUTH phone otp verify failure keeps code entry open and surfaces otp copy`() = runTest {
+        coEvery { authRepository.verifyPhoneOtp("+821012345678", "000000") } returns
+            BecalmResult.Failure(BecalmError.Validation(field = "phone", message = "phone_otp_failed"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.verifyPhoneOtp("010-1234-5678", "000000")
+        advanceUntilIdle()
+
+        assertEquals(R.string.auth_error_phone_otp_failed, viewModel.phoneOtpState.value.error?.resId)
+        assertEquals(
+            R.string.auth_error_phone_otp_failed,
+            (viewModel.uiState.value as AuthUiState.Error).message.resId,
+        )
+        assertEquals(true, viewModel.phoneOtpState.value.codeRequested)
     }
 
     @Test
@@ -481,6 +560,7 @@ class AuthViewModelSpecTest {
         authRepositoryProvider = authRepositoryProvider,
         sessionStore = sessionStore,
         userPrefsStore = userPrefsStore,
+        userProfileRepository = userProfileRepository,
         runtimeBootstrapProvider = runtimeBootstrapProvider,
         runtimeBootstrapDispatcher = testDispatcher,
         logger = logger,

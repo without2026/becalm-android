@@ -11,7 +11,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.becalm.android.R
-import kotlin.math.abs
 import javax.inject.Inject
 
 public data class VoiceFailureNotificationSpec(
@@ -38,13 +37,14 @@ public class VoiceFailureNotifier @Inject constructor() {
             reasonCode = reasonCode,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(R.drawable.ic_stat_becalm)
             .setContentTitle(spec.title)
             .setContentText(spec.body)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .build()
-        NotificationManagerCompat.from(context).notify(notificationId(rawEventId), notification)
+        NotificationManagerCompat.from(context).notify(notificationId(), notification)
     }
 
     fun buildNotificationSpec(
@@ -54,16 +54,9 @@ public class VoiceFailureNotifier @Inject constructor() {
         reasonCode: String?,
     ): VoiceFailureNotificationSpec {
         val title = context.getString(R.string.voice_failure_notification_title)
-        val safeEventTitle = eventTitle?.takeIf { it.isNotBlank() } ?: context.getString(R.string.raw_event_detail_no_title)
         val body = when (reasonCode) {
-            "output_truncated" -> context.getString(
-                R.string.voice_failure_notification_body_output_truncated,
-                safeEventTitle,
-            )
-            else -> context.getString(
-                R.string.voice_failure_notification_body_generic,
-                safeEventTitle,
-            )
+            "output_truncated" -> context.getString(R.string.voice_failure_notification_body_output_truncated)
+            else -> context.getString(R.string.voice_failure_notification_body_generic)
         }
         return VoiceFailureNotificationSpec(
             channelId = CHANNEL_ID,
@@ -75,6 +68,7 @@ public class VoiceFailureNotifier @Inject constructor() {
 
     companion object {
         const val CHANNEL_ID: String = "voice_processing_failed"
+        const val NOTIFICATION_ID: Int = 0x0BEECA1
 
         fun ensureChannel(context: Context) {
             val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -89,7 +83,7 @@ public class VoiceFailureNotifier @Inject constructor() {
             manager.createNotificationChannel(channel)
         }
 
-        fun notificationId(rawEventId: String): Int = abs(rawEventId.hashCode())
+        fun notificationId(): Int = NOTIFICATION_ID
 
         private fun canPostNotifications(context: Context): Boolean =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||

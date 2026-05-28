@@ -151,7 +151,7 @@ class PersonDetailSupplementScreenTest {
             .performTextInput("noreply@navercorp.com")
         composeTestRule.onNodeWithTag("unassigned-match-nickname-event-1")
             .performTextInput("네이버 예약팀")
-        composeTestRule.onNodeWithText(string(R.string.persons_manual_match_action))
+        composeTestRule.onNodeWithText(string(R.string.persons_manual_add_person_action))
             .performScrollTo()
             .performClick()
 

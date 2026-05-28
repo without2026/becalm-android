@@ -49,19 +49,24 @@ internal fun SourceConnectionsContent(
     continueEnabled: Boolean = true,
     continueLoading: Boolean = false,
     showImapLaterNotice: Boolean = false,
+    progressiveSetup: Boolean = false,
 ) {
     val requiredSection = stringResource(R.string.onb_setup_required_section)
     val recommendedSection = stringResource(R.string.onb_setup_recommended_section)
     val optionalSection = stringResource(R.string.onb_setup_optional_section)
     val mailSection = stringResource(R.string.onb_sources_mail_section)
     val calendarSection = stringResource(R.string.onb_sources_calendar_section)
-    val mailItems = items.filter { it.category == SourceConnectionCategory.Mail }
-    val calendarItems = items.filter { it.category == SourceConnectionCategory.Calendar }
+    val firstSourceSection = stringResource(R.string.onb_setup_first_source_section)
+    val visibleSourceItems = if (progressiveSetup) items.take(1) else items
+    val mailItems = visibleSourceItems.filter { it.category == SourceConnectionCategory.Mail }
+    val calendarItems = visibleSourceItems.filter { it.category == SourceConnectionCategory.Calendar }
     val selfIdentityGateOpen = selfIdentity?.confirmed != false
-    val sourceOwnershipGateOpen = sourceOwnershipsReady && sourceOwnerships.none { it.ownership == "unknown" }
-    val showRequiredSetup = setupItems.isNotEmpty() || selfIdentity != null
-    val showSetupRecommendedCalendar = setupItems.isNotEmpty() && calendarItems.isNotEmpty() && selfIdentityGateOpen
-    val showImapLaterNoticePanel = showImapLaterNotice && selfIdentityGateOpen && mailItems.isNotEmpty()
+    val sourceOwnershipGateOpen = (sourceOwnershipsReady || sourceOwnerships.isEmpty()) &&
+        sourceOwnerships.none { it.ownership == "unknown" }
+    val continueGateOpen = selfIdentityGateOpen && (progressiveSetup || sourceOwnershipGateOpen)
+    val showRequiredSetup = !progressiveSetup && (setupItems.isNotEmpty() || selfIdentity != null)
+    val showSetupRecommendedCalendar = !progressiveSetup && setupItems.isNotEmpty() && calendarItems.isNotEmpty() && selfIdentityGateOpen
+    val showImapLaterNoticePanel = !progressiveSetup && showImapLaterNotice && selfIdentityGateOpen && mailItems.isNotEmpty()
     LazyColumn(
         modifier = modifier.testTag("source-connections-list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
@@ -81,7 +86,34 @@ internal fun SourceConnectionsContent(
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
-        if (showRequiredSetup) {
+        if (progressiveSetup) {
+            if (selfIdentity != null) {
+                item(key = "progressive-self-identity") {
+                    SelfIdentitySetupPanel(
+                        state = selfIdentity,
+                        onDisplayNameChange = onSelfDisplayNameChange,
+                        onEmailChange = onSelfEmailChange,
+                        onPhoneChange = onSelfPhoneChange,
+                        onAliasChange = onSelfAliasChange,
+                        onSave = onSaveSelfIdentity,
+                    )
+                }
+            }
+            if (selfIdentityGateOpen && visibleSourceItems.isNotEmpty()) {
+                sourceSection(
+                    title = firstSourceSection,
+                    items = visibleSourceItems,
+                    onConnect = onConnect,
+                    onSkip = onSkip,
+                    skipLabel = skipLabel,
+                )
+            }
+            if (selfIdentityGateOpen) {
+                item(key = "setup-add-later-notice") {
+                    SetupAddLaterNotice()
+                }
+            }
+        } else if (showRequiredSetup) {
             item(key = "required-setup-title") {
                 Text(
                     text = requiredSection,
@@ -106,7 +138,7 @@ internal fun SourceConnectionsContent(
                 }
             }
         }
-        if (setupItems.isNotEmpty()) {
+        if (!progressiveSetup && setupItems.isNotEmpty()) {
             item(key = "recommended-setup-title") {
                 Text(
                     text = recommendedSection,
@@ -141,7 +173,7 @@ internal fun SourceConnectionsContent(
                 )
             }
         }
-        if (selfIdentityGateOpen && mailItems.isNotEmpty()) {
+        if (!progressiveSetup && selfIdentityGateOpen && mailItems.isNotEmpty()) {
             sourceSection(
                 title = mailSection,
                 items = mailItems,
@@ -155,7 +187,7 @@ internal fun SourceConnectionsContent(
                 }
             }
         }
-        if (selfIdentityGateOpen && !showSetupRecommendedCalendar && calendarItems.isNotEmpty()) {
+        if (!progressiveSetup && selfIdentityGateOpen && !showSetupRecommendedCalendar && calendarItems.isNotEmpty()) {
             sourceSection(
                 title = calendarSection,
                 items = calendarItems,
@@ -164,7 +196,7 @@ internal fun SourceConnectionsContent(
                 skipLabel = skipLabel,
             )
         }
-        if (selfIdentityGateOpen && sourceOwnerships.isNotEmpty()) {
+        if (!progressiveSetup && selfIdentityGateOpen && sourceOwnerships.isNotEmpty()) {
             item(key = "source-ownership-title") {
                 Text(
                     text = stringResource(R.string.settings_identity_connections_section),
@@ -195,13 +227,30 @@ internal fun SourceConnectionsContent(
             BecalmButton(
                 text = continueLabel,
                 onClick = onContinue,
-                enabled = continueEnabled && selfIdentityGateOpen && sourceOwnershipGateOpen,
+                enabled = continueEnabled && continueGateOpen,
                 loading = continueLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("source-connections-continue"),
             )
         }
+    }
+}
+
+@Composable
+private fun SetupAddLaterNotice() {
+    QuietPanel(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.onb_setup_add_later_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.onb_setup_add_later_body),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -21,7 +21,6 @@ public object EvidenceImportPickerRequests {
     public fun meetingAudio(): MeetingOpenDocumentRequest =
         MeetingOpenDocumentRequest(
             mimeTypes = MeetingImportFilePolicy.AUDIO_MIME_TYPES,
-            initialUri = null,
         )
 
 }

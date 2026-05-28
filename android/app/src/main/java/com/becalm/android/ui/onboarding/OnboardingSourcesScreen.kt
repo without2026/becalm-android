@@ -4,10 +4,23 @@ import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -15,15 +28,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.components.uiMessageStringResource
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.navigation.returnToSettingsSourcesAfterSourceConnect
@@ -73,6 +94,7 @@ public fun SettingsSourceConnectionsScreen(
     onConnectSource: ((OnboardingSourceProvider, Activity) -> Unit)? = null,
     onPersistEmailConsent: (suspend (EmailPipaProvider) -> Boolean)? = null,
     onRefreshSource: ((OnboardingSourceProvider) -> Unit)? = null,
+    onSourceOwnership: ((String, String) -> Unit)? = null,
     onNavigateDone: (() -> Unit)? = null,
     onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
 ) {
@@ -88,6 +110,7 @@ public fun SettingsSourceConnectionsScreen(
         onConnectSource = onConnectSource,
         onPersistEmailConsent = onPersistEmailConsent,
         onRefreshSource = onRefreshSource,
+        onSourceOwnership = onSourceOwnership,
         onNavigateComplete = onNavigateDone,
         onLaunchPendingIntent = onLaunchPendingIntent,
     )
@@ -116,10 +139,10 @@ internal fun SourceConnectionsScreen(
     onSelfPhoneChange: (String) -> Unit = {},
     onSelfAliasChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
-    sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
-    sourceOwnershipsReady: Boolean = true,
+    sourceOwnerships: List<OnboardingSourceOwnershipUi>? = null,
+    sourceOwnershipsReady: Boolean? = null,
     updatingSourceOwnershipId: String? = null,
-    onSourceOwnership: (String, String) -> Unit = { _, _ -> },
+    onSourceOwnership: ((String, String) -> Unit)? = null,
     onConnectSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     onSkipSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     includedProviders: Set<OnboardingSourceProvider>? = null,
@@ -178,10 +201,14 @@ internal fun SourceConnectionsScreen(
     val refreshSource = onRefreshSource ?: { provider ->
         requireNotNull(resolvedViewModel).refreshSourceProviderConnection(provider)
     }
+    val updateSourceOwnership = onSourceOwnership ?: { id, ownership ->
+        resolvedViewModel?.onSetSourceConnectionOwnership(id, ownership)
+        Unit
+    }
     val navigateComplete = onNavigateComplete ?: when (entryPoint) {
         SourceConnectionsEntryPoint.Setup -> {
             {
-                navController.navigate(BecalmRoute.Today.path) {
+                navController.navigate(BecalmNavigationDefaults.authenticatedHomeRoute) {
                     popUpTo(BecalmRoute.OnboardingSetup.path) { inclusive = true }
                 }
             }
@@ -210,10 +237,17 @@ internal fun SourceConnectionsScreen(
     val activityMissingCopy = stringResource(R.string.onb_sources_activity_missing)
     val consentWriteFailedCopy = stringResource(R.string.onb_sources_consent_write_failed)
     val stateErrorMessage = state.error?.let { uiMessageStringResource(it) }
+    val stateNoticeMessage = state.notice?.let { uiMessageStringResource(it) }
 
     LaunchedEffect(stateErrorMessage) {
         if (!stateErrorMessage.isNullOrBlank()) {
             snackbarHostState.showSnackbar(stateErrorMessage)
+        }
+    }
+    LaunchedEffect(stateNoticeMessage) {
+        if (!stateNoticeMessage.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(stateNoticeMessage)
+            resolvedViewModel?.onNoticeDismissed()
         }
     }
 
@@ -255,12 +289,32 @@ internal fun SourceConnectionsScreen(
         },
     )
 
+    val effectiveIncludedProviders = includedProviders ?: SourceConnectionProjector.sourceProvidersFor(entryPoint)
+    val effectiveSourceOwnerships = (sourceOwnerships ?: if (entryPoint == SourceConnectionsEntryPoint.Settings) {
+        state.sourceOwnerships
+    } else {
+        emptyList()
+    }).filterForProviders(if (includedProviders == null) null else effectiveIncludedProviders)
+    val effectiveSourceOwnershipsReady = sourceOwnershipsReady ?: if (entryPoint == SourceConnectionsEntryPoint.Settings) {
+        state.sourceOwnershipsLoaded && !state.sourceOwnershipLoadFailed
+    } else {
+        true
+    }
+    val effectiveUpdatingSourceOwnershipId = updatingSourceOwnershipId
+        ?: if (entryPoint == SourceConnectionsEntryPoint.Settings) state.updatingSourceOwnershipId else null
+    val existingConnectionProviders = if (entryPoint == SourceConnectionsEntryPoint.Settings) {
+        state.sourceOwnerships.mapNotNull(OnboardingSourceOwnershipUi::toSourceProvider).toSet()
+    } else {
+        emptySet()
+    }
+
     val items = SourceConnectionProjector.sourceConnectionItems(
         stepStates = state.stepStates,
         transientStates = transientStates,
         respectStepStates = SourceConnectionProjector.respectStepStatesFor(entryPoint),
         respectConnectedStepStates = entryPoint != SourceConnectionsEntryPoint.Settings || includedProviders == null,
-        includedProviders = includedProviders ?: SourceConnectionProjector.sourceProvidersFor(entryPoint),
+        includedProviders = effectiveIncludedProviders,
+        existingConnectionProviders = existingConnectionProviders,
         stringFor = resources::getString,
     )
     val hasIncomplete = entryPoint == SourceConnectionsEntryPoint.Onboarding &&
@@ -268,74 +322,306 @@ internal fun SourceConnectionsScreen(
             item.state !in setOf(SourceConnectionState.Connected, SourceConnectionState.Skipped)
         }
     val copy = SourceConnectionCopy.copyFor(entryPoint)
+    val connectProvider: (OnboardingSourceProvider) -> Unit = connectProvider@{ provider ->
+        val hostActivity = activity
+        if (hostActivity == null) {
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    activityMissingCopy,
+                )
+            }
+            return@connectProvider
+        }
+        scope.launch {
+            val emailProvider = provider.emailProvider
+            if (emailProvider != null && !persistEmailConsent(emailProvider)) {
+                snackbarHostState.showSnackbar(consentWriteFailedCopy)
+                return@launch
+            }
+            transientStatesState.value = transientStatesState.value +
+                (provider to SourceConnectionState.PendingExternalAuth)
+            connectSource(provider, hostActivity)
+        }
+    }
+    val focusedSettingsItem = if (
+        entryPoint == SourceConnectionsEntryPoint.Settings &&
+        includedProviders != null &&
+        items.size == 1
+    ) {
+        items.single()
+    } else {
+        null
+    }
     BecalmScaffold(
         title = stringResource(copy.titleRes),
         actions = actions,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        SourceConnectionsContent(
-            items = items,
-            headline = stringResource(copy.headlineRes),
-            body = stringResource(copy.bodyRes),
-            continueLabel = stringResource(SourceConnectionCopy.continueLabelRes(entryPoint, hasIncomplete)),
-            skipLabel = stringResource(SourceConnectionCopy.skipLabelRes(entryPoint)),
-            onConnect = { provider ->
-                val hostActivity = activity
-                if (hostActivity == null) {
-                    scope.launch {
-                        snackbarHostState.showSnackbar(
-                            activityMissingCopy,
-                        )
-                    }
-                    return@SourceConnectionsContent
-                }
-                scope.launch {
-                    val emailProvider = provider.emailProvider
-                    if (emailProvider != null && !persistEmailConsent(emailProvider)) {
-                        snackbarHostState.showSnackbar(consentWriteFailedCopy)
-                        return@launch
-                    }
-                    transientStatesState.value = transientStatesState.value +
-                        (provider to SourceConnectionState.PendingExternalAuth)
-                    connectSource(provider, hostActivity)
-                }
-            },
-            onSkip = { provider ->
-                transientStatesState.value = transientStatesState.value - provider
-                skipSource(provider)
-            },
-            setupItems = setupItems,
-            selfIdentity = selfIdentity,
-            onSelfDisplayNameChange = onSelfDisplayNameChange,
-            onSelfEmailChange = onSelfEmailChange,
-            onSelfPhoneChange = onSelfPhoneChange,
-            onSelfAliasChange = onSelfAliasChange,
-            onSaveSelfIdentity = onSaveSelfIdentity,
-            sourceOwnerships = sourceOwnerships,
-            sourceOwnershipsReady = sourceOwnershipsReady,
-            updatingSourceOwnershipId = updatingSourceOwnershipId,
-            onSourceOwnership = onSourceOwnership,
-            onConnectSetupItem = onConnectSetupItem ?: {},
-            onSkipSetupItem = onSkipSetupItem ?: {},
-            continueEnabled = !state.isCompleting,
-            continueLoading = state.isCompleting,
-            showImapLaterNotice = entryPoint != SourceConnectionsEntryPoint.Settings,
-            onContinue = {
-                if (entryPoint == SourceConnectionsEntryPoint.Setup) {
-                    if (onCompleteSetup != null) {
-                        onCompleteSetup.invoke()
-                        navigateComplete()
-                    } else {
-                        requireNotNull(resolvedViewModel).onCompleteSetup()
-                    }
-                } else if (entryPoint == SourceConnectionsEntryPoint.Onboarding) {
-                    requireNotNull(skipRemaining).invoke()
+        val onContinue = {
+            if (entryPoint == SourceConnectionsEntryPoint.Setup) {
+                if (onCompleteSetup != null) {
+                    onCompleteSetup.invoke()
                     navigateComplete()
                 } else {
-                    navigateComplete()
+                    requireNotNull(resolvedViewModel).onCompleteSetup()
                 }
-            },
-            modifier = Modifier.padding(padding),
-        )
+            } else if (entryPoint == SourceConnectionsEntryPoint.Onboarding) {
+                requireNotNull(skipRemaining).invoke()
+                navigateComplete()
+            } else {
+                navigateComplete()
+            }
+        }
+        if (focusedSettingsItem != null) {
+            FocusedSettingsSourceConnectionContent(
+                item = focusedSettingsItem,
+                sourceOwnerships = effectiveSourceOwnerships,
+                sourceOwnershipsReady = effectiveSourceOwnershipsReady,
+                updatingSourceOwnershipId = effectiveUpdatingSourceOwnershipId,
+                onSourceOwnership = updateSourceOwnership,
+                onConnect = { connectProvider(focusedSettingsItem.provider) },
+                continueLabel = stringResource(SourceConnectionCopy.continueLabelRes(entryPoint, hasIncomplete)),
+                onContinue = onContinue,
+                continueEnabled = !state.isCompleting,
+                continueLoading = state.isCompleting,
+                modifier = Modifier.padding(padding),
+            )
+        } else {
+            SourceConnectionsContent(
+                items = items,
+                headline = stringResource(copy.headlineRes),
+                body = stringResource(copy.bodyRes),
+                continueLabel = stringResource(SourceConnectionCopy.continueLabelRes(entryPoint, hasIncomplete)),
+                skipLabel = stringResource(SourceConnectionCopy.skipLabelRes(entryPoint)),
+                onConnect = connectProvider,
+                onSkip = { provider ->
+                    transientStatesState.value = transientStatesState.value - provider
+                    skipSource(provider)
+                },
+                setupItems = setupItems,
+                selfIdentity = selfIdentity,
+                onSelfDisplayNameChange = onSelfDisplayNameChange,
+                onSelfEmailChange = onSelfEmailChange,
+                onSelfPhoneChange = onSelfPhoneChange,
+                onSelfAliasChange = onSelfAliasChange,
+                onSaveSelfIdentity = onSaveSelfIdentity,
+                sourceOwnerships = effectiveSourceOwnerships,
+                sourceOwnershipsReady = effectiveSourceOwnershipsReady,
+                updatingSourceOwnershipId = effectiveUpdatingSourceOwnershipId,
+                onSourceOwnership = updateSourceOwnership,
+                onConnectSetupItem = onConnectSetupItem ?: {},
+                onSkipSetupItem = onSkipSetupItem ?: {},
+                continueEnabled = !state.isCompleting,
+                continueLoading = state.isCompleting,
+                showImapLaterNotice = entryPoint != SourceConnectionsEntryPoint.Settings,
+                progressiveSetup = entryPoint == SourceConnectionsEntryPoint.Setup,
+                onContinue = onContinue,
+                modifier = Modifier.padding(padding),
+            )
+        }
     }
 }
+
+@Composable
+private fun FocusedSettingsSourceConnectionContent(
+    item: SourceConnectionItemUi,
+    sourceOwnerships: List<OnboardingSourceOwnershipUi>,
+    sourceOwnershipsReady: Boolean,
+    updatingSourceOwnershipId: String?,
+    onSourceOwnership: (String, String) -> Unit,
+    onConnect: () -> Unit,
+    continueLabel: String,
+    onContinue: () -> Unit,
+    continueEnabled: Boolean,
+    continueLoading: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val sourceOwnershipGateOpen = (sourceOwnershipsReady || sourceOwnerships.isEmpty()) &&
+        sourceOwnerships.none { it.ownership == "unknown" }
+    LazyColumn(
+        modifier = modifier.testTag("source-connections-list"),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item(key = "settings-source-story-hero") {
+            FocusedSourceStoryHero(
+                item = item,
+            )
+        }
+        item(key = "settings-source-story-action") {
+            FocusedSourceActionPanel(
+                item = item,
+                onConnect = onConnect,
+            )
+        }
+        if (sourceOwnerships.isNotEmpty()) {
+            item(key = "source-ownership-title") {
+                Text(
+                    text = stringResource(R.string.settings_identity_connections_section),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            if (!sourceOwnershipGateOpen) {
+                item(key = "source-ownership-required") {
+                    Text(
+                        text = stringResource(R.string.onb_setup_source_ownership_required),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            items(sourceOwnerships, key = { ownership -> ownership.id }) { ownership ->
+                SourceOwnershipSetupRow(
+                    item = ownership,
+                    updating = updatingSourceOwnershipId == ownership.id,
+                    onOwnership = { value -> onSourceOwnership(ownership.id, value) },
+                )
+            }
+        }
+        item(key = "settings-source-story-done") {
+            BecalmButton(
+                text = continueLabel,
+                onClick = onContinue,
+                enabled = continueEnabled && sourceOwnershipGateOpen,
+                loading = continueLoading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("source-connections-continue"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FocusedSourceStoryHero(
+    item: SourceConnectionItemUi,
+) {
+    SourceStoryHeader(
+        icon = sourceStoryIcon(item.provider),
+        headline = stringResource(focusedSourceHeadlineRes(item.provider)),
+        body = stringResource(focusedSourceBodyRes(item.provider)),
+    )
+}
+
+@Composable
+private fun FocusedSourceActionPanel(
+    item: SourceConnectionItemUi,
+    onConnect: () -> Unit,
+) {
+    val busy = item.state.isBusy
+    QuietPanel(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = focusedSourceActionTitle(item.state),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = focusedSourceActionBody(item.provider),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            BecalmButton(
+                text = focusedConnectLabel(item),
+                onClick = onConnect,
+                enabled = item.state != SourceConnectionState.Connected && !busy,
+                loading = busy,
+                variant = if (item.state == SourceConnectionState.Connected) {
+                    BecalmButtonVariant.Secondary
+                } else {
+                    BecalmButtonVariant.Primary
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("source-connection-primary"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun focusedSourceActionTitle(state: SourceConnectionState): String =
+    when (state) {
+        SourceConnectionState.Connected -> stringResource(R.string.settings_source_story_connected_title)
+        SourceConnectionState.Failed -> stringResource(R.string.settings_source_story_retry_title)
+        SourceConnectionState.Connecting,
+        SourceConnectionState.PendingExternalAuth,
+        SourceConnectionState.Syncing,
+        -> stringResource(R.string.settings_source_story_connecting_title)
+        SourceConnectionState.Idle,
+        SourceConnectionState.ConsentRequired,
+        SourceConnectionState.Skipped,
+        -> stringResource(R.string.settings_source_story_ready_title)
+    }
+
+@Composable
+private fun focusedSourceActionBody(provider: OnboardingSourceProvider): String =
+    stringResource(
+        focusedSourceBodyRes(provider),
+    )
+
+private fun focusedSourceHeadlineRes(provider: OnboardingSourceProvider): Int =
+    when (provider) {
+        OnboardingSourceProvider.GMAIL,
+        OnboardingSourceProvider.OUTLOOK_MAIL,
+        -> R.string.onb_intro_email_title
+        OnboardingSourceProvider.GOOGLE_CALENDAR,
+        OnboardingSourceProvider.OUTLOOK_CALENDAR,
+        -> R.string.onb_intro_calendar_title
+    }
+
+private fun focusedSourceBodyRes(provider: OnboardingSourceProvider): Int =
+    when (provider) {
+        OnboardingSourceProvider.GMAIL,
+        OnboardingSourceProvider.OUTLOOK_MAIL,
+        -> R.string.onb_intro_email_body
+        OnboardingSourceProvider.GOOGLE_CALENDAR,
+        OnboardingSourceProvider.OUTLOOK_CALENDAR,
+        -> R.string.onb_intro_calendar_body
+    }
+
+@Composable
+private fun focusedConnectLabel(item: SourceConnectionItemUi): String {
+    item.primaryActionLabel?.let { return it }
+    return when (item.state) {
+        SourceConnectionState.Failed -> stringResource(R.string.onb_sources_retry)
+        SourceConnectionState.Connected -> stringResource(R.string.onb_sources_status_connected)
+        SourceConnectionState.Syncing -> stringResource(R.string.onb_sources_status_syncing)
+        SourceConnectionState.ConsentRequired -> stringResource(R.string.onb_sources_connect_with_consent)
+        else -> stringResource(R.string.action_connect)
+    }
+}
+
+private fun sourceStoryIcon(provider: OnboardingSourceProvider): ImageVector =
+    when (provider) {
+        OnboardingSourceProvider.GMAIL,
+        OnboardingSourceProvider.OUTLOOK_MAIL,
+        -> Icons.Outlined.Email
+        OnboardingSourceProvider.GOOGLE_CALENDAR,
+        OnboardingSourceProvider.OUTLOOK_CALENDAR,
+        -> Icons.Outlined.CalendarMonth
+    }
+
+private fun List<OnboardingSourceOwnershipUi>.filterForProviders(
+    providers: Set<OnboardingSourceProvider>?,
+): List<OnboardingSourceOwnershipUi> {
+    if (providers == null) return this
+    return filter { ownership -> ownership.toSourceProvider() in providers }
+}
+
+private fun OnboardingSourceOwnershipUi.toSourceProvider(): OnboardingSourceProvider? =
+    when {
+        provider == "google" && capability == "mail" -> OnboardingSourceProvider.GMAIL
+        provider == "google" && capability == "calendar" -> OnboardingSourceProvider.GOOGLE_CALENDAR
+        provider == "outlook" && capability == "mail" -> OnboardingSourceProvider.OUTLOOK_MAIL
+        provider == "outlook" && capability == "calendar" -> OnboardingSourceProvider.OUTLOOK_CALENDAR
+        else -> null
+    }

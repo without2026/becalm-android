@@ -8,12 +8,17 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.supabase.SupabaseSession
+import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.MeetingImportRepository
+import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.data.repository.ProcessingSourceState
+import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.domain.meeting.MeetingImportFolderKind
 import com.becalm.android.ui.sources.ARG_SOURCE_TYPE
 import com.becalm.android.ui.sources.SourceAdministrationPort
 import com.becalm.android.ui.sources.SourceDetailEffect
@@ -50,16 +55,18 @@ class SourceDetailViewModelSpecTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val sourceStatusRepository: SourceStatusRepository = mockk()
+    private val processingStatusRepository: ProcessingStatusRepository = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
     private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
     private val meetingImportRepository: MeetingImportRepository = mockk(relaxed = true)
+    private val authRepository: AuthRepository = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        coEvery { meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Audio) } returns
-            BecalmResult.Success("content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FAudio")
+        coEvery { authRepository.currentSession() } returns null
+        every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
     }
 
     @After
@@ -131,6 +138,80 @@ class SourceDetailViewModelSpecTest {
             assertTrue(state.showManualSyncButton)
             assertFalse(state.showDisconnectConfirmDialog)
             assertNull(state.disconnectOutcome)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `authenticated session loads recent source evidence without host user id wiring`() = runTest {
+        val lastSync = Instant.parse("2026-04-20T09:00:00Z")
+        coEvery { authRepository.currentSession() } returns session(userId = "user-1")
+        every { sourceStatusRepository.observeFor(SourceType.GMAIL) } returns
+            flowOf(
+                SourceStatus(
+                    sourceType = SourceType.GMAIL,
+                    status = SourceConnectionStatus.CONNECTED,
+                    lastSyncedAt = lastSync,
+                    errorMessage = null,
+                ),
+            )
+        every { rawIngestionRepository.observeForSourceType("user-1", SourceType.GMAIL, 50) } returns
+            flowOf(
+                listOf(
+                    rawEvent(id = "gmail-1", sourceType = SourceType.GMAIL),
+                    rawEvent(id = "gmail-2", sourceType = SourceType.GMAIL),
+                ),
+            )
+
+        val viewModel = buildViewModel(SourceType.GMAIL)
+        advanceUntilIdle()
+
+        viewModel.state.test {
+            var state = awaitItem()
+            while (state.status == SourceSyncStatus.Unknown || state.recentEvents.isEmpty()) {
+                state = awaitItem()
+            }
+
+            assertEquals(SourceType.GMAIL, state.sourceType)
+            assertEquals(SourceSyncStatus.Connected, state.status)
+            assertEquals(lastSync, state.lastSyncAt)
+            assertEquals(2, state.eventsSyncedCount)
+            assertEquals(listOf("gmail-1", "gmail-2"), state.recentEvents.map { it.id })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `P1-4 source detail keeps connected state while surfacing extraction phase`() = runTest {
+        every { sourceStatusRepository.observeFor(SourceType.GMAIL) } returns
+            flowOf(status(sourceType = SourceType.GMAIL, status = SourceConnectionStatus.CONNECTED))
+        every { processingStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.GMAIL,
+                    phase = ProcessingPhase.GEMINI,
+                    itemCount = 1,
+                    message = ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED,
+                    updatedAt = Instant.parse("2026-04-20T09:01:00Z"),
+                ),
+            ),
+        )
+        every { rawIngestionRepository.observeForSourceType("user-1", SourceType.GMAIL, 50) } returns
+            flowOf(emptyList())
+
+        val viewModel = buildViewModel(SourceType.GMAIL)
+        viewModel.setUserId("user-1")
+
+        viewModel.state.test {
+            var state = awaitItem()
+            while (state.status == SourceSyncStatus.Unknown) {
+                state = awaitItem()
+            }
+
+            assertEquals(SourceSyncStatus.Connected, state.status)
+            assertEquals(ProcessingPhase.GEMINI, state.processingPhase)
+            assertEquals(ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED, state.processingMessage)
+            assertFalse(state.hasError)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -445,7 +526,7 @@ class SourceDetailViewModelSpecTest {
 
     @Test
     // spec: MTG-001
-    fun `SMG-006 meeting source exposes audio import only`() = runTest {
+    fun `SMG-006 meeting source exposes audio import without probing a SAF folder`() = runTest {
         every { sourceStatusRepository.observeFor(SourceType.MEETING) } returns
             flowOf(status(sourceType = SourceType.MEETING, status = SourceConnectionStatus.CONNECTED))
         every { rawIngestionRepository.observeForSourceType("user-1", SourceType.MEETING, 50) } returns
@@ -461,10 +542,6 @@ class SourceDetailViewModelSpecTest {
 
             assertEquals(SourceType.MEETING, state.sourceType)
             assertTrue(state.showMeetingAudioAddButton)
-            assertEquals(
-                "content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FAudio",
-                state.meetingAudioPickerInitialUri,
-            )
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -609,10 +686,13 @@ class SourceDetailViewModelSpecTest {
         sourceType: String,
         sourceAdministrationPort: SourceAdministrationPort = FakeSourceAdministrationPort(),
         sourceSyncPort: SourceSyncPort = this.sourceSyncPort,
+        authRepository: AuthRepository = this.authRepository,
     ): SourceDetailViewModel = SourceDetailViewModel(
         savedStateHandle = SavedStateHandle(mapOf(ARG_SOURCE_TYPE to sourceType)),
         sourceStatusRepository = sourceStatusRepository,
+        processingStatusRepository = processingStatusRepository,
         rawIngestionRepository = rawIngestionRepository,
+        authRepository = authRepository,
         sourceAdministrationPort = sourceAdministrationPort,
         sourceSyncPort = sourceSyncPort,
         meetingImportRepository = meetingImportRepository,
@@ -639,6 +719,14 @@ class SourceDetailViewModelSpecTest {
         sourceType = sourceType,
         eventTitle = id,
         timestamp = Instant.fromEpochMilliseconds(1_000),
+    )
+
+    private fun session(userId: String): SupabaseSession = SupabaseSession(
+        accessToken = "access-token",
+        refreshToken = "refresh-token",
+        userId = userId,
+        email = "user@example.test",
+        expiresAt = Instant.parse("2026-04-20T10:00:00Z"),
     )
 }
 

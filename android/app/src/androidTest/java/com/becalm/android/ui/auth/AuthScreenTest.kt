@@ -69,7 +69,7 @@ class AuthScreenTest {
     }
 
     @Test
-    fun splash_screen_navigates_to_today_for_completed_session() {
+    fun splash_screen_navigates_to_people_for_completed_session() {
         var destination: String? = null
 
         composeTestRule.setContent {
@@ -86,7 +86,7 @@ class AuthScreenTest {
         }
 
         composeTestRule.runOnIdle {
-            assertEquals(BecalmRoute.Today.path, destination)
+            assertEquals(BecalmRoute.Persons.path, destination)
         }
     }
 
@@ -422,7 +422,7 @@ class AuthScreenTest {
     }
 
     @Test
-    fun login_screen_navigates_to_today_for_completed_signed_in_session() {
+    fun login_screen_navigates_to_people_for_completed_signed_in_session() {
         var destination: String? = null
         var grantedCount = 0
 
@@ -447,7 +447,7 @@ class AuthScreenTest {
         }
 
         composeTestRule.runOnIdle {
-            assertEquals(BecalmRoute.Today.path, destination)
+            assertEquals(BecalmRoute.Persons.path, destination)
             assertEquals(1, grantedCount)
         }
     }

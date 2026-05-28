@@ -102,6 +102,9 @@ class AuthRepositoryLocalIntegrationTest {
         override suspend fun upsertAll(entities: List<PersonEnrichmentEntity>) =
             delegate().upsertAll(entities)
 
+        override suspend fun replaceAll(entities: List<PersonEnrichmentEntity>) =
+            delegate().replaceAll(entities)
+
         override suspend fun deleteAll() = delegate().deleteAll()
     }
     private val imapCredentialStore = mockk<com.becalm.android.data.local.secure.ImapCredentialStore>(relaxed = true)
@@ -248,6 +251,17 @@ class AuthRepositoryLocalIntegrationTest {
         )
         userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true)
         syncCursorStore.setGmailHistoryId(123L)
+        val mirrorCursorKeys = listOf(
+            "raw_ingestion_events:gmail",
+            "raw_ingestion_events:all",
+            "source_event_participants:gmail",
+            "source_event_participants:all",
+            "calendar_events",
+            "commitments_cursor",
+            "commitment_participants",
+            "schedule_event_links",
+        )
+        mirrorCursorKeys.forEach { key -> syncCursorStore.setCursor(key, "ks1:test") }
         databaseProvider.ensureOpenFor(hash)
         databaseProvider.current().commitmentDao().insert(
             commitment(id = "wipe-row", userId = USER_ID),
@@ -273,6 +287,9 @@ class AuthRepositoryLocalIntegrationTest {
         assertTrue(userPrefsStore.observePipaActionLog().first().isEmpty())
         assertFalse(userPrefsStore.observeEmailSourceConnected(EmailPipaProvider.GMAIL).first())
         assertNull(syncCursorStore.observeGmailHistoryId().first())
+        mirrorCursorKeys.forEach { key ->
+            assertNull("cursor key should be cleared: $key", syncCursorStore.observeCursor(key).first())
+        }
         assertNull(sessionStore.load())
         assertNull(databaseProvider.currentUserIdHash())
 
@@ -280,6 +297,32 @@ class AuthRepositoryLocalIntegrationTest {
         assertEquals(0, databaseProvider.current().commitmentDao().observeAllForUser(USER_ID).first().size)
         assertEquals(0, enrichmentRepository.observeAll().first().size)
         coVerify { authClient.signOut(session.accessToken) }
+    }
+
+    @Test
+    fun `P1-3 account swap opens next user database without process restart or data leak`() = runTest {
+        val userA = "user-a"
+        val userB = "user-b"
+        val sessionA = LocalIntegrationSupport.authenticatedSession(userId = userA, email = "a@example.com")
+        val sessionB = LocalIntegrationSupport.authenticatedSession(userId = userB, email = "b@example.com")
+        every { processRestarter.restart() } answers { throw AssertionError("restart not expected") }
+        coEvery { authClient.signInWithEmail("a@example.com", "pw") } returns BecalmResult.Success(sessionA)
+        coEvery { authClient.signInWithEmail("b@example.com", "pw") } returns BecalmResult.Success(sessionB)
+        coEvery { authClient.signOut(sessionA.accessToken) } returns BecalmResult.Success(Unit)
+
+        assertTrue(repository.signInWithEmail("a@example.com", "pw") is BecalmResult.Success)
+        databaseProvider.current().commitmentDao().insert(
+            commitment(id = "a-only-row", userId = userA),
+        )
+        assertEquals(1, databaseProvider.current().commitmentDao().observeAllForUser(userA).first().size)
+
+        assertTrue(repository.invalidateSession() is BecalmResult.Success)
+        assertTrue(repository.signInWithEmail("b@example.com", "pw") is BecalmResult.Success)
+
+        assertEquals(userB, userPrefsStore.observeCurrentUserId().first())
+        assertEquals(BeCalmDatabase.deriveUserIdHash(userB), databaseProvider.currentUserIdHash())
+        assertEquals(0, databaseProvider.current().commitmentDao().observeAllForUser(userA).first().size)
+        assertEquals(0, databaseProvider.current().commitmentDao().observeAllForUser(userB).first().size)
     }
 
     private fun commitment(id: String, userId: String): CommitmentEntity = CommitmentEntity(

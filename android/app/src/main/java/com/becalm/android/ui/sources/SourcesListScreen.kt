@@ -1,7 +1,6 @@
 package com.becalm.android.ui.sources
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,20 +8,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -45,12 +51,15 @@ import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.SourcePresentation
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.sourceStatusLabelRes
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.SOURCE_CONNECTION_SUCCESS_MESSAGE_KEY
 import com.becalm.android.ui.navigation.dispatchSourcesListNavigation
 import com.becalm.android.ui.theme.BecalmTheme
+import kotlinx.coroutines.launch
 
 /**
  * Sources list screen — user-facing source status rows.
@@ -68,21 +77,49 @@ import com.becalm.android.ui.theme.BecalmTheme
 @Composable
 public fun SourcesListScreen(
     navController: NavHostController,
+    sourceConnectionResult: String? = null,
+    sourceProvider: String? = null,
+    sourceFamily: String? = null,
     viewModel: SourcesListViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val sourceConnectedMessage = stringResource(R.string.sources_connection_completed_message)
+    val sourceConnectionFailedMessage = stringResource(R.string.sources_connection_failed_message)
+
+    fun showConnectionCompletedIfNeeded() {
+        val shouldShow = navController.currentBackStackEntry
+            ?.savedStateHandle
+            ?.remove<Boolean>(SOURCE_CONNECTION_SUCCESS_MESSAGE_KEY) == true
+        if (shouldShow) {
+            scope.launch { snackbarHostState.showSnackbar(sourceConnectedMessage) }
+        }
+    }
 
     CollectFlowEffect(viewModel.navigation) { target ->
         navController.dispatchSourcesListNavigation(target)
     }
     LaunchedEffect(viewModel) {
         viewModel.refreshStatuses()
+        showConnectionCompletedIfNeeded()
+    }
+    LaunchedEffect(sourceConnectionResult, sourceProvider, sourceFamily) {
+        val result = sourceConnectionResult ?: return@LaunchedEffect
+        viewModel.refreshStatuses()
+        val message = if (result == "error") {
+            sourceConnectionFailedMessage
+        } else {
+            sourceConnectedMessage
+        }
+        snackbarHostState.showSnackbar(message)
     }
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshStatuses()
+                showConnectionCompletedIfNeeded()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -93,6 +130,7 @@ public fun SourcesListScreen(
         state = state,
         onBack = navController::popBackStack,
         onRowClick = viewModel::onSourceSelected,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     )
 }
 
@@ -102,10 +140,12 @@ public fun SourcesListScreenContent(
     onBack: () -> Unit,
     onRowClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    snackbarHost: @Composable () -> Unit = {},
 ) {
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.sources_title),
+        snackbarHost = snackbarHost,
         navigationIcon = {
             IconButton(onClick = onBack) {
                 Icon(
@@ -151,6 +191,7 @@ private fun SourceRowItem(
     modifier: Modifier = Modifier,
 ) {
     val statusLabel = stringResource(sourceStatusLabelRes(row.status))
+    val presentation = sourcePresentationFor(row.sourceType)
     EvidenceCard(
         modifier = modifier
             .testTag("sources-row-${row.sourceType}")
@@ -158,6 +199,10 @@ private fun SourceRowItem(
             .semantics { role = Role.Button },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            SourceRowIcon(
+                presentation = presentation,
+                modifier = Modifier.padding(end = 12.dp),
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = rowDisplayName(row),
@@ -199,6 +244,23 @@ private fun SourceRowItem(
                         },
                     )
                 }
+                row.processingLabelRes?.let { processingLabelRes ->
+                    val processingText = row.processingMessage?.let { message ->
+                        uiMessageStringResource(message)
+                    } ?: stringResource(
+                        R.string.sources_processing_status_fmt,
+                        stringResource(processingLabelRes),
+                    )
+                    Text(
+                        text = processingText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (row.processingNeedsAction) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(8.dp))
             SourceStatusIndicator(
@@ -206,6 +268,26 @@ private fun SourceRowItem(
                 label = statusLabel,
             )
         }
+    }
+}
+
+@Composable
+private fun SourceRowIcon(
+    presentation: SourcePresentation,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.size(40.dp),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+        contentColor = presentation.accentColor,
+        tonalElevation = 0.dp,
+    ) {
+        Icon(
+            imageVector = presentation.icon,
+            contentDescription = null,
+            modifier = Modifier.padding(10.dp),
+        )
     }
 }
 

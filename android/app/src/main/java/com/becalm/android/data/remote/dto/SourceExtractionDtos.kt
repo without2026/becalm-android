@@ -26,6 +26,9 @@ public data class SourceExtractionErrorEnvelope(
 
     /** Human-readable description of the error, or null when absent. */
     @field:Json(name = "message") val message: String? = null,
+
+    /** Optional recovery action supplied by newer Railway error envelopes. */
+    @field:Json(name = "client_action") val clientAction: String? = null,
 ) {
     public companion object {
         /** Deterministic failure: LLM output was truncated — non-retryable. */
@@ -36,6 +39,12 @@ public data class SourceExtractionErrorEnvelope(
 
         /** Transient failure: upstream Vertex AI error — retryable with backoff. */
         public const val VERTEX_UPSTREAM_ERROR: String = "vertex_upstream_error"
+
+        /** Recoverable backend-state miss: the transient speaker-preview transcript expired. */
+        public const val SPEAKER_PREVIEW_UNAVAILABLE: String = "speaker_preview_unavailable"
+
+        /** Client action for [SPEAKER_PREVIEW_UNAVAILABLE]. */
+        public const val RESTART_MEETING_SPEAKER_PREVIEW: String = "restart_meeting_speaker_preview"
     }
 }
 

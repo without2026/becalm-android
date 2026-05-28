@@ -26,6 +26,10 @@ public data class UserProfileEntity(
     val timezone: String = "Asia/Seoul",
     @ColumnInfo(name = "preferred_locale")
     val preferredLocale: String = "ko",
+    @ColumnInfo(name = "display_name_source")
+    val displayNameSource: String? = null,
+    @ColumnInfo(name = "onboarding_completed_at")
+    val onboardingCompletedAt: Instant? = null,
     @ColumnInfo(name = "created_at")
     val createdAt: Instant,
     @ColumnInfo(name = "updated_at")

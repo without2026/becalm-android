@@ -117,7 +117,43 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
     val selfMatch = matchSelfIdentityAnchor(selfIdentityAnchors)
     val selfResolved = selfMatch?.resolutionStatus == RESOLUTION_SELF_RESOLVED
     val sourceLocalSpeakerLabel = isSourceLocalSpeakerLabel()
-    val resolved = if (selfMatch != null || sourceLocalSpeakerLabel) null else PersonIdentityResolver.resolve(userId, anchor)
+    val sourceLocalSpeakerReviewCandidate = sourceLocalSpeakerLabel &&
+        SourceParticipantReviewPolicy.isSourceLocalSpeakerReviewCandidate(
+            SourceEventParticipantEntity(
+                id = "",
+                userId = userId,
+                sourceEventId = sourceEventId,
+                sourceType = sourceType,
+                sourceRef = sourceRef,
+                personId = null,
+                role = role,
+                relationToUser = relationToUser,
+                identityType = identityType,
+                normalizedValue = normalizedValue,
+                displayNameRaw = displayName,
+                emailRaw = email,
+                phoneRaw = phone,
+                organizationRaw = organization,
+                titleRaw = title,
+                evidence = evidence,
+                confidence = confidence,
+                resolutionStatus = "unresolved",
+                createdAt = now,
+            ),
+        )
+    val shouldResolve = SourceParticipantReviewPolicy.shouldAttemptAutomaticPersonResolution(
+        sourceType = sourceType,
+        participant = this,
+    )
+    val needsManualReview = SourceParticipantReviewPolicy.isReviewableForManualReview(
+        sourceType = sourceType,
+        participant = this,
+    )
+    val resolved = if (selfMatch != null || sourceLocalSpeakerLabel || !shouldResolve) {
+        null
+    } else {
+        PersonIdentityResolver.resolve(userId, anchor)
+    }
     val normalized = normalizedValue ?: resolved?.identityKey?.substringAfter(':', missingDelimiterValue = resolved.rawValue)
     val participantAnchor = anchor ?: normalizedValue ?: displayName ?: organization ?: rawValue
     val participantId = UUID.nameUUIDFromBytes(
@@ -147,7 +183,10 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
         confidence = confidence.coerceIn(0.0, 1.0),
         resolutionStatus = when {
             selfMatch != null -> selfMatch.resolutionStatus
+            sourceLocalSpeakerReviewCandidate -> "unresolved"
             sourceLocalSpeakerLabel -> "ignored"
+            !shouldResolve && needsManualReview -> "unresolved"
+            !shouldResolve -> "ignored"
             resolved == null -> "unresolved"
             else -> "resolved"
         },
@@ -163,7 +202,11 @@ internal fun CommitmentEntity.toCommitmentParticipantEntity(
     selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
 ): CommitmentParticipantEntity? {
     if (counterpartyRef.matchSelfIdentityAnchor(selfIdentityAnchors) != null) return null
-    val resolved = PersonIdentityResolver.resolve(userId, counterpartyRef)
+    val resolved = if (SourceParticipantReviewPolicy.requiresUserConfirmedPerson(sourceType)) {
+        null
+    } else {
+        PersonIdentityResolver.resolve(userId, counterpartyRef)
+    }
     val personId = resolved?.personId ?: fallbackPersonId ?: return null
     val participantId = UUID.nameUUIDFromBytes(
         "commitment-participant:$userId:$id:$personId:$index".toByteArray(Charsets.UTF_8),
@@ -198,9 +241,13 @@ internal fun SourceCompletionSignalDto.toCommitmentProgressEventEntity(
     if (personRef.matchSelfIdentityAnchor(selfIdentityAnchors) != null) return null
     val quote = evidenceQuote.trim().take(PROGRESS_EVIDENCE_MAX_CHARS)
     if (quote.isBlank()) return null
-    val resolvedPersonId = PersonIdentityResolver.resolve(userId, personRef)?.personId
-        ?: sourceParticipants.personIdForCompletionRef(personRef)
-        ?: fallbackPersonId
+    val confirmedPersonId = sourceParticipants.personIdForCompletionRef(personRef) ?: fallbackPersonId
+    val resolvedPersonId = confirmedPersonId
+        ?: if (SourceParticipantReviewPolicy.requiresUserConfirmedPerson(sourceEvent.sourceType)) {
+            null
+        } else {
+            PersonIdentityResolver.resolve(userId, personRef)?.personId
+        }
     return CommitmentProgressEventEntity(
         id = UUID.nameUUIDFromBytes(
             "completion-signal:$userId:${sourceEvent.id}:$index:$quote".toByteArray(Charsets.UTF_8),

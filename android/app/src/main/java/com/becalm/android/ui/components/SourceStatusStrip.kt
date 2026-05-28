@@ -2,11 +2,13 @@ package com.becalm.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,14 +28,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmColors
+import com.becalm.android.ui.theme.dimens
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -68,17 +73,18 @@ private val ChipShape = RoundedCornerShape(100.dp)
  *
  * Renders exactly [sources].size chips in order. Disconnected and failed sources are
  * surfaced by the Today attention banner instead of occupying neutral-looking chip slots.
- * The strip is read-only per spec — "칩 탭 인터랙션 없음". Catch-up recovery is driven
- * by pull-to-refresh on the Today screen (TDY-009), not by tapping chips. Error recovery
- * is routed through the settings screen.
+ * The strip is read-only by default. Hosts that have a source-detail destination can pass
+ * [onSourceClick] so each chip opens the source-specific trust/recovery surface.
  *
  * @param sources Chip list in display order.
  * @param modifier Optional [Modifier] applied to the outer [LazyRow].
+ * @param onSourceClick Optional source-detail navigation callback.
  */
 @Composable
 public fun SourceStatusStrip(
     sources: List<SourceStatusChip>,
     modifier: Modifier = Modifier,
+    onSourceClick: ((String) -> Unit)? = null,
 ) {
     val a11yLabel = stringResource(R.string.today_source_strip_a11y_label)
     LazyRow(
@@ -89,7 +95,12 @@ public fun SourceStatusStrip(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     ) {
         items(items = sources, key = { it.sourceType }) { chip ->
-            SourceStatusChipView(chip = chip)
+            SourceStatusChipView(
+                chip = chip,
+                onClick = onSourceClick?.let { callback ->
+                    { callback(chip.sourceType) }
+                },
+            )
         }
     }
 }
@@ -99,15 +110,39 @@ public fun SourceStatusStrip(
 @Composable
 private fun SourceStatusChipView(
     chip: SourceStatusChip,
+    onClick: (() -> Unit)?,
 ) {
     val becalmColors = MaterialTheme.becalmColors
     val colorScheme = MaterialTheme.colorScheme
+    val statusLabel = sourceChipStateDescription(chip)
+    val openDetailLabel = if (onClick != null) {
+        stringResource(R.string.sources_status_open_source_detail_a11y)
+    } else {
+        null
+    }
+    val description = sourceChipContentDescription(chip, openDetailLabel)
 
     Row(
         modifier = Modifier
             .testTag("source-chip-${chip.sourceType}")
+            .heightIn(min = MaterialTheme.dimens.sourceStatusStripHeight)
             .background(color = becalmColors.glassPanelFill, shape = ChipShape)
             .border(width = 1.dp, color = becalmColors.glassBorder, shape = ChipShape)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        onClickLabel = openDetailLabel,
+                        role = Role.Button,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                },
+            )
+            .semantics {
+                contentDescription = description
+                stateDescription = statusLabel
+            }
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -175,6 +210,23 @@ private fun SourceChipStatusIndicator(status: SourceSyncStatus) {
 @Composable
 private fun sourceDisplayName(sourceType: String): String =
     stringResource(sourcePresentationFor(sourceType).labelRes)
+
+@Composable
+private fun sourceChipContentDescription(
+    chip: SourceStatusChip,
+    openDetailLabel: String?,
+): String {
+    val sourceName = sourceDisplayName(chip.sourceType)
+    val statusLabel = stringResource(sourceStatusLabelRes(chip.status))
+    val lastSync = chip.lastSyncedAt?.let {
+        stringResource(R.string.sources_status_last_success_at_fmt, formatTimeHHmm(it))
+    }
+    return listOfNotNull(sourceName, statusLabel, lastSync, openDetailLabel).joinToString(separator = ", ")
+}
+
+@Composable
+private fun sourceChipStateDescription(chip: SourceStatusChip): String =
+    stringResource(sourceStatusLabelRes(chip.status))
 
 private fun formatTimeHHmm(at: Instant): String {
     val local = at.toLocalDateTime(TimeZone.currentSystemDefault())

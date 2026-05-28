@@ -51,6 +51,10 @@ class PrivacyDataExporterLocalIntegrationTest {
             PipaActionLogEntry(
                 action = "processing_pause",
                 timestampIso = "2026-04-23T00:00:00Z",
+                details = mapOf(
+                    "access_token" to "access-token",
+                    "source" to "gmail",
+                ),
             ),
         )
 
@@ -73,6 +77,8 @@ class PrivacyDataExporterLocalIntegrationTest {
         assertTrue(entries.containsKey("datastore.json"))
         assertTrue(entries.containsKey("README.txt"))
         assertTrue(entries["datastore.json"].orEmpty().contains("processing_pause"))
+        assertTrue(entries["datastore.json"].orEmpty().contains("[redacted]"))
+        assertTrue(entries["datastore.json"].orEmpty().contains("gmail"))
         assertFalse(entries["datastore.json"].orEmpty().contains("access-token"))
         assertFalse(entries["datastore.json"].orEmpty().contains("refresh-token"))
     }

@@ -10,7 +10,6 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentItemType
-import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.BatchUploadResponse
@@ -23,9 +22,7 @@ import com.becalm.android.data.remote.dto.SourceExtractedItemType
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
-import com.becalm.android.worker.PersonInteractionIndexWorker
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.VoiceFailureNotifier
 import com.becalm.android.worker.VoiceUploadWorker
@@ -38,16 +35,14 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import java.io.ByteArrayInputStream
-import javax.inject.Provider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -105,7 +100,7 @@ class AiPersonPipelineLocalIntegrationTest {
     }
 
     @Test
-    fun `Vertex voice response is persisted and indexed into the same person`() = runTest {
+    fun `Vertex voice response is persisted and kept as a person review candidate`() = runTest {
         db.rawIngestionEventDao().insert(aiVoiceRawEvent())
         coEvery {
             sourceExtractionApi.commitmentExtract(
@@ -125,6 +120,7 @@ class AiPersonPipelineLocalIntegrationTest {
                 selfSpeakerId = any(),
                 speakerMappings = any(),
                 speakerPreviewId = any(),
+                processingConfirmed = any(),
             )
         } returns Response.success(aiVoiceResponse())
 
@@ -144,36 +140,8 @@ class AiPersonPipelineLocalIntegrationTest {
         val participants = db.personIndexDao().findSourceEventParticipantsForUser(USER_ID)
         assertEquals(1, participants.size)
         assertEquals(CUSTOMER_EMAIL, participants.single().emailRaw)
-        assertNotNull(db.personIndexDao().findPersonForMemory(USER_ID, participants.single().personId!!))
-
-        val indexResult = newPersonIndexWorker().doWork()
-
-        assertEquals(ListenableWorker.Result.success().javaClass, indexResult.javaClass)
-        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
-        val aggregate = db.personIndexDao().observeAggregates(USER_ID, limit = 10).first()
-            .single { it.personId == personId }
-        assertEquals(2, aggregate.pendingCommitmentCount)
-        assertTrue(aggregate.channelSources.orEmpty().contains(SourceType.VOICE))
-
-        val interactions = db.personIndexDao()
-            .observeInteractionsForPerson(USER_ID, personId, limit = 10)
-            .first()
-        assertEquals(3, interactions.size)
-        assertTrue(interactions.any { it.interactionKind == "call" && it.sourceRef == "raw:$RAW_ID" })
-        assertTrue(
-            interactions.any {
-                it.interactionKind == "commitment" &&
-                    it.role == CommitmentItemType.SCHEDULE &&
-                    it.status == CommitmentScheduleStatus.CONFIRMED
-            },
-        )
-        assertTrue(
-            interactions.any {
-                it.interactionKind == "commitment" &&
-                    it.role == CommitmentItemType.ACTION &&
-                    it.direction == "give"
-            },
-        )
+        assertNull(participants.single().personId)
+        assertEquals("unresolved", participants.single().resolutionStatus)
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
@@ -190,6 +158,7 @@ class AiPersonPipelineLocalIntegrationTest {
             commitmentDao = db.commitmentDao(),
             commitmentProgressEventDao = db.commitmentProgressEventDao(),
             personIndexDao = db.personIndexDao(),
+            meetingSpeakerPreviewDao = db.meetingSpeakerPreviewDao(),
             selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             sourceExtractionApi = sourceExtractionApi,
             rawIngestionRepository = rawIngestionRepository,
@@ -200,21 +169,6 @@ class AiPersonPipelineLocalIntegrationTest {
             processingPauseGate = processingPauseGate,
             voiceFailureNotifier = voiceFailureNotifier,
             moshi = Moshi.Builder().build(),
-            logger = logger,
-            ioDispatcher = dispatcher,
-        )
-
-    private fun newPersonIndexWorker(): PersonInteractionIndexWorker =
-        PersonInteractionIndexWorker(
-            appContext = LocalIntegrationSupport.appContext(),
-            workerParams = LocalIntegrationSupport.workerParams(),
-            databaseProvider = Provider { db },
-            rawDaoProvider = Provider { db.rawIngestionEventDao() },
-            commitmentDaoProvider = Provider { db.commitmentDao() },
-            personIndexDaoProvider = Provider { db.personIndexDao() },
-            selfIdentityAnchorDaoProvider = Provider { db.selfIdentityAnchorDao() },
-            userPrefsStore = userPrefsStore,
-            workScheduler = workScheduler,
             logger = logger,
             ioDispatcher = dispatcher,
         )
@@ -231,6 +185,7 @@ class AiPersonPipelineLocalIntegrationTest {
             durationSeconds = 60,
             timestamp = Instant.parse("2026-04-29T00:00:00Z"),
             syncStatus = "pending",
+            processingConfirmedAt = Instant.parse("2026-04-29T00:00:00Z"),
         )
 
     private fun aiVoiceResponse(): SourceExtractionResponse =

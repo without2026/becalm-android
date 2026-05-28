@@ -14,8 +14,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
+import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.DangerZone
@@ -92,61 +94,98 @@ internal fun SourceProcessingFlowSection(state: SourceDetailUiState) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         QuietPanel(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                SourceProcessingFlowRow(
+            val steps = listOf(
+                SourceProcessingStep(
                     title = stringResource(R.string.source_detail_flow_connected),
                     body = if (state.status == SourceSyncStatus.Disconnected || state.status == SourceSyncStatus.Unknown) {
                         stringResource(R.string.source_detail_flow_connected_needed)
                     } else {
                         stringResource(R.string.source_detail_flow_connected_done)
                     },
-                    modifier = Modifier.weight(1f),
-                )
-                SourceProcessingFlowRow(
+                ),
+                SourceProcessingStep(
                     title = stringResource(R.string.source_detail_flow_checking),
-                    body = when {
-                        state.status == SourceSyncStatus.Syncing -> stringResource(R.string.source_detail_flow_checking_active)
-                        state.hasError || state.status == SourceSyncStatus.Error -> stringResource(R.string.source_detail_flow_checking_blocked)
-                        else -> stringResource(R.string.source_detail_flow_checking_done)
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                SourceProcessingFlowRow(
+                    body = stringResource(sourceCheckingFlowBodyRes(state)),
+                ),
+                SourceProcessingStep(
                     title = stringResource(R.string.source_detail_flow_memory),
-                    body = if (state.eventsSyncedCount != null && state.eventsSyncedCount > 0) {
-                        stringResource(R.string.source_detail_flow_memory_done)
-                    } else {
-                        stringResource(R.string.source_detail_flow_memory_waiting)
-                    },
-                    modifier = Modifier.weight(1f),
-                )
+                    body = stringResource(sourceMemoryFlowBodyRes(state)),
+                ),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                steps.forEach { step ->
+                    Text(
+                        text = step.title,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                steps.forEach { step ->
+                    SourceProcessingFlowBody(body = step.body)
+                }
             }
         }
     }
 }
 
+private data class SourceProcessingStep(
+    val title: String,
+    val body: String,
+)
+
+private fun sourceCheckingFlowBodyRes(state: SourceDetailUiState): Int =
+    when {
+        state.status == SourceSyncStatus.Syncing ||
+            state.processingPhase == ProcessingPhase.SCANNING ||
+            state.processingPhase == ProcessingPhase.NEW_ITEMS ->
+            R.string.source_detail_flow_checking_active
+        state.hasError ||
+            state.status == SourceSyncStatus.Error ||
+            state.processingPhase.isActionNeeded() ->
+            R.string.source_detail_flow_checking_blocked
+        else -> R.string.source_detail_flow_checking_done
+    }
+
+private fun sourceMemoryFlowBodyRes(state: SourceDetailUiState): Int =
+    when {
+        state.processingPhase == ProcessingPhase.GEMINI ->
+            R.string.source_detail_flow_memory_active
+        state.processingPhase == ProcessingPhase.UPLOADING ->
+            R.string.source_detail_flow_memory_mirroring
+        state.processingPhase.isActionNeeded() ->
+            R.string.source_detail_flow_memory_blocked
+        state.processingPhase == ProcessingPhase.SYNCED ||
+            state.processingPhase == ProcessingPhase.NO_NEW_ITEMS ||
+            ((state.eventsSyncedCount ?: 0) > 0) ->
+            R.string.source_detail_flow_memory_done
+        else -> R.string.source_detail_flow_memory_waiting
+    }
+
 @Composable
-private fun SourceProcessingFlowRow(
-    title: String,
+private fun SourceProcessingFlowBody(
     body: String,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = body,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    Text(
+        text = body,
+        modifier = modifier.fillMaxWidth(),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -195,6 +234,24 @@ private fun SourceStatusMeta(state: SourceDetailUiState) {
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (state.processingPhase != ProcessingPhase.IDLE) {
+        Spacer(modifier = Modifier.height(4.dp))
+        val processingText = state.processingMessage.toProcessingStatusMessage()?.let { message ->
+            uiMessageStringResource(message)
+        } ?: stringResource(
+            R.string.sources_processing_status_fmt,
+            stringResource(state.processingPhase.sourceProcessingPhaseLabelRes()),
+        )
+        Text(
+            text = processingText,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (state.processingPhase.isActionNeeded()) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
         )
     }
     state.actionMessage?.let { actionMessage ->
@@ -306,7 +363,10 @@ internal fun RecentSourceEventRow(event: RecentEventSummary) {
             .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         Text(
-            text = event.timestamp.toString(),
+            text = stringResource(
+                R.string.source_detail_recent_event_time_fmt,
+                event.timestamp.toLocalTimeLabel(),
+            ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

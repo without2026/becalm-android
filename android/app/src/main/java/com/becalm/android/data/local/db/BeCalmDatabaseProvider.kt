@@ -33,17 +33,11 @@ private const val TAG = "BeCalmDatabaseProvider"
  * before sign-in. On cold start [com.becalm.android.BecalmApplication] nudges the provider
  * via [ensureOpenFor] so Hilt's first DAO injection resolves the correct user immediately.
  *
- * ## In-process user swap caveat (alpha MVP)
+ * ## In-process user swap
  * [ensureOpenFor] idempotently no-ops when the requested [userIdHash] matches the
  * already-open file. When the hash **differs**, the previous file is closed and a new
- * one is built, but `@Singleton` repositories that already captured a DAO reference
- * during the prior user's session continue to point at the closed database. For alpha
- * this is acceptable because [com.becalm.android.data.repository.AuthRepositoryImpl.signOut]
- * / [com.becalm.android.data.repository.AuthRepositoryImpl.invalidateSession] invoke
- * [close] and the recommended UX is a cold restart before the next sign-in. A
- * follow-up refactor will migrate repositories to `Provider<Dao>` injection so
- * in-process swap becomes safe; tracked in `docs/plans/db-auth-user-scoped-database.md`
- * §Appendix.
+ * one is built. DAO bindings are lazy proxies that resolve [current] on every method
+ * invocation, so singleton repositories do not retain a closed prior-user DAO handle.
  *
  * ## Concurrency
  * Every state transition (open / swap / close / lazy bootstrap) is serialized behind
@@ -80,9 +74,8 @@ public class BeCalmDatabaseProvider @Inject constructor(
      * is already open.
      *
      * When [userIdHash] differs from the currently-open hash this method closes the
-     * prior instance and builds a fresh one. See the in-process swap caveat in the
-     * class-level KDoc — callers that rely on `@Singleton`-cached DAO references
-     * must restart the process after invoking this path.
+     * prior instance and builds a fresh one. Existing lazy DAO proxies resolve the new
+     * instance on their next method invocation.
      *
      * @param userIdHash Result of [BeCalmDatabase.deriveUserIdHash] for the signed-in user.
      */
@@ -95,7 +88,7 @@ public class BeCalmDatabaseProvider @Inject constructor(
                 logger.w(
                     TAG,
                     "user-scope swap detected (${currentHash?.take(4)}… → ${userIdHash.take(4)}…); " +
-                        "caller must restart the process before reusing cached DAOs",
+                        "lazy DAO proxies will resolve the new scope on next use",
                 )
                 currentDb?.close()
             }
@@ -138,11 +131,10 @@ public class BeCalmDatabaseProvider @Inject constructor(
      * Returns the id-hash of the user whose database is currently open, or `null`
      * when no database is open.
      *
-     * Consumed by [com.becalm.android.data.repository.AuthRepositoryImpl] to detect
-     * in-process account swaps at sign-in time (a non-null prior hash that differs
-     * from the newly-signed-in user's hash triggers a forced process restart so the
-     * `@Singleton` DAO graph cannot carry the prior user's references across the
-     * swap, AUTH-008).
+     * Consumed by [com.becalm.android.data.repository.AuthRepositoryImpl] to report
+     * in-process account swaps at sign-in time. DAO bindings are lazy proxies, so a
+     * non-null prior hash that differs from the new user's hash is handled by
+     * [ensureOpenFor] without rebuilding the Hilt graph.
      */
     public fun currentUserIdHash(): String? = lock.withLock { currentHash }
 

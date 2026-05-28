@@ -24,6 +24,7 @@ public enum class ProcessingPhase {
     IDLE,
     SCANNING,
     NEW_ITEMS,
+    AWAITING_CONFIRMATION,
     GEMINI,
     UPLOADING,
     NO_NEW_ITEMS,
@@ -39,6 +40,7 @@ public val ProcessingPhase.isActive: Boolean
         ProcessingPhase.UPLOADING
         -> true
         ProcessingPhase.NEW_ITEMS,
+        ProcessingPhase.AWAITING_CONFIRMATION,
         ProcessingPhase.IDLE,
         ProcessingPhase.NO_NEW_ITEMS,
         ProcessingPhase.SYNCED,
@@ -54,6 +56,13 @@ public data class ProcessingSourceState(
     val message: String? = null,
     val updatedAt: Instant? = null,
 )
+
+public object ProcessingStatusMessages {
+    public const val SOURCE_SYNC_BACKPRESSURE_DELAYED: String = "source_sync_backpressure_delayed"
+    public const val LLM_DAILY_BUDGET_EXCEEDED: String = "llm_daily_budget_exceeded"
+    public const val LLM_RATE_LIMITED_RETRYING: String = "llm_rate_limited_retrying"
+    public const val AUDIO_CONFIRMATION_REQUIRED: String = "audio_confirmation_required"
+}
 
 @Singleton
 public class ProcessingStatusRepository @Inject constructor(
@@ -74,6 +83,10 @@ public class ProcessingStatusRepository @Inject constructor(
         record(sourceType, ProcessingPhase.NEW_ITEMS, itemCount = itemCount, message = message)
     }
 
+    public suspend fun recordAwaitingConfirmation(sourceType: String, itemCount: Int, message: String? = null) {
+        record(sourceType, ProcessingPhase.AWAITING_CONFIRMATION, itemCount = itemCount, message = message)
+    }
+
     public suspend fun recordGemini(sourceType: String, message: String? = null) {
         record(sourceType, ProcessingPhase.GEMINI, message = message)
     }
@@ -92,7 +105,15 @@ public class ProcessingStatusRepository @Inject constructor(
         newItemsMessage: String? = null,
     ) {
         if (itemCount > 0) {
-            recordNewItems(sourceType, itemCount, newItemsMessage)
+            if (sourceType in AUDIO_CONFIRMATION_SOURCES) {
+                recordAwaitingConfirmation(
+                    sourceType = sourceType,
+                    itemCount = itemCount,
+                    message = newItemsMessage ?: ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
+                )
+            } else {
+                recordNewItems(sourceType, itemCount, newItemsMessage)
+            }
         } else {
             recordNoNewItems(sourceType)
         }
@@ -149,6 +170,11 @@ public class ProcessingStatusRepository @Inject constructor(
     private companion object {
         private const val TAG = "ProcessingStatus"
         private const val MAX_MESSAGE_CHARS = 96
+        private val AUDIO_CONFIRMATION_SOURCES: Set<String> = setOf(
+            SourceType.VOICE,
+            SourceType.CALL_RECORDING,
+            SourceType.MEETING,
+        )
         private val DISPLAY_SOURCES: List<String> = listOf(
             SourceType.VOICE,
             SourceType.CALL_RECORDING,

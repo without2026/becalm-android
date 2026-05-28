@@ -68,6 +68,9 @@ public interface WorkScheduler {
     /** Retries backend mirrors for source participant manual/self match decisions. */
     public fun enqueueSourceParticipantMirrorRetry(initialDelaySeconds: Long = 0L)
 
+    /** Continues backend mirror pagination for [sourceType] after a capped refresh reports `hasMore=true`. */
+    public fun enqueueSourceRelationRefresh(sourceType: String, initialDelaySeconds: Long = 0L) {}
+
     /**
      * Regenerates and mirrors the compact markdown memory for [personId].
      *
@@ -97,7 +100,7 @@ public interface WorkScheduler {
      *
      * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity]
      *   to process.
-     * @param audioUri   Content URI of the audio file (read-only SAF access; VOI-007).
+     * @param audioUri   Content URI of the audio file (read-only content access; VOI-007).
      *
      * Spec refs: VOI-001, VOI-005, VOI-007.
      */
@@ -196,6 +199,13 @@ public interface WorkScheduler {
 
     /** Cancels the non-blocking Stage 2 cold-sync backfill chain. */
     public fun cancelColdSyncStage2()
+
+    /**
+     * Enqueues one immediate MediaStore audio scan. Recording permission/path grant flows use
+     * this to import existing call, meeting, and voice recordings without waiting for observer
+     * callbacks or the next foreground catch-up.
+     */
+    public fun enqueueMediaStoreOneShotNow(lookbackDays: Int?) {}
 
     /**
      * Cancels the [VoiceUploadWorker] unique-work entry for [rawEventId], if one is enqueued

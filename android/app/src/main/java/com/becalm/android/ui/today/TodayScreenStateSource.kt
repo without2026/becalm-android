@@ -48,6 +48,8 @@ internal data class TodaySnapshot(
     val sourceStatuses: List<SourceStatus>,
     val processingStates: List<ProcessingSourceState>,
     val processingPaused: Boolean,
+    val rangeFilter: ScheduleRangeFilter,
+    val today: LocalDate,
     val now: Instant,
 )
 
@@ -83,36 +85,40 @@ internal class TodayScreenStateSource @Inject constructor(
     fun observeUiState(
         userIdFlow: StateFlow<String?>,
         refreshingFlow: Flow<Boolean>,
+        scheduleRangeFilterFlow: Flow<ScheduleRangeFilter> = flowOf(ScheduleRangeFilter.ALL),
     ): Flow<TodayUiState> {
-        val userDayFlow = combine(userIdFlow, todayFlow()) { userId, today -> userId to today }
+        val userDayFlow = combine(userIdFlow, todayFlow(), scheduleRangeFilterFlow) { userId, today, filter ->
+            ScheduleQueryScope(userId = userId, today = today, rangeFilter = filter)
+        }
             .distinctUntilChanged()
 
-        val commitmentFlow = userDayFlow.flatMapLatest { (userId, today) ->
-            if (userId == null) return@flatMapLatest flowOf(emptyList())
-            val (dayStart, dayEnd) = todayRange(today)
+        val commitmentFlow = userDayFlow.flatMapLatest { scope ->
+            val userId = scope.userId ?: return@flatMapLatest flowOf(emptyList())
+            val (rangeStart, rangeEnd) = scheduleRange(scope.today, scope.rangeFilter)
             commitmentRepository.observeTimelineForToday(
                 userId = userId,
-                endOfTodayEpochMs = dayEnd.toEpochMilliseconds() - 1L,
-                startOfTodayEpochMs = dayStart.toEpochMilliseconds(),
+                endOfTodayEpochMs = rangeEnd.toEpochMilliseconds() - 1L,
+                startOfTodayEpochMs = rangeStart.toEpochMilliseconds(),
             )
         }
 
-        val calendarFlow = userDayFlow.flatMapLatest { (userId, today) ->
-            if (userId == null) return@flatMapLatest flowOf(emptyList())
-            val (dayStart, dayEnd) = todayRange(today)
-            calendarEventRepository.observeForUser(userId, dayStart, dayEnd)
+        val calendarFlow = userDayFlow.flatMapLatest { scope ->
+            val userId = scope.userId ?: return@flatMapLatest flowOf(emptyList())
+            val (rangeStart, rangeEnd) = scheduleRange(scope.today, scope.rangeFilter)
+            calendarEventRepository.observeForUser(userId, rangeStart, rangeEnd)
         }
 
-        val scheduleLinkFlow = userDayFlow.flatMapLatest { (userId, today) ->
+        val scheduleLinkFlow = userDayFlow.flatMapLatest { scope ->
+            val userId = scope.userId
             if (userId == null || scheduleEventLinkRepository == null) return@flatMapLatest flowOf(emptyList())
             combine(commitmentFlow, calendarFlow) { commitments, calendarEvents ->
                 commitments to calendarEvents
             }.flatMapLatest { (commitments, calendarEvents) ->
-                val (dayStart, dayEnd) = todayRange(today)
+                val (rangeStart, rangeEnd) = scheduleRange(scope.today, scope.rangeFilter)
                 scheduleEventLinkRepository.observeForTodayRange(
                     userId = userId,
-                    rangeStart = dayStart,
-                    rangeEnd = dayEnd,
+                    rangeStart = rangeStart,
+                    rangeEnd = rangeEnd,
                     calendarEventIds = calendarEvents.map { it.id },
                     commitmentIds = commitments.map { it.id },
                 )
@@ -130,20 +136,22 @@ internal class TodayScreenStateSource @Inject constructor(
         }
 
         val baseSnapshotFlow = combine(
-            userIdFlow,
+            userDayFlow,
             commitmentFlow,
             calendarFlow,
             scheduleLinkFlow,
             sourceProcessingFlow,
-        ) { userId, commitments, calendarEvents, scheduleLinks, sourceProcessing ->
+        ) { scope, commitments, calendarEvents, scheduleLinks, sourceProcessing ->
             TodaySnapshot(
-                userId = userId,
+                userId = scope.userId,
                 commitments = commitments,
                 calendarEvents = calendarEvents,
                 scheduleLinks = scheduleLinks,
                 sourceStatuses = sourceProcessing.sourceStatuses,
                 processingStates = sourceProcessing.processingStates,
                 processingPaused = false,
+                rangeFilter = scope.rangeFilter,
+                today = scope.today,
                 now = clock.nowInstant(),
             )
         }
@@ -192,6 +200,15 @@ internal class TodayScreenStateSource @Inject constructor(
         return start to end
     }
 
+    private fun scheduleRange(today: LocalDate, filter: ScheduleRangeFilter): Pair<Instant, Instant> {
+        val todayStart = today.atStartOfDayIn(KST)
+        return when (filter) {
+            ScheduleRangeFilter.UPCOMING -> todayStart to DISTANT_FUTURE
+            ScheduleRangeFilter.PAST -> EPOCH_START to todayStart
+            ScheduleRangeFilter.ALL -> EPOCH_START to DISTANT_FUTURE
+        }
+    }
+
     private fun todayFlow(): Flow<LocalDate> = flow {
         while (currentCoroutineContext().isActive) {
             emit(clock.today(KST))
@@ -202,5 +219,13 @@ internal class TodayScreenStateSource @Inject constructor(
     private companion object {
         private const val TAG = "TodayViewModel"
         private const val TODAY_POLL_INTERVAL_MS = 60_000L
+        private val EPOCH_START: Instant = Instant.fromEpochMilliseconds(0)
+        private val DISTANT_FUTURE: Instant = Instant.fromEpochMilliseconds(Long.MAX_VALUE)
     }
 }
+
+private data class ScheduleQueryScope(
+    val userId: String?,
+    val today: LocalDate,
+    val rangeFilter: ScheduleRangeFilter,
+)

@@ -74,6 +74,12 @@ public interface AuthRepository {
      */
     public suspend fun signUpWithEmail(email: String, password: String): BecalmResult<SupabaseSession>
 
+    /** Sends a Supabase SMS OTP to an E.164-normalized phone number. */
+    public suspend fun requestPhoneOtp(phoneE164: String): BecalmResult<Unit>
+
+    /** Verifies a Supabase SMS OTP and commits the returned session locally. */
+    public suspend fun verifyPhoneOtp(phoneE164: String, token: String): BecalmResult<SupabaseSession>
+
     /**
      * Signs in with a Google ID token obtained from the Google Sign-In SDK (AUTH-002).
      *
@@ -202,6 +208,15 @@ public class AuthRepositoryImpl @Inject constructor(
     override suspend fun signInWithGoogle(idToken: String): BecalmResult<SupabaseSession> =
         authClient.signInWithGoogleIdToken(idToken).commitSignInState()
 
+    override suspend fun requestPhoneOtp(phoneE164: String): BecalmResult<Unit> =
+        authClient.requestPhoneOtp(phoneE164)
+
+    override suspend fun verifyPhoneOtp(
+        phoneE164: String,
+        token: String,
+    ): BecalmResult<SupabaseSession> =
+        authClient.verifyPhoneOtp(phoneE164, token).commitSignInState()
+
     /**
      * Shared post-authentication state update for [signInWithEmail] / [signInWithGoogle].
      *
@@ -211,18 +226,15 @@ public class AuthRepositoryImpl @Inject constructor(
      * - Persists the encrypted Supabase session only after user-scoped local state
      *   has committed. This prevents a long-lived "session exists, but current user
      *   and Room scope are incomplete" split-brain state.
-     * - Detects an in-process **account swap** — a new user signing in while the
-     *   provider still holds a different user's database handle — and hands off to
-     *   [ProcessRestarter]. A restart is required because `@Singleton` repositories
-     *   captured their DAO references at first injection; reusing them after the
-     *   swap reads from a closed file (see [BeCalmDatabaseProvider] class KDoc).
-     *   Same-user re-sign-in (identical hash) skips the restart so routine
-     *   sign-out → sign-back-in stays seamless.
+     * - Handles an in-process **account swap** by switching [BeCalmDatabaseProvider]
+     *   to the new user-scoped file. DAO injections are lazy proxies over the provider,
+     *   so singleton repositories resolve the current database on every DAO call instead
+     *   of keeping a closed prior-user handle.
      * - Emits the session on [sessionFlow] and primes the auth token cache for the
      *   first hot-path request.
      *
-     * Must not return to the caller on the swap branch — [ProcessRestarter.restart]
-     * is declared `Nothing` so the compiler enforces that.
+     * The swap branch returns normally after [BeCalmDatabaseProvider] has opened
+     * the new user scope; callers must not rely on a process restart to refresh DAOs.
      */
     private suspend fun BecalmResult<SupabaseSession>.commitSignInState(): BecalmResult<SupabaseSession> =
         when (this) {
@@ -249,8 +261,7 @@ public class AuthRepositoryImpl @Inject constructor(
             tokenProvider.primeCache()
             productAnalytics.setUserScope(session.userId)
             if (priorHash != null && priorHash != newHash) {
-                logger.w(TAG, "account swap detected — restarting process to rebuild DAO graph")
-                processRestarter.restart()
+                logger.i(TAG, "account swap completed in-process with user-scoped database swap")
             }
             BecalmResult.Success(Unit)
         } catch (e: IOException) {

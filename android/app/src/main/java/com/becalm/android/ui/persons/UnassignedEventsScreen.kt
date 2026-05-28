@@ -390,17 +390,36 @@ private fun PersonMatchReviewCard(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
-            BecalmButton(
-                text = stringResource(R.string.person_match_self_action),
-                onClick = onSelf,
-                enabled = !saving,
-                loading = saving,
-                variant = BecalmButtonVariant.Secondary,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("unassigned-match-self-${event.id}"),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            if (isSelfSuggestion) {
+                BecalmButton(
+                    text = stringResource(R.string.person_match_self_action),
+                    onClick = onSelf,
+                    enabled = !saving,
+                    loading = saving,
+                    variant = BecalmButtonVariant.Secondary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("unassigned-match-self-${event.id}"),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            } else {
+                BecalmButton(
+                    text = stringResource(R.string.person_match_confirm_action),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("unassigned-match-confirm-${event.id}"),
+                    enabled = !saving,
+                    loading = saving,
+                    onClick = {
+                        onConfirm(
+                            candidate.anchor,
+                            selectedNickname.ifBlank { candidate.displayName },
+                        )
+                    },
+                    variant = BecalmButtonVariant.Primary,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.align(Alignment.End),
@@ -420,19 +439,6 @@ private fun PersonMatchReviewCard(
                     ) {
                         Text(text = stringResource(R.string.person_match_other_person_action))
                     }
-                    BecalmButton(
-                        text = stringResource(R.string.person_match_confirm_action),
-                        modifier = Modifier.testTag("unassigned-match-confirm-${event.id}"),
-                        enabled = !saving,
-                        loading = saving,
-                        onClick = {
-                            onConfirm(
-                                candidate.anchor,
-                                selectedNickname.ifBlank { candidate.displayName },
-                            )
-                        },
-                        variant = BecalmButtonVariant.Primary,
-                    )
                 }
             }
         } else {
@@ -488,11 +494,7 @@ private fun CandidateRecommendation(
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = stringResource(
-                        R.string.person_match_candidate_with_confidence,
-                        candidate.displayName,
-                        (candidate.confidence * 100).toInt().coerceIn(0, 100),
-                    ),
+                    text = candidate.displayName,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
@@ -550,15 +552,38 @@ private fun ManualMatchPanel(
                 kind = PersonMatchChoiceKind.CANDIDATE,
             )
         }
-    val visibleChoices = (candidateChoices + matchChoices)
+    val allChoices = (candidateChoices + matchChoices)
         .distinctBy(PersonMatchChoiceRow::anchor)
+    val visibleChoices = allChoices
         .filter { choice ->
             normalizedQuery.isBlank() ||
                 choice.displayName.contains(normalizedQuery, ignoreCase = true) ||
                 choice.anchor.contains(normalizedQuery, ignoreCase = true) ||
                 choice.detail?.contains(normalizedQuery, ignoreCase = true) == true
         }
-        .take(MAX_MANUAL_MATCH_CHOICES)
+    val choiceSections = listOf(
+        ManualMatchChoiceSection(
+            title = stringResource(R.string.person_match_candidate_section_label),
+            choices = visibleChoices
+                .filter { it.kind == PersonMatchChoiceKind.CANDIDATE }
+                .take(MAX_MANUAL_MATCH_CHOICES_PER_SECTION),
+        ),
+        ManualMatchChoiceSection(
+            title = stringResource(R.string.person_match_contacts_section_label),
+            choices = visibleChoices
+                .filter { it.kind == PersonMatchChoiceKind.CONTACT }
+                .sortedBy { it.displayName }
+                .take(MAX_MANUAL_MATCH_CHOICES_PER_SECTION),
+        ),
+        ManualMatchChoiceSection(
+            title = stringResource(R.string.person_match_existing_people_section_label),
+            choices = visibleChoices
+                .filter { it.kind == PersonMatchChoiceKind.EXISTING_PERSON }
+                .sortedWith(compareByDescending<PersonMatchChoiceRow> { it.hasInteractions }.thenBy { it.displayName })
+                .take(MAX_MANUAL_MATCH_CHOICES_PER_SECTION),
+        ),
+    )
+    val selectedKnownChoice = allChoices.any { it.anchor == personAnchor }
 
     Text(
         text = stringResource(R.string.person_match_manual_label),
@@ -583,41 +608,18 @@ private fun ManualMatchPanel(
             .fillMaxWidth()
             .testTag("unassigned-match-anchor-$eventId"),
     )
-    if (visibleChoices.isNotEmpty()) {
+    if (choiceSections.any { it.choices.isNotEmpty() }) {
         Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = stringResource(R.string.person_match_existing_people_label),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 2.dp),
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            visibleChoices.forEach { choice ->
-                val selected = choice.anchor == personAnchor
-                ContactRow(
-                    headline = choice.displayName,
-                    metadata = choice.detail ?: choice.anchor
-                        .takeUnless { it == choice.displayName }
-                        ?.takeIf(::isDisplayableManualMatchAnchor),
-                    attentionLabel = when {
-                        selected -> stringResource(R.string.person_match_selected_label)
-                        choice.kind == PersonMatchChoiceKind.CANDIDATE ->
-                            stringResource(R.string.person_match_candidate_label)
-                        choice.hasInteractions || choice.kind == PersonMatchChoiceKind.EXISTING_PERSON ->
-                            stringResource(R.string.person_match_existing_person_label)
-                        else -> stringResource(R.string.person_match_contact_label)
-                    },
-                    onClick = {
-                        onPersonAnchorChange(choice.anchor)
-                        onNicknameChange(choice.displayName)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("unassigned-match-choice-$eventId-${choice.anchor}"),
-                ) {
-                    MatchChoiceAvatar(seed = choice.displayName)
-                }
+        choiceSections.forEach { section ->
+            if (section.choices.isNotEmpty()) {
+                ManualMatchChoiceSectionContent(
+                    title = section.title,
+                    choices = section.choices,
+                    eventId = eventId,
+                    selectedAnchor = personAnchor,
+                    onPersonAnchorChange = onPersonAnchorChange,
+                    onNicknameChange = onNicknameChange,
+                )
             }
         }
     } else if (normalizedQuery.isNotBlank()) {
@@ -659,20 +661,72 @@ private fun ManualMatchPanel(
         TextButton(onClick = onLater, enabled = !saving) {
             Text(text = stringResource(R.string.person_match_later_action))
         }
-        OutlinedButton(
-            enabled = personAnchor.isNotBlank() && !saving,
-            onClick = onConfirm,
-        ) {
-            Text(text = stringResource(R.string.persons_manual_add_person_action))
-        }
         BecalmButton(
-            text = stringResource(R.string.persons_manual_match_action),
+            text = stringResource(
+                if (selectedKnownChoice) {
+                    R.string.persons_manual_match_action
+                } else {
+                    R.string.persons_manual_add_person_action
+                },
+            ),
             enabled = personAnchor.isNotBlank() && !saving,
             loading = saving,
             onClick = onConfirm,
             variant = BecalmButtonVariant.Primary,
         )
     }
+}
+
+private data class ManualMatchChoiceSection(
+    val title: String,
+    val choices: List<PersonMatchChoiceRow>,
+)
+
+@Composable
+private fun ManualMatchChoiceSectionContent(
+    title: String,
+    choices: List<PersonMatchChoiceRow>,
+    eventId: String,
+    selectedAnchor: String,
+    onPersonAnchorChange: (String) -> Unit,
+    onNicknameChange: (String) -> Unit,
+) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 2.dp),
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        choices.forEach { choice ->
+            val selected = choice.anchor == selectedAnchor
+            ContactRow(
+                headline = choice.displayName,
+                metadata = choice.detail ?: choice.anchor
+                    .takeUnless { it == choice.displayName }
+                    ?.takeIf(::isDisplayableManualMatchAnchor),
+                attentionLabel = when {
+                    selected -> stringResource(R.string.person_match_selected_label)
+                    choice.kind == PersonMatchChoiceKind.CANDIDATE ->
+                        stringResource(R.string.person_match_candidate_label)
+                    choice.kind == PersonMatchChoiceKind.CONTACT ->
+                        stringResource(R.string.person_match_contact_label)
+                    else -> stringResource(R.string.person_match_existing_person_label)
+                },
+                onClick = {
+                    onPersonAnchorChange(choice.anchor)
+                    onNicknameChange(choice.displayName)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("unassigned-match-choice-$eventId-${choice.anchor}"),
+            ) {
+                MatchChoiceAvatar(seed = choice.displayName)
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(10.dp))
 }
 
 @Composable
@@ -699,7 +753,7 @@ private enum class MatchQueueFilter {
     LATER,
 }
 
-private const val MAX_MANUAL_MATCH_CHOICES = 24
+private const val MAX_MANUAL_MATCH_CHOICES_PER_SECTION = 12
 
 private fun isDisplayableManualMatchAnchor(anchor: String): Boolean =
     anchor.contains("@") || anchor.startsWith("+")

@@ -150,7 +150,7 @@ class PeoplePipelineCheckpoint4E2eTest {
             .performTextInput("right@acme.kr")
         composeTestRule.onNodeWithTag("unassigned-match-nickname-event-wrong")
             .performTextInput("Right Jane")
-        composeTestRule.onNodeWithText(string(R.string.persons_manual_match_action)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.persons_manual_add_person_action)).performClick()
 
         composeTestRule.runOnIdle {
             assertEquals("right@acme.kr", matchedAnchor)

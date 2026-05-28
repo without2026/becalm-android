@@ -5,6 +5,8 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.daoOp
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.NoopSyncCursorStore
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.dao.ScheduleEventLinkDao
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -17,6 +19,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import retrofit2.Response
@@ -57,10 +60,13 @@ public interface ScheduleEventLinkRepository {
     )
 }
 
+private const val CURSOR_KEY = "schedule_event_links"
+
 @Singleton
 public class ScheduleEventLinkRepositoryImpl @Inject constructor(
     private val dao: ScheduleEventLinkDao,
     private val apiProvider: Provider<RailwayApi>,
+    private val cursorStore: SyncCursorStore,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ScheduleEventLinkRepository {
@@ -75,6 +81,7 @@ public class ScheduleEventLinkRepositoryImpl @Inject constructor(
     ) : this(
         dao = dao,
         apiProvider = Provider { api },
+        cursorStore = NoopSyncCursorStore,
         logger = logger,
     )
 
@@ -83,7 +90,8 @@ public class ScheduleEventLinkRepositoryImpl @Inject constructor(
         since: Instant?,
         status: String?,
     ): BecalmResult<ScheduleEventLinkRepository.RefreshStats> = withContext(ioDispatcher) {
-        var cursor: String? = null
+        val useStoredCursor = since == null && status == null
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(CURSOR_KEY).first() else null
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -123,6 +131,9 @@ public class ScheduleEventLinkRepositoryImpl @Inject constructor(
             lastHasMore = body.hasMore
             lastCursor = body.cursor
             cursor = body.cursor
+            if (useStoredCursor) {
+                cursorStore.setCursor(CURSOR_KEY, body.cursor)
+            }
         }
 
         BecalmResult.Success(

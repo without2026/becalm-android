@@ -4,6 +4,7 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.FirstMemoryRepository
 import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.ui.persons.PersonListProjection
 import com.becalm.android.ui.persons.PersonRow
@@ -48,6 +49,7 @@ class PersonsViewModelSpecTest {
     private val projectionPort = FakePersonsScreenProjectionPort()
     private val refreshCoordinator = FakePersonsRefreshCoordinator()
     private val manualMatchRepository: PersonManualMatchRepository = mockk(relaxed = true)
+    private val firstMemoryRepository: FirstMemoryRepository = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -425,6 +427,7 @@ class PersonsViewModelSpecTest {
         projectionPort = projectionPort,
         refreshCoordinator = refreshCoordinator,
         manualMatchRepository = manualMatchRepository,
+        firstMemoryRepository = firstMemoryRepository,
         ioDispatcher = testDispatcher,
     )
 

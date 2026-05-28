@@ -169,6 +169,57 @@ public interface RawIngestionEventDao {
         lastError: String? = null,
     ): Int
 
+    @Query(
+        """
+        UPDATE raw_ingestion_events
+        SET sync_status = :status,
+            processing_confirmed_at = :now,
+            last_attempt_at = NULL,
+            last_error = NULL
+        WHERE id = :id
+          AND user_id = :userId
+          AND sync_status = 'detected_pending_confirmation'
+          AND source_type IN ('voice', 'call_recording', 'meeting')
+        """,
+    )
+    public suspend fun markDetectedAudioProcessingConfirmed(
+        id: String,
+        userId: String,
+        status: String,
+        now: Instant,
+    ): Int
+
+    @Query(
+        """
+        UPDATE raw_ingestion_events
+        SET sync_status = 'skipped_by_user',
+            last_attempt_at = :now,
+            last_error = NULL
+        WHERE id = :id
+          AND user_id = :userId
+          AND sync_status = 'detected_pending_confirmation'
+          AND source_type IN ('voice', 'call_recording', 'meeting')
+        """,
+    )
+    public suspend fun markDetectedAudioSkippedByUser(
+        id: String,
+        userId: String,
+        now: Instant,
+    ): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND sync_status = 'detected_pending_confirmation'
+        """,
+    )
+    public suspend fun countDetectedAudioConfirmationsForSource(
+        userId: String,
+        sourceType: String,
+    ): Int
+
     /**
      * Emits a live list of the most recent events associated with [counterpartyRef] for [userId],
      * newest-first. Drives the PersonDetailScreen event timeline.
@@ -187,31 +238,6 @@ public interface RawIngestionEventDao {
         counterpartyRef: String,
         limit: Int,
     ): Flow<List<RawIngestionEventEntity>>
-
-    @Query(
-        """
-        SELECT counterparty_ref FROM (
-            SELECT counterparty_ref, MAX(timestamp) AS last_seen_at
-            FROM raw_ingestion_events
-            WHERE user_id = :userId
-              AND counterparty_ref IS NOT NULL
-            GROUP BY counterparty_ref
-
-            UNION ALL
-
-            SELECT counterparty_ref, MAX(source_event_occurred_at) AS last_seen_at
-            FROM commitments
-            WHERE user_id = :userId
-              AND counterparty_ref IS NOT NULL
-              AND deleted_at IS NULL
-            GROUP BY counterparty_ref
-        )
-        GROUP BY counterparty_ref
-        ORDER BY MAX(last_seen_at) DESC
-        LIMIT :limit
-        """,
-    )
-    public suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String>
 
     /**
      * Emits a live list of the most recent events for [sourceType] owned by [userId],
@@ -266,7 +292,6 @@ public interface RawIngestionEventDao {
           AND source_type IN ('meeting', 'message_screenshot')
           AND sync_status IN (
             'pending',
-            'awaiting_consent',
             'meeting_preview_pending',
             'meeting_extract_pending',
             'meeting_extract_running'
@@ -274,6 +299,154 @@ public interface RawIngestionEventDao {
         """,
     )
     public fun observeEvidenceImportProcessingCount(userId: String): Flow<Int>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+          AND sync_status = 'awaiting_consent'
+        """,
+    )
+    public fun observeEvidenceImportAwaitingConsentCount(userId: String): Flow<Int>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+          AND (
+            sync_status = 'failed'
+            OR EXISTS (
+              SELECT 1 FROM meeting_speaker_previews
+              WHERE meeting_speaker_previews.raw_event_id = raw_ingestion_events.id
+                AND meeting_speaker_previews.user_id = raw_ingestion_events.user_id
+                AND meeting_speaker_previews.status = 'meeting_extract_failed'
+            )
+          )
+        """,
+    )
+    public fun observeEvidenceImportFailedItemCount(userId: String): Flow<Int>
+
+    @Query(
+        """
+        SELECT MIN(COALESCE(last_attempt_at, timestamp)) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+          AND sync_status IN (
+            'pending',
+            'meeting_preview_pending',
+            'meeting_extract_pending',
+            'meeting_extract_running'
+          )
+        """,
+    )
+    public fun observeEvidenceImportOldestProcessingAt(userId: String): Flow<Instant?>
+
+    @Query(
+        """
+        SELECT * FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND sync_status IN (
+            'pending',
+            'queued',
+            'failed_retryable',
+            'detected_pending_confirmation',
+            'meeting_preview_pending',
+            'meeting_extract_pending',
+            'meeting_extract_running'
+          )
+        ORDER BY COALESCE(last_attempt_at, timestamp) DESC
+        LIMIT :limit
+        """,
+    )
+    public fun observeActiveProcessingItems(
+        userId: String,
+        limit: Int,
+    ): Flow<List<RawIngestionEventEntity>>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND sync_status IN (
+            'pending',
+            'queued',
+            'failed_retryable',
+            'detected_pending_confirmation',
+            'meeting_preview_pending',
+            'meeting_extract_pending',
+            'meeting_extract_running'
+          )
+        """,
+    )
+    public suspend fun countActiveProcessingForSource(
+        userId: String,
+        sourceType: String,
+    ): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND (
+            sync_status = 'failed'
+            OR EXISTS (
+              SELECT 1 FROM meeting_speaker_previews
+              WHERE meeting_speaker_previews.raw_event_id = raw_ingestion_events.id
+                AND meeting_speaker_previews.user_id = raw_ingestion_events.user_id
+                AND meeting_speaker_previews.status = 'meeting_extract_failed'
+            )
+          )
+        """,
+    )
+    public suspend fun countFailedProcessingItemsForSource(
+        userId: String,
+        sourceType: String,
+    ): Int
+
+    @Query(
+        """
+        SELECT * FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+          AND (
+            sync_status = 'failed'
+            OR EXISTS (
+              SELECT 1 FROM meeting_speaker_previews
+              WHERE meeting_speaker_previews.raw_event_id = raw_ingestion_events.id
+                AND meeting_speaker_previews.user_id = raw_ingestion_events.user_id
+                AND meeting_speaker_previews.status = 'meeting_extract_failed'
+            )
+          )
+        ORDER BY COALESCE(last_attempt_at, timestamp) DESC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findFailedEvidenceImportsForRetry(
+        userId: String,
+        limit: Int,
+    ): List<RawIngestionEventEntity>
+
+    @Query(
+        """
+        UPDATE raw_ingestion_events
+        SET sync_status = 'pending',
+            processing_confirmed_at = :now,
+            retry_count = 0,
+            last_attempt_at = :now,
+            last_error = NULL
+        WHERE id = :id
+          AND user_id = :userId
+        """,
+    )
+    public suspend fun resetFailedEvidenceImportForRetry(
+        id: String,
+        userId: String,
+        now: Instant,
+    ): Int
 
     /**
      * Hard-deletes all events owned by [userId]. Called on logout to clear local data
@@ -380,7 +553,8 @@ public interface RawIngestionEventDao {
         "SELECT id FROM raw_ingestion_events " +
             "WHERE user_id = :userId " +
             "AND source_type IN ('voice', 'call_recording', 'meeting', 'message_screenshot') " +
-            "AND sync_status = 'awaiting_consent'",
+            "AND sync_status = 'awaiting_consent' " +
+            "AND (source_type = 'message_screenshot' OR processing_confirmed_at IS NOT NULL)",
     )
     public suspend fun findAwaitingConsentVoiceIds(userId: String): List<String>
 
@@ -397,7 +571,8 @@ public interface RawIngestionEventDao {
             "SET sync_status = 'pending' " +
             "WHERE user_id = :userId " +
             "AND source_type IN ('voice', 'call_recording', 'meeting', 'message_screenshot') " +
-            "AND sync_status = 'awaiting_consent'",
+            "AND sync_status = 'awaiting_consent' " +
+            "AND (source_type = 'message_screenshot' OR processing_confirmed_at IS NOT NULL)",
     )
     public suspend fun flipAwaitingConsentVoiceToPending(userId: String)
 
@@ -438,7 +613,8 @@ public interface RawIngestionEventDao {
         "SELECT id FROM raw_ingestion_events " +
             "WHERE user_id = :userId " +
             "AND source_type IN ('voice', 'call_recording', 'meeting', 'message_screenshot') " +
-            "AND sync_status IN ('pending', 'queued', 'failed_retryable')",
+            "AND sync_status IN ('pending', 'queued', 'failed_retryable') " +
+            "AND (source_type = 'message_screenshot' OR processing_confirmed_at IS NOT NULL)",
     )
     public suspend fun findCancellableVoiceIds(userId: String): List<String>
 

@@ -39,7 +39,7 @@ class OnboardingProgressResolverSpecTest {
 
     @Test
     // spec: RUX-011
-    fun `post login incomplete progress resumes to unified setup`() {
+    fun `new post login progress starts at welcome route`() {
         val states = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED } +
             mapOf(
                 OnboardingStep.TERMS to StepStatus.GRANTED,
@@ -47,11 +47,11 @@ class OnboardingProgressResolverSpecTest {
                 OnboardingStep.PIPA_CONSENT to StepStatus.NOT_STARTED,
             )
 
-        assertEquals(BecalmRoute.OnboardingSetup.path, OnboardingProgressResolver.resumeRoute(states))
+        assertEquals(BecalmRoute.OnboardingSetupWelcome.path, OnboardingProgressResolver.resumeRoute(states))
     }
 
     @Test
-    fun `legacy half completed provider progress still resumes to unified setup`() {
+    fun `legacy half completed provider progress resumes to next setup step`() {
         val states = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED } +
             mapOf(
                 OnboardingStep.TERMS to StepStatus.GRANTED,
@@ -62,6 +62,23 @@ class OnboardingProgressResolverSpecTest {
                 OnboardingStep.LINK_GMAIL to StepStatus.COMPLETE,
             )
 
-        assertEquals(BecalmRoute.OnboardingSetup.path, OnboardingProgressResolver.resumeRoute(states))
+        assertEquals(BecalmRoute.OnboardingSetupDeviceSources.path, OnboardingProgressResolver.resumeRoute(states))
+    }
+
+    @Test
+    fun `saved setup route wins over step-derived default`() {
+        val states = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED } +
+            mapOf(
+                OnboardingStep.TERMS to StepStatus.GRANTED,
+                OnboardingStep.LOGIN to StepStatus.GRANTED,
+            )
+
+        assertEquals(
+            BecalmRoute.OnboardingSetupEmail.path,
+            OnboardingProgressResolver.resumeRoute(
+                stepStates = states,
+                setupRoute = BecalmRoute.OnboardingSetupEmail.path,
+            ),
+        )
     }
 }

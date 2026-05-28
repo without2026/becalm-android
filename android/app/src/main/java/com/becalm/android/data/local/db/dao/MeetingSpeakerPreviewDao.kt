@@ -38,6 +38,9 @@ public interface MeetingSpeakerPreviewDao {
          AND raw_ingestion_events.user_id = meeting_speaker_previews.user_id
         WHERE meeting_speaker_previews.user_id = :userId
           AND meeting_speaker_previews.status = 'meeting_review_required'
+          AND meeting_speaker_previews.speaker_preview_id IS NOT NULL
+          AND meeting_speaker_previews.speaker_preview_id != ''
+          AND LENGTH(TRIM(meeting_speaker_previews.speakers_json)) > 2
         ORDER BY meeting_speaker_previews.updated_at DESC
         LIMIT 1
         """,
@@ -49,6 +52,9 @@ public interface MeetingSpeakerPreviewDao {
         SELECT COUNT(*) FROM meeting_speaker_previews
         WHERE user_id = :userId
           AND status = 'meeting_review_required'
+          AND speaker_preview_id IS NOT NULL
+          AND speaker_preview_id != ''
+          AND LENGTH(TRIM(speakers_json)) > 2
         """,
     )
     public fun observeReviewRequiredCount(userId: String): Flow<Int>
@@ -65,6 +71,90 @@ public interface MeetingSpeakerPreviewDao {
         """,
     )
     public fun observeProcessingCount(userId: String): Flow<Int>
+
+    @Query(
+        """
+        SELECT MIN(updated_at) FROM meeting_speaker_previews
+        WHERE user_id = :userId
+          AND status IN (
+            'meeting_preview_pending',
+            'meeting_extract_pending',
+            'meeting_extract_running'
+          )
+        """,
+    )
+    public fun observeOldestProcessingAt(userId: String): Flow<Instant?>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM meeting_speaker_previews
+        INNER JOIN raw_ingestion_events
+          ON raw_ingestion_events.id = meeting_speaker_previews.raw_event_id
+         AND raw_ingestion_events.user_id = meeting_speaker_previews.user_id
+        WHERE meeting_speaker_previews.user_id = :userId
+          AND raw_ingestion_events.source_type = :sourceType
+          AND meeting_speaker_previews.status IN (
+            'meeting_preview_pending',
+            'meeting_extract_pending',
+            'meeting_extract_running'
+          )
+        """,
+    )
+    public suspend fun countProcessingForSource(
+        userId: String,
+        sourceType: String,
+    ): Int
+
+    @Query(
+        """
+        UPDATE meeting_speaker_previews
+        SET status = 'meeting_extract_done',
+            last_error = NULL,
+            updated_at = :updatedAt
+        WHERE user_id = :userId
+          AND status IN (
+            'meeting_preview_pending',
+            'meeting_extract_pending',
+            'meeting_extract_running'
+          )
+          AND EXISTS (
+            SELECT 1 FROM raw_ingestion_events
+            WHERE raw_ingestion_events.id = meeting_speaker_previews.raw_event_id
+              AND raw_ingestion_events.user_id = meeting_speaker_previews.user_id
+              AND raw_ingestion_events.sync_status = 'synced'
+          )
+        """,
+    )
+    public suspend fun markProcessingDoneForSyncedRawEvents(
+        userId: String,
+        updatedAt: Instant,
+    ): Int
+
+    @Query(
+        """
+        UPDATE meeting_speaker_previews
+        SET status = 'meeting_extract_failed',
+            last_error = COALESCE(last_error, :lastError),
+            updated_at = :updatedAt
+        WHERE user_id = :userId
+          AND status IN (
+            'meeting_preview_pending',
+            'meeting_extract_pending',
+            'meeting_extract_running'
+          )
+          AND EXISTS (
+            SELECT 1 FROM raw_ingestion_events
+            WHERE raw_ingestion_events.id = meeting_speaker_previews.raw_event_id
+              AND raw_ingestion_events.user_id = meeting_speaker_previews.user_id
+              AND raw_ingestion_events.sync_status = 'failed'
+          )
+        """,
+    )
+    public suspend fun markProcessingFailedForFailedRawEvents(
+        userId: String,
+        lastError: String,
+        updatedAt: Instant,
+    ): Int
 
     @Query(
         """

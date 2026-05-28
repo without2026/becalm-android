@@ -1,6 +1,7 @@
 package com.becalm.android.ui.onboarding
 
 import android.content.Context
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -49,7 +50,7 @@ class OnboardingCheckpoint1E2eTest {
                     onPersistEmailConsent = { true },
                     onRefreshSource = {},
                     onCompleteSetup = { completeCount += 1 },
-                    onNavigateComplete = { destination = BecalmRoute.Today.path },
+                    onNavigateComplete = { destination = BecalmRoute.Persons.path },
                     onLaunchPendingIntent = {},
                     setupItems = listOf(
                         setupItem(
@@ -72,15 +73,22 @@ class OnboardingCheckpoint1E2eTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.onb_setup_headline)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.onb_setup_required_section)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.onb_setup_recommended_section)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.onb_setup_required_section)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.onb_setup_recommended_section)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.onb_setup_contacts_title)).assertCountEquals(0)
+        composeTestRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasText(string(R.string.onb_setup_first_source_section)))
+        composeTestRule.onNodeWithText(string(R.string.onb_setup_first_source_section)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasText(string(R.string.onb_setup_add_later_title)))
+        composeTestRule.onNodeWithText(string(R.string.onb_setup_add_later_title)).assertIsDisplayed()
         composeTestRule.onNodeWithTag("source-connections-list")
             .performScrollToNode(hasText(string(R.string.onb_setup_start)))
         composeTestRule.onNodeWithText(string(R.string.onb_setup_start)).performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, completeCount)
-            assertEquals(BecalmRoute.Today.path, destination)
+            assertEquals(BecalmRoute.Persons.path, destination)
         }
     }
 

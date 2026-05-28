@@ -138,6 +138,14 @@ class DefaultAuthTokenProviderSpecTest {
         override suspend fun signInWithGoogleIdToken(idToken: String): BecalmResult<SupabaseSession> =
             error("not expected")
 
+        override suspend fun requestPhoneOtp(phoneE164: String): BecalmResult<Unit> =
+            error("not expected")
+
+        override suspend fun verifyPhoneOtp(
+            phoneE164: String,
+            token: String,
+        ): BecalmResult<SupabaseSession> = error("not expected")
+
         override suspend fun refresh(currentSession: SupabaseSession): BecalmResult<SupabaseSession> {
             refreshCalls += 1
             refreshedFrom = currentSession

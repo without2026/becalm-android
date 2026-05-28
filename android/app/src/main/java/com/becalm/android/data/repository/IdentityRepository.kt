@@ -5,16 +5,24 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
+import com.becalm.android.data.local.datastore.NoopSyncCursorStore
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.dao.SourceConnectionDao
+import com.becalm.android.data.local.db.dao.UserProfileDao
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceConnectionEntity
+import com.becalm.android.data.local.db.entity.UserProfileEntity
 import com.becalm.android.data.remote.api.RailwayApi
+import com.becalm.android.data.remote.dto.EmailConnectionRecommendationDto
+import com.becalm.android.data.remote.dto.OnboardingSelfIdentityCommitRequestDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorCreateRequestDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorPatchRequestDto
 import com.becalm.android.data.remote.dto.SourceConnectionDto
 import com.becalm.android.data.remote.dto.SourceConnectionPatchRequestDto
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.dto.UserProfileDto
 import java.io.IOException
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -29,6 +37,19 @@ public interface SelfIdentityRepository {
     public fun observeAll(userId: String): Flow<List<SelfIdentityAnchorEntity>>
     public fun observeActive(userId: String): Flow<List<SelfIdentityAnchorEntity>>
     public suspend fun refresh(userId: String): BecalmResult<List<SelfIdentityAnchorEntity>>
+    public suspend fun commitOnboardingSelfIdentity(
+        userId: String,
+        displayName: String,
+        displayNameSource: String,
+        displayNameReadOnly: Boolean,
+        email: String?,
+        emailReadOnly: Boolean,
+        phoneE164: String?,
+        phoneReadOnly: Boolean,
+        phoneVerified: Boolean,
+        alias: String?,
+        authProvider: String,
+    ): BecalmResult<OnboardingSelfIdentityCommit>
     public suspend fun createAnchor(
         userId: String,
         anchorType: String,
@@ -61,6 +82,12 @@ public interface SelfIdentityRepository {
     ): BecalmResult<SelfIdentityAnchorEntity>
 }
 
+public data class OnboardingSelfIdentityCommit(
+    val profile: UserProfileEntity,
+    val anchors: List<SelfIdentityAnchorEntity>,
+    val emailConnectionRecommendation: EmailConnectionRecommendationDto?,
+)
+
 public interface SourceConnectionRepository {
     public fun observeAll(userId: String): Flow<List<SourceConnectionEntity>>
     public suspend fun refresh(userId: String): BecalmResult<List<SourceConnectionEntity>>
@@ -70,11 +97,20 @@ public interface SourceConnectionRepository {
         ownership: String,
         linkedSelfAnchorId: String? = null,
     ): BecalmResult<SourceConnectionEntity>
+    public suspend fun disconnectConnection(
+        userId: String,
+        connectionId: String,
+    ): BecalmResult<SourceConnectionEntity>
+    public suspend fun deleteConnection(
+        userId: String,
+        connectionId: String,
+    ): BecalmResult<SourceConnectionEntity>
 }
 
 @Singleton
 public class SelfIdentityRepositoryImpl @Inject constructor(
     private val dao: SelfIdentityAnchorDao,
+    private val userProfileDao: UserProfileDao,
     private val apiProvider: Provider<RailwayApi>,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -109,6 +145,66 @@ public class SelfIdentityRepositoryImpl @Inject constructor(
         } catch (t: Throwable) {
             t.rethrowIfCancellation()
             logger.e(TAG, "self identity refresh failed", t)
+            BecalmResult.Failure(BecalmError.Unknown(t))
+        }
+    }
+
+    override suspend fun commitOnboardingSelfIdentity(
+        userId: String,
+        displayName: String,
+        displayNameSource: String,
+        displayNameReadOnly: Boolean,
+        email: String?,
+        emailReadOnly: Boolean,
+        phoneE164: String?,
+        phoneReadOnly: Boolean,
+        phoneVerified: Boolean,
+        alias: String?,
+        authProvider: String,
+    ): BecalmResult<OnboardingSelfIdentityCommit> = withContext(ioDispatcher) {
+        val request = OnboardingSelfIdentityCommitRequestDto(
+            displayName = displayName.trim(),
+            displayNameSource = displayNameSource.trim().takeIf { it.isNotEmpty() },
+            displayNameReadOnly = displayNameReadOnly,
+            email = email?.trim()?.takeIf { it.isNotEmpty() },
+            emailReadOnly = emailReadOnly,
+            phoneE164 = phoneE164?.trim()?.takeIf { it.isNotEmpty() },
+            phoneReadOnly = phoneReadOnly,
+            phoneVerified = phoneVerified,
+            alias = alias?.trim()?.takeIf { it.isNotEmpty() },
+            authProvider = authProvider.trim().takeIf { it.isNotEmpty() },
+        )
+        try {
+            val response = api.commitOnboardingSelfIdentity(request)
+            if (!response.isSuccessful) {
+                return@withContext BecalmResult.Failure(response.toIdentityError("onboarding_self_identity"))
+            }
+            val body = response.body()?.data
+                ?: return@withContext BecalmResult.Failure(
+                    BecalmError.Unknown(IllegalStateException("null body for onboarding_self_identity")),
+                )
+            val profile = body.profile.toProfileEntity(
+                fallbackUserId = userId,
+                existing = userProfileDao.findByUserId(userId),
+            )
+            val anchors = body.anchors.map { it.toEntity(userId) }
+            userProfileDao.upsert(profile)
+            if (anchors.isNotEmpty()) {
+                dao.insertAll(anchors)
+            }
+            BecalmResult.Success(
+                OnboardingSelfIdentityCommit(
+                    profile = profile,
+                    anchors = anchors,
+                    emailConnectionRecommendation = body.emailConnectionRecommendation,
+                ),
+            )
+        } catch (e: IOException) {
+            logger.w(TAG, "onboarding self identity commit network failure", e)
+            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
+        } catch (t: Throwable) {
+            t.rethrowIfCancellation()
+            logger.e(TAG, "onboarding self identity commit failed", t)
             BecalmResult.Failure(BecalmError.Unknown(t))
         }
     }
@@ -217,6 +313,7 @@ public class SelfIdentityRepositoryImpl @Inject constructor(
 public class SourceConnectionRepositoryImpl @Inject constructor(
     private val dao: SourceConnectionDao,
     private val apiProvider: Provider<RailwayApi>,
+    private val syncCursorStore: SyncCursorStore = NoopSyncCursorStore,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : SourceConnectionRepository {
@@ -235,12 +332,18 @@ public class SourceConnectionRepositoryImpl @Inject constructor(
                     BecalmError.Unknown(IllegalStateException("null body for source_connections")),
                 )
             val entities = body.data.map { it.toEntity(userId) }
+            val previousById = entities.associate { entity ->
+                entity.id to dao.findById(entity.id)
+            }
             if (entities.isEmpty()) {
                 dao.deleteAllForUser(userId)
             } else {
                 dao.insertAll(entities)
                 dao.deleteMissingForUser(userId, entities.map { it.id })
             }
+            entities
+                .filter { SourceMirrorCursorReset.shouldResetAfterRefresh(previousById[it.id], it) }
+                .forEach { SourceMirrorCursorReset.clearForConnection(syncCursorStore, it) }
             BecalmResult.Success(entities)
         } catch (e: IOException) {
             logger.w(TAG, "source connections refresh network failure", e)
@@ -280,6 +383,54 @@ public class SourceConnectionRepositoryImpl @Inject constructor(
             BecalmResult.Failure(BecalmError.Unknown(t))
         }
     }
+
+    override suspend fun disconnectConnection(
+        userId: String,
+        connectionId: String,
+    ): BecalmResult<SourceConnectionEntity> = withContext(ioDispatcher) {
+        try {
+            val response = api.disconnectSourceConnection(connectionId)
+            if (!response.isSuccessful) return@withContext BecalmResult.Failure(response.toIdentityError("source_connection"))
+            val entity = response.body()?.data?.toEntity(userId)
+                ?: return@withContext BecalmResult.Failure(BecalmError.NotFound("source_connection"))
+            dao.upsert(entity)
+            clearMirrorCursorsFor(entity)
+            BecalmResult.Success(entity)
+        } catch (e: IOException) {
+            logger.w(TAG, "source connection disconnect network failure", e)
+            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
+        } catch (t: Throwable) {
+            t.rethrowIfCancellation()
+            logger.e(TAG, "source connection disconnect failed", t)
+            BecalmResult.Failure(BecalmError.Unknown(t))
+        }
+    }
+
+    override suspend fun deleteConnection(
+        userId: String,
+        connectionId: String,
+    ): BecalmResult<SourceConnectionEntity> = withContext(ioDispatcher) {
+        try {
+            val response = api.deleteSourceConnection(connectionId)
+            if (!response.isSuccessful) return@withContext BecalmResult.Failure(response.toIdentityError("source_connection"))
+            val entity = response.body()?.data?.toEntity(userId)
+                ?: return@withContext BecalmResult.Failure(BecalmError.NotFound("source_connection"))
+            dao.deleteById(entity.id)
+            clearMirrorCursorsFor(entity)
+            BecalmResult.Success(entity)
+        } catch (e: IOException) {
+            logger.w(TAG, "source connection delete network failure", e)
+            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
+        } catch (t: Throwable) {
+            t.rethrowIfCancellation()
+            logger.e(TAG, "source connection delete failed", t)
+            BecalmResult.Failure(BecalmError.Unknown(t))
+        }
+    }
+
+    private suspend fun clearMirrorCursorsFor(connection: SourceConnectionEntity) {
+        SourceMirrorCursorReset.clearForConnection(syncCursorStore, connection)
+    }
 }
 
 private const val TAG = "IdentityRepository"
@@ -314,6 +465,24 @@ private fun SelfIdentityAnchorDto.toEntity(fallbackUserId: String): SelfIdentity
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
+
+private fun UserProfileDto.toProfileEntity(
+    fallbackUserId: String,
+    existing: UserProfileEntity?,
+): UserProfileEntity {
+    val now = kotlinx.datetime.Clock.System.now()
+    return UserProfileEntity(
+        userId = userId.ifBlank { fallbackUserId },
+        displayNameOverride = displayNameOverride ?: displayName,
+        phoneE164Self = phoneE164Self,
+        timezone = timezone,
+        preferredLocale = preferredLocale,
+        displayNameSource = displayNameSource ?: existing?.displayNameSource,
+        onboardingCompletedAt = onboardingCompletedAt ?: existing?.onboardingCompletedAt,
+        createdAt = createdAt ?: existing?.createdAt ?: now,
+        updatedAt = updatedAt ?: now,
+    )
+}
 
 private fun SourceConnectionDto.toEntity(fallbackUserId: String): SourceConnectionEntity =
     SourceConnectionEntity(

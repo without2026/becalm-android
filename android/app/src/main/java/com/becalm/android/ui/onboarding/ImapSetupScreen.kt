@@ -10,7 +10,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -128,6 +129,8 @@ public fun ImapSetupScreen(
                 when (event) {
                     is EmailConnectEvent.Connected -> navigateToGoogleCalendar()
                     is EmailConnectEvent.PendingIntentRequired -> Unit // IMAP never emits this.
+                    is EmailConnectEvent.Syncing -> Unit
+                    is EmailConnectEvent.NotConnected -> Unit
                     is EmailConnectEvent.Failed -> snackbarHostState.showSnackbar(
                         errorCopyByCode[event.errorCode] ?: errorCopyByCode.getValue("unknown"),
                     )
@@ -247,18 +250,24 @@ internal fun ImapForm(
 
 @Composable
 internal fun ImapFormHeader() {
-    Text(
-        text = stringResource(R.string.onb_imap_headline),
-        style = MaterialTheme.typography.headlineSmall,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth(),
+    SourceStoryHeader(
+        icon = Icons.Outlined.Email,
+        headline = stringResource(R.string.onb_imap_headline),
+        body = stringResource(R.string.onb_imap_body),
     )
-    Spacer(modifier = Modifier.height(8.dp))
-    Text(
-        text = stringResource(R.string.onb_imap_body),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth(),
+    Spacer(modifier = Modifier.height(16.dp))
+    ImapCredentialInfoPanel()
+}
+
+@Composable
+internal fun ImapCredentialInfoPanel() {
+    SourceStoryInfoPanel(
+        title = stringResource(R.string.onb_imap_title),
+        body = stringResource(R.string.onb_sources_mail_consent_body),
+        detailLines = listOf(
+            stringResource(R.string.onb_imap_provider_naver),
+            stringResource(R.string.onb_imap_provider_daum),
+        ),
     )
 }
 

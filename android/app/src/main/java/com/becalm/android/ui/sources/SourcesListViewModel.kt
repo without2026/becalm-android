@@ -8,6 +8,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.UiMessage
@@ -37,6 +38,9 @@ import javax.inject.Inject
  * @param lastSyncAt Wall-clock instant of the last successful sync, or null if never synced.
  * @param hasError True when the repository reported a failure; raw error copy is not carried
  *   into UI state.
+ * @param processingLabelRes Optional processing-phase label. Source connection health remains
+ *   in [status]; processing progress is surfaced separately so "connected" is not confused with
+ *   "all source data has been mirrored and organized".
  */
 public data class SourceStatusRow(
     val sourceType: String,
@@ -46,6 +50,9 @@ public data class SourceStatusRow(
     val enrichedCount: Int? = null,
     val help: UiMessage? = null,
     @StringRes val recommendedActionLabelRes: Int? = null,
+    @StringRes val processingLabelRes: Int? = null,
+    val processingMessage: UiMessage? = null,
+    val processingNeedsAction: Boolean = false,
 )
 
 /**
@@ -91,6 +98,7 @@ private const val TAG = "SourcesListViewModel"
 public class SourcesListViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val contactsPermissionChecker: ContactsPermissionChecker,
     private val logger: Logger,
@@ -113,11 +121,13 @@ public class SourcesListViewModel @Inject constructor(
             }
             combine(
                 sourceStatusRepository.observeAll(),
+                processingStatusRepository.observeAll(),
                 personEnrichmentRepository.observeSummary(),
                 contactsPermissionChecker.observeGrantState(),
-            ) { statuses, enrichmentSummary, permissionGranted ->
+            ) { statuses, processingStates, enrichmentSummary, permissionGranted ->
                 SourcesListProjector.buildState(
                     statuses = statuses,
+                    processingStates = processingStates,
                     enrichmentSummary = enrichmentSummary,
                     permissionGranted = permissionGranted,
                 )

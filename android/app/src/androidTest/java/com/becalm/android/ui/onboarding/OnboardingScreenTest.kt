@@ -59,7 +59,6 @@ class OnboardingScreenTest {
                     voiceFolderDetected = true,
                     callFolderDetected = false,
                     meetingFolderDetected = false,
-                    requiresManualPicker = true,
                     onGrant = { grantClicks += 1 },
                     onSkip = { skipClicks += 1 },
                 )
@@ -94,9 +93,7 @@ class OnboardingScreenTest {
                 string(R.string.onb_recording_folder_status_created_later),
             ),
         ).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.onb_recording_folder_manual_picker_fallback))
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.action_grant)).performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.onb_recording_folder_use_selected)).performScrollTo().performClick()
         composeTestRule.onNodeWithText(string(R.string.action_skip)).performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
@@ -116,12 +113,10 @@ class OnboardingScreenTest {
                     navController = rememberNavController(),
                     detectionOverride = RecordingFolderDetection(
                         displayPath = "/storage/emulated/0/Recordings",
-                        preferredDocumentId = "primary:Recordings",
                         voiceFolderDetected = true,
                         callFolderDetected = false,
                         meetingFolderDetected = false,
                         usedFallbackPath = false,
-                        requiresManualPicker = true,
                     ),
                     audioPermissionOverride = "android.permission.READ_MEDIA_AUDIO",
                     onGrantFlow = { grantClicks += 1 },
@@ -133,7 +128,7 @@ class OnboardingScreenTest {
         composeTestRule.onNodeWithText(
             string(R.string.onb_recording_folder_detected_path_fmt, "/storage/emulated/0/Recordings"),
         ).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.action_grant)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.onb_recording_folder_use_selected)).performClick()
         composeTestRule.onNodeWithText(string(R.string.action_skip)).performClick()
 
         composeTestRule.runOnIdle {

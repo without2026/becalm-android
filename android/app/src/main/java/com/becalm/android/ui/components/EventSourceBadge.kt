@@ -2,12 +2,9 @@ package com.becalm.android.ui.components
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -45,25 +42,20 @@ public fun EventSourceBadge(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(percent = 50),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.44f),
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(7.dp)
-                    .background(style.accentColor, CircleShape),
-            )
-            Spacer(modifier = Modifier.width(6.dp))
             Icon(
                 imageVector = style.icon,
                 contentDescription = null, // label below already conveys the source
+                tint = style.accentColor,
                 modifier = Modifier.size(size = 14.dp),
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(5.dp))
             Text(
                 text = stringResource(style.labelRes),
                 style = MaterialTheme.typography.labelMedium,

@@ -9,9 +9,12 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.MeetingImportRepository
+import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.data.repository.ProcessingSourceState
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.domain.meeting.MeetingImportFolderKind
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,6 +28,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
@@ -68,12 +72,13 @@ public data class SourceDetailUiState(
     val status: SourceSyncStatus = SourceSyncStatus.Unknown,
     val lastSyncAt: Instant? = null,
     val eventsSyncedCount: Int? = null,
+    val processingPhase: ProcessingPhase = ProcessingPhase.IDLE,
+    val processingMessage: String? = null,
     val hasError: Boolean = false,
     val showReconnectButton: Boolean = false,
     val showDisconnectButton: Boolean = false,
     val showManualSyncButton: Boolean = false,
     val showMeetingAudioAddButton: Boolean = false,
-    val meetingAudioPickerInitialUri: String? = null,
     val showDisconnectConfirmDialog: Boolean = false,
     val disconnectOutcome: SourceDisconnectOutcome? = null,
     val actionError: UiMessage? = null,
@@ -118,15 +123,17 @@ private const val RECENT_EVENTS_LIMIT = 50
  * events that match [sourceType].
  *
  * ## userId
- * The SP-41 spec does not inject [com.becalm.android.data.repository.AuthRepository] into
- * this ViewModel. The userId is therefore supplied by the host composable via [setUserId].
- * Until [setUserId] is called the events list remains empty.
+ * The default user scope is loaded from [AuthRepository] so the production screen can show
+ * recent imported evidence without host wiring. [setUserId] remains available for tests and
+ * future explicit host scopes.
  */
 @HiltViewModel
 public class SourceDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val rawIngestionRepository: RawIngestionRepository,
+    private val authRepository: AuthRepository,
     private val sourceAdministrationPort: SourceAdministrationPort,
     private val sourceSyncPort: SourceSyncPort,
     private val meetingImportRepository: MeetingImportRepository,
@@ -149,9 +156,33 @@ public class SourceDetailViewModel @Inject constructor(
     private val _effects: MutableSharedFlow<SourceDetailEffect> =
         MutableSharedFlow(extraBufferCapacity = 1)
 
-    /** Provide the authenticated userId so that event queries are scoped per-user. */
+    private val hasValidSourceType: Boolean =
+        sourceType.isNotBlank() && sourceType in SourceType.ALL
+
+    init {
+        seedUserIdFromCurrentSession()
+    }
+
+    /** Provide or override the authenticated userId so that event queries are scoped per-user. */
     public fun setUserId(userId: String) {
         _userId.value = userId
+    }
+
+    private fun seedUserIdFromCurrentSession() {
+        if (!hasValidSourceType) return
+        viewModelScope.launch {
+            try {
+                val userId = authRepository.currentSession()?.userId?.takeIf { it.isNotBlank() }
+                    ?: return@launch
+                if (_userId.value == null) {
+                    _userId.value = userId
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(TAG, "failed to load source detail session scope: ${e.message}")
+            }
+        }
     }
 
     /** One-shot UI effects for reconnect navigation. */
@@ -216,7 +247,7 @@ public class SourceDetailViewModel @Inject constructor(
         }
     }
 
-    /** Imports a user-selected meeting audio file into Recordings/BeCalm Meetings/Audio. */
+    /** Imports a user-selected meeting audio file into app-private storage for speaker review. */
     public fun onMeetingAudioSelected(uri: Uri?) {
         if (uri == null || sourceType != SourceType.MEETING) return
         viewModelScope.launch {
@@ -276,31 +307,47 @@ public class SourceDetailViewModel @Inject constructor(
         rawIngestionRepository.observeForSourceType(userId, sourceType, limit = RECENT_EVENTS_LIMIT)
     }
 
-    private val hasValidSourceType: Boolean =
-        sourceType.isNotBlank() && sourceType in SourceType.ALL
-
     private val statusFlow = if (!hasValidSourceType) {
         flowOf(null)
     } else {
         sourceStatusRepository.observeFor(sourceType)
+    }
+    private val processingStateFlow = if (!hasValidSourceType) {
+        flowOf(null)
+    } else {
+        processingStatusRepository.observeAll().map { states ->
+            states.firstOrNull { state -> state.sourceType == sourceType }
+        }
     }
     private val _dialogState = MutableStateFlow(false)
     private val _disconnectOutcome = MutableStateFlow<SourceDisconnectOutcome?>(null)
     private val _actionError = MutableStateFlow<UiMessage?>(null)
     private val _actionMessage = MutableStateFlow<UiMessage?>(null)
     private val _manualSyncLoading = MutableStateFlow(false)
-    private val _meetingPickerFolders = MutableStateFlow(MeetingPickerFolders())
-    private val meetingPickerStateFlow = combine(
+    private val transientStateFlow = combine(
         _actionError,
         _actionMessage,
         _manualSyncLoading,
-        _meetingPickerFolders,
-    ) { actionError, actionMessage, manualSyncLoading, folders ->
+    ) { actionError, actionMessage, manualSyncLoading ->
         SourceDetailTransientState(
             actionError = actionError,
             actionMessage = actionMessage,
             manualSyncLoading = manualSyncLoading,
-            pickerFolders = folders,
+        )
+    }
+    private val stableStateFlow = combine(
+        statusFlow,
+        processingStateFlow,
+        eventsFlow,
+        _dialogState,
+        _disconnectOutcome,
+    ) { status, processingState, sourceEvents, showDisconnectConfirmDialog, disconnectOutcome ->
+        SourceDetailStableState(
+            status = status,
+            processingState = processingState,
+            sourceEvents = sourceEvents,
+            showDisconnectConfirmDialog = showDisconnectConfirmDialog,
+            disconnectOutcome = disconnectOutcome,
         )
     }
 
@@ -322,21 +369,19 @@ public class SourceDetailViewModel @Inject constructor(
             SourceDetailUiState(error = UiMessage.resource(R.string.source_detail_error_invalid_source)),
         )
     } else {
-        combine(
-            statusFlow,
-            eventsFlow,
-            _dialogState,
-            _disconnectOutcome,
-            meetingPickerStateFlow,
-        ) { status, sourceEvents, showDisconnectConfirmDialog, disconnectOutcome, meetingPickerState ->
-            buildUiState(
-                status = status,
-                sourceEvents = sourceEvents,
-                showDisconnectConfirmDialog = showDisconnectConfirmDialog,
-                disconnectOutcome = disconnectOutcome,
-                transientState = meetingPickerState,
-            )
-        }.stateIn(
+            combine(
+                stableStateFlow,
+                transientStateFlow,
+            ) { stableState, transientState ->
+                buildUiState(
+                    status = stableState.status,
+                    processingState = stableState.processingState,
+                    sourceEvents = stableState.sourceEvents,
+                    showDisconnectConfirmDialog = stableState.showDisconnectConfirmDialog,
+                    disconnectOutcome = stableState.disconnectOutcome,
+                    transientState = transientState,
+                )
+            }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = SourceDetailUiState(sourceType = sourceType),
@@ -349,8 +394,6 @@ public class SourceDetailViewModel @Inject constructor(
             logger.e(TAG, "sourceType argument missing from SavedStateHandle")
         } else if (!hasValidSourceType) {
             logger.w(TAG, "rejected unknown sourceType")
-        } else if (sourceType == SourceType.MEETING) {
-            prepareMeetingImportFolders()
         }
     }
 
@@ -361,14 +404,16 @@ public class SourceDetailViewModel @Inject constructor(
 
     private fun buildUiState(
         status: com.becalm.android.data.repository.SourceStatus?,
+        processingState: ProcessingSourceState?,
         sourceEvents: List<com.becalm.android.data.local.db.entity.RawIngestionEventEntity>,
         showDisconnectConfirmDialog: Boolean,
         disconnectOutcome: SourceDisconnectOutcome?,
         transientState: SourceDetailTransientState,
     ): SourceDetailUiState {
-        val base = SourceDetailProjector.buildUiState(
+        return SourceDetailProjector.buildUiState(
             sourceType = sourceType,
             status = status,
+            processingState = processingState,
             sourceEvents = sourceEvents,
             showDisconnectConfirmDialog = showDisconnectConfirmDialog,
             disconnectOutcome = disconnectOutcome,
@@ -376,37 +421,22 @@ public class SourceDetailViewModel @Inject constructor(
             actionMessage = transientState.actionMessage,
             manualSyncLoading = transientState.manualSyncLoading,
         )
-        return if (sourceType != SourceType.MEETING) {
-            base
-        } else {
-            base.copy(
-                meetingAudioPickerInitialUri = transientState.pickerFolders.audioUri,
-            )
-        }
-    }
-
-    private fun prepareMeetingImportFolders() {
-        viewModelScope.launch {
-            val audio = meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Audio)
-            val audioUri = (audio as? BecalmResult.Success)?.value
-            _meetingPickerFolders.value = MeetingPickerFolders(audioUri)
-            if (audio is BecalmResult.Failure) {
-                _actionMessage.value = null
-                _actionError.value = UiMessage.resource(R.string.source_detail_error_folder_probe_failed)
-            }
-        }
     }
 
     private data class SourceDetailTransientState(
         val actionError: UiMessage?,
         val actionMessage: UiMessage?,
         val manualSyncLoading: Boolean,
-        val pickerFolders: MeetingPickerFolders,
     )
 
-    private data class MeetingPickerFolders(
-        val audioUri: String? = null,
+    private data class SourceDetailStableState(
+        val status: com.becalm.android.data.repository.SourceStatus?,
+        val processingState: ProcessingSourceState?,
+        val sourceEvents: List<com.becalm.android.data.local.db.entity.RawIngestionEventEntity>,
+        val showDisconnectConfirmDialog: Boolean,
+        val disconnectOutcome: SourceDisconnectOutcome?,
     )
+
 }
 
 private fun SourceSyncStatus.allowsManualSync(): Boolean =

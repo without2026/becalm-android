@@ -26,21 +26,22 @@ public fun ContactRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     attentionLabel: String? = null,
+    supportingText: String? = null,
     leading: @Composable () -> Unit,
 ) {
     Row(
         modifier = modifier
             .background(
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f),
-                shape = MaterialTheme.shapes.medium,
+                shape = MaterialTheme.shapes.small,
             )
             .border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.outlineVariant,
-                shape = MaterialTheme.shapes.medium,
+                shape = MaterialTheme.shapes.small,
             )
             .clickable(onClick = onClick)
-            .padding(16.dp)
+            .padding(horizontal = 14.dp, vertical = 12.dp)
             .semantics { role = Role.Button },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -59,7 +60,17 @@ public fun ContactRow(
                     text = attentionLabel,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+            if (!supportingText.isNullOrBlank()) {
+                Text(
+                    text = supportingText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 3.dp),
                 )
             }
             if (!metadata.isNullOrBlank()) {

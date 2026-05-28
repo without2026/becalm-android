@@ -69,7 +69,7 @@ behaviors:
     type: privacy
     description: "VoiceUploadWorker는 Samsung Voice Recorder 원본 오디오 파일을 복사·이동·삭제하지 않는다. 오디오 바이트는 multipart 요청 스트림으로만 Railway에 전달되며 앱 private storage에 잔존하지 않는다"
     trigger: "VoiceUploadWorker 실행 시점부터 완료까지"
-    precondition: "원본 파일 경로 = Samsung Voice Recorder 폴더 (사용자 자산), SAF URI 권한 = read-only"
+    precondition: "원본 파일 URI = MediaStore.Audio content URI 또는 사용자가 직접 선택한 read-only content URI. 원본 파일은 사용자 자산이다"
     expected: "파일 URI → ContentResolver.openInputStream → OkHttp RequestBody 직접 스트리밍. 앱 context.filesDir / cacheDir 에 복사본 없음. 업로드 성공/실패와 무관하게 원본 파일은 삭제되지 않음(사용자 소유). 메모리 버퍼는 청크 단위(64KB)로 스트리밍."
     source: phase2-acceptance
     tests: []
@@ -79,6 +79,7 @@ invariants:
   - "Transcript(STT 중간 산출물)는 Android·Railway·Supabase Postgres 어디에도 영속되지 않는다 — Railway 요청 lifetime 내 ephemeral"
   - "voice/call_recording/meeting audio recall용으로 저장되는 텍스트는 commitment.quote(verbatim, <=100 chars)와 raw_ingestion_events.event_snippet뿐이다 — full transcript 저장 금지"
   - "원본 오디오 파일은 사용자 자산이므로 앱이 삭제·복사·이동하지 않는다"
+  - "자동 녹음 감지는 SAF tree grant가 아니라 READ_MEDIA_AUDIO + 앱 내부 MediaStore path selection으로 활성화된다. 앱은 전체 Audio 권한을 받아도 선택된 녹음 preset 경로만 MediaStore.Audio 쿼리에서 포함한다"
   - "CLOVA Speech 호출은 audio bytes + diarization only, Vertex AI 호출은 normalized transcript text + schema extraction only로 분리한다. 오디오/전사 전문/응답은 요청 lifetime 내 ephemeral이며 at-rest 저장을 수행하지 않는다"
   - "Vertex AI ZDR(Zero Data Retention) 플래그 필수 — Google이 프롬프트/응답을 로깅/학습에 사용하지 못하도록 차단"
   - "Railway는 받은 오디오 바이트를 Supabase Storage·Postgres·파일시스템·로그에 저장하지 않는다 — 요청 핸들러 스코프 내 메모리 처리만"

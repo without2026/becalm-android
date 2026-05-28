@@ -37,9 +37,12 @@ class ColdSyncStage2WorkerSpecTest {
             terminal(SourceType.NAVER_IMAP),
             terminal(SourceType.DAUM_IMAP),
             terminal(SourceType.VOICE),
+            terminal(SourceType.CALL_RECORDING),
+            terminal(SourceType.MEETING),
         )
 
         coEvery { runtimeCoordinator.startStage2(any()) } returns BecalmResult.Success(Unit)
+        every { userPrefsStore.observeEnabledSources() } returns flowOf(terminalStatuses.map { it.sourceType }.toSet())
         every { sourceStatusRepository.observeAll() } returns flowOf(terminalStatuses)
 
         val result = buildWorker(

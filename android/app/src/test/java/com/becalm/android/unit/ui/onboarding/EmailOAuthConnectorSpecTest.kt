@@ -47,7 +47,7 @@ class EmailOAuthConnectorSpecTest {
 
         assertEquals(EmailOAuthResult.Connected, result)
         coVerify(exactly = 1) { api.getMailOAuthStatus(SourceType.GMAIL) }
-        coVerify(exactly = 0) { api.syncMailSource(any()) }
+        coVerify(exactly = 0) { api.syncMailSource(any(), any()) }
         val statusEvent = productAnalytics.events.single {
             it.eventName == ProductAnalyticsEvents.SOURCE_OAUTH_STATUS_CHECKED
         }

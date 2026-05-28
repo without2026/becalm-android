@@ -12,8 +12,6 @@ internal object SourceConnectionProjector {
         when (entryPoint) {
             SourceConnectionsEntryPoint.Setup -> setOf(
                 OnboardingSourceProvider.GMAIL,
-                OnboardingSourceProvider.OUTLOOK_MAIL,
-                OnboardingSourceProvider.GOOGLE_CALENDAR,
             )
             SourceConnectionsEntryPoint.Onboarding -> setOf(
                 OnboardingSourceProvider.GMAIL,
@@ -29,6 +27,7 @@ internal object SourceConnectionProjector {
         respectConnectedStepStates: Boolean = respectStepStates,
         includeCalendarSources: Boolean = true,
         includedProviders: Set<OnboardingSourceProvider>? = null,
+        existingConnectionProviders: Set<OnboardingSourceProvider> = emptySet(),
         stringFor: (Int) -> String,
     ): List<SourceConnectionItemUi> =
         sourceSpecs
@@ -43,14 +42,24 @@ internal object SourceConnectionProjector {
                     title = stringFor(spec.titleRes),
                     description = stringFor(spec.descriptionRes),
                     consentCopy = spec.consentRes?.let(stringFor),
-                    state = sourceStateFor(
-                        provider = spec.provider,
-                        stepStates = stepStates,
-                        transientStates = transientStates,
-                        respectStepStates = respectStepStates,
-                        respectConnectedStepStates = respectConnectedStepStates,
-                        defaultState = spec.defaultState,
-                    ),
+                    state = if (spec.provider in existingConnectionProviders) {
+                        transientStates[spec.provider]?.takeIf { it != SourceConnectionState.Idle }
+                            ?: SourceConnectionState.Connected
+                    } else {
+                        sourceStateFor(
+                            provider = spec.provider,
+                            stepStates = stepStates,
+                            transientStates = transientStates,
+                            respectStepStates = respectStepStates,
+                            respectConnectedStepStates = respectConnectedStepStates,
+                            defaultState = spec.defaultState,
+                        )
+                    },
+                    primaryActionLabel = if (spec.provider in existingConnectionProviders) {
+                        stringFor(R.string.settings_source_connections_add_another_account)
+                    } else {
+                        null
+                    },
                 )
             }
 
@@ -74,9 +83,8 @@ internal object SourceConnectionProjector {
             StepStatus.SKIPPED,
             StepStatus.DENIED,
             -> SourceConnectionState.Skipped
-            StepStatus.IN_PROGRESS,
-            StepStatus.NOT_STARTED,
-            -> transientStates[provider] ?: defaultState
+            StepStatus.IN_PROGRESS -> transientStates[provider] ?: SourceConnectionState.Syncing
+            StepStatus.NOT_STARTED -> transientStates[provider] ?: defaultState
         }
     }
 

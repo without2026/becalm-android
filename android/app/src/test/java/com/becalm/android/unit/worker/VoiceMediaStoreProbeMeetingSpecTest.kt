@@ -8,8 +8,8 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
-import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.RawIngestionSyncStatus
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.meeting.MeetingImportFolders
@@ -65,7 +65,7 @@ class VoiceMediaStoreProbeMeetingSpecTest {
 
     @Test
     // spec: ING-001B
-    fun `MTG-007 meeting audio scanner inserts meeting raw event and enqueues speaker preview`() = runTest {
+    fun `MTG-007 meeting audio scanner inserts meeting raw event awaiting user confirmation`() = runTest {
         stubCommon()
         every {
             contentResolver.query(
@@ -94,17 +94,119 @@ class VoiceMediaStoreProbeMeetingSpecTest {
 
         assertEquals(SourceType.MEETING, inserted.captured.sourceType)
         assertEquals("1777766400000-standup.m4a", inserted.captured.eventTitle)
-        assertEquals(MeetingSpeakerPreviewStatus.PENDING, inserted.captured.syncStatus)
+        assertEquals(RawIngestionSyncStatus.DETECTED_PENDING_CONFIRMATION, inserted.captured.syncStatus)
         assertEquals(1, (outcome as com.becalm.android.worker.ingestion.MeetingIngestOutcome.Success).insertedCount)
         coVerify(exactly = 1) {
             syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, 1_777_766_400_000L)
         }
-        coVerify(exactly = 1) { workScheduler.enqueueMeetingSpeakerPreview(inserted.captured.id, any()) }
+        coVerify(exactly = 0) { workScheduler.enqueueMeetingSpeakerPreview(any(), any()) }
         coVerify(exactly = 0) { workScheduler.enqueueVoiceUpload(any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `call recording scanner inserts call raw event and enqueues speaker preview`() = runTest {
+    fun `meeting audio scanner treats same display name with different file metadata as distinct files`() = runTest {
+        stubCommon()
+        every {
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                any<Array<String>>(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns MatrixCursor(
+            arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.DISPLAY_NAME,
+                MediaStore.Audio.Media.RELATIVE_PATH,
+                MediaStore.Audio.Media.SIZE,
+            ),
+        ).apply {
+            addRow(arrayOf<Any?>(42L, 1_777_766_400L, 120_000L, "meeting.m4a", "Recordings/BeCalm Meetings/Audio/", 100_000L))
+            addRow(arrayOf<Any?>(43L, 1_777_766_460L, 120_000L, "meeting.m4a", "Recordings/BeCalm Meetings/Audio/", 101_000L))
+        }
+        coEvery { rawIngestionEventDao.findByClientEventId("user-1", any()) } returns null
+        val inserted = mutableListOf<RawIngestionEventEntity>()
+        coEvery { rawIngestionEventDao.insert(capture(inserted)) } returnsMany listOf(1L, 2L)
+
+        val outcome = buildProbe().ingestMeetingAudio(Instant.parse("2026-05-03T00:00:00Z"))
+
+        assertEquals(2, (outcome as com.becalm.android.worker.ingestion.MeetingIngestOutcome.Success).insertedCount)
+        assertEquals(2, inserted.map { it.clientEventId }.distinct().size)
+        coVerify(exactly = 0) { workScheduler.enqueueMeetingSpeakerPreview(any(), any()) }
+    }
+
+    @Test
+    fun `voice scanner ignores unsupported Recordings subfolders and advances cursor`() = runTest {
+        stubCommon()
+        every {
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                any<Array<String>>(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns MatrixCursor(
+            arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.DISPLAY_NAME,
+                MediaStore.Audio.Media.RELATIVE_PATH,
+                "is_pending",
+            ),
+        ).apply {
+            addRow(arrayOf<Any?>(44L, 1_777_766_600L, 30_000L, "foreign.m4a", "Recordings/Other Recorder/", 0))
+        }
+
+        val inserted = buildProbe().ingestVoiceRecordings(Instant.parse("2026-05-03T00:00:00Z"))
+
+        assertEquals(0, inserted)
+        coVerify(exactly = 0) { rawIngestionEventDao.insert(any()) }
+        coVerify(exactly = 1) {
+            syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE, 1_777_766_600_000L)
+        }
+    }
+
+    @Test
+    fun `pending MediaStore rows are deferred without advancing source cursor`() = runTest {
+        stubCommon()
+        every {
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                any<Array<String>>(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns MatrixCursor(
+            arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.DISPLAY_NAME,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.RELATIVE_PATH,
+                "is_pending",
+            ),
+        ).apply {
+            addRow(arrayOf<Any?>(45L, 1_777_766_700L, 24_000L, "HS0008.m4a", "HS0008", "Recordings/Call/", 1))
+        }
+
+        val outcome = buildProbe().ingestCallRecordings(Instant.parse("2026-05-03T00:00:00Z"))
+
+        assertEquals(0, (outcome as com.becalm.android.worker.ingestion.CallRecordingIngestOutcome.Success).insertedCount)
+        coVerify(exactly = 0) { rawIngestionEventDao.insert(any()) }
+        coVerify(exactly = 0) {
+            syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_CALL_RECORDING, any())
+        }
+    }
+
+    @Test
+    fun `call recording scanner inserts call raw event awaiting user confirmation`() = runTest {
         stubCommon()
         every {
             contentResolver.query(
@@ -133,9 +235,9 @@ class VoiceMediaStoreProbeMeetingSpecTest {
         val outcome = buildProbe().ingestCallRecordings(Instant.parse("2026-05-03T00:00:00Z"))
 
         assertEquals(SourceType.CALL_RECORDING, inserted.captured.sourceType)
-        assertEquals(MeetingSpeakerPreviewStatus.PENDING, inserted.captured.syncStatus)
+        assertEquals(RawIngestionSyncStatus.DETECTED_PENDING_CONFIRMATION, inserted.captured.syncStatus)
         assertEquals(1, (outcome as com.becalm.android.worker.ingestion.CallRecordingIngestOutcome.Success).insertedCount)
-        coVerify(exactly = 1) { workScheduler.enqueueMeetingSpeakerPreview(inserted.captured.id, any()) }
+        coVerify(exactly = 0) { workScheduler.enqueueMeetingSpeakerPreview(any(), any()) }
         coVerify(exactly = 0) { workScheduler.enqueueVoiceUpload(any(), any(), any(), any(), any()) }
     }
 

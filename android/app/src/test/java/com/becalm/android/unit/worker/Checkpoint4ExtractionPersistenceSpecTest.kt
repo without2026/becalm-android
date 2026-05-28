@@ -70,10 +70,9 @@ class Checkpoint4ExtractionPersistenceSpecTest {
         assertEquals(SourceType.GMAIL, commitment.sourceType)
         assertEquals("gmail-message", commitment.sourceRef)
         assertEquals(RAW_EVENT_ID, sourceParticipant.sourceEventId)
-        assertEquals("resolved", sourceParticipant.resolutionStatus)
-        assertNotNull(commitmentParticipant)
-        assertEquals("give", commitmentParticipant?.role)
-        assertEquals(sourceParticipant.personId, commitmentParticipant?.personId)
+        assertEquals("unresolved", sourceParticipant.resolutionStatus)
+        assertEquals(null, sourceParticipant.personId)
+        assertEquals(null, commitmentParticipant)
     }
 
     @Test
@@ -107,7 +106,7 @@ class Checkpoint4ExtractionPersistenceSpecTest {
         assertTrue(response.items.isEmpty())
         assertEquals(RAW_EVENT_ID, participant.sourceEventId)
         assertEquals("counterparty", participant.relationToUser)
-        assertEquals("resolved", participant.resolutionStatus)
+        assertEquals("unresolved", participant.resolutionStatus)
     }
 
     @Test
@@ -164,10 +163,9 @@ class Checkpoint4ExtractionPersistenceSpecTest {
             now = NOW,
         )
 
-        assertEquals("resolved", sourceParticipant.resolutionStatus)
-        assertNotNull(sourceParticipant.personId)
-        assertEquals(sourceParticipant.personId, scheduleParticipant?.personId)
-        assertEquals("attendee", scheduleParticipant?.role)
+        assertEquals("unresolved", sourceParticipant.resolutionStatus)
+        assertEquals(null, sourceParticipant.personId)
+        assertEquals(null, scheduleParticipant)
     }
 
     @Test
@@ -206,12 +204,12 @@ class Checkpoint4ExtractionPersistenceSpecTest {
         assertNotNull(progress)
         assertEquals("completed", progress?.eventType)
         assertEquals("needs_review", progress?.status)
-        assertEquals(participant.personId, progress?.personId)
+        assertEquals(null, progress?.personId)
         assertEquals("gmail:thread-1", progress?.conversationRef)
     }
 
     @Test
-    fun `name-only extracted participants stay unresolved for user confirmation`() {
+    fun `meeting name-only participant mentions are ignored when they are not direct counterparties`() {
         val participant = SourceExtractedParticipantDto(
             role = "speaker",
             relationToUser = "participant",
@@ -232,9 +230,33 @@ class Checkpoint4ExtractionPersistenceSpecTest {
         )
 
         assertEquals(null, participant.personId)
-        assertEquals("unresolved", participant.resolutionStatus)
+        assertEquals("ignored", participant.resolutionStatus)
         assertEquals("name", participant.identityType)
         assertEquals("김민홍", participant.displayNameRaw)
+    }
+
+    @Test
+    fun `meeting counterparty participant remains reviewable when it names a direct person`() {
+        val participant = SourceExtractedParticipantDto(
+            role = "counterparty",
+            relationToUser = "counterparty",
+            identityType = "name",
+            normalizedValue = "김민홍",
+            displayName = "김민홍",
+            evidence = "김민홍님에게 다음 자료를 보내기로 했습니다.",
+            confidence = 0.74,
+        ).toSourceEventParticipantEntity(
+            userId = USER_ID,
+            sourceEventId = RAW_EVENT_ID,
+            sourceType = SourceType.MEETING,
+            sourceRef = "meeting-audio",
+            index = 0,
+            now = NOW,
+        )
+
+        assertEquals(null, participant.personId)
+        assertEquals("unresolved", participant.resolutionStatus)
+        assertEquals("counterparty", participant.relationToUser)
     }
 
     @Test
@@ -299,7 +321,7 @@ class Checkpoint4ExtractionPersistenceSpecTest {
     }
 
     @Test
-    fun `unmatched speaker label remains source local and ignored`() {
+    fun `unmatched speaker label remains source local and unresolved`() {
         val participant = SourceExtractedParticipantDto(
             role = "speaker",
             relationToUser = "counterparty",
@@ -321,7 +343,7 @@ class Checkpoint4ExtractionPersistenceSpecTest {
         assertEquals(null, participant.personId)
         assertEquals("counterparty", participant.relationToUser)
         assertEquals("speaker_label", participant.identityType)
-        assertEquals("ignored", participant.resolutionStatus)
+        assertEquals("unresolved", participant.resolutionStatus)
     }
 
     @Test

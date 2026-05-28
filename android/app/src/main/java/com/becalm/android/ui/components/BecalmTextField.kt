@@ -7,6 +7,7 @@
 package com.becalm.android.ui.components
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
@@ -60,6 +61,8 @@ import com.becalm.android.ui.theme.becalmColors
  * @param imeAction           IME action button; defaults to [ImeAction.Default].
  * @param singleLine          When `true`, the field does not wrap to multiple lines.
  * @param enabled             When `false`, the field is non-interactive and visually dimmed.
+ * @param compact             Reduces vertical density for search/filter fields while
+ *                            keeping the standard form-field default unchanged.
  * @param visualTransformation Transforms the visible text. Callers rendering passwords or
  *                            other sensitive personal data MUST pass
  *                            `PasswordVisualTransformation()` and SHOULD also set
@@ -82,6 +85,7 @@ public fun BecalmTextField(
     imeAction: ImeAction = ImeAction.Default,
     singleLine: Boolean = true,
     enabled: Boolean = true,
+    compact: Boolean = false,
     visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     val becalmColors = MaterialTheme.becalmColors
@@ -128,10 +132,11 @@ public fun BecalmTextField(
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier.heightIn(min = 56.dp),
+        modifier = modifier.heightIn(min = if (compact) 48.dp else 56.dp),
         enabled = enabled,
         singleLine = singleLine,
-        textStyle = MaterialTheme.typography.bodyLarge.copy(color = textColor),
+        textStyle = (if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge)
+            .copy(color = textColor),
         keyboardOptions = KeyboardOptions(
             keyboardType = keyboardType,
             imeAction = imeAction,
@@ -167,6 +172,7 @@ public fun BecalmTextField(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
+                            .background(becalmColors.glassPanelFill, fieldShape)
                             .border(1.dp, borderColor, fieldShape),
                     )
                 },

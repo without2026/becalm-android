@@ -56,9 +56,15 @@ public class ColdSyncStage2Worker @AssistedInject constructor(
             is com.becalm.android.core.result.BecalmResult.Success -> Unit
         }
 
-        sourceStatusRepository.observeAll().first { statuses: List<SourceStatus> ->
-            DefaultColdSyncRuntimeCoordinator.STAGE2_SOURCE_TYPES.all { sourceType ->
-                statuses.any { it.sourceType == sourceType && it.status in TERMINAL_STATUSES }
+        val enabledStage2Sources = userPrefsStore.observeEnabledSources().first()
+            .let { enabledSources ->
+                DefaultColdSyncRuntimeCoordinator.STAGE2_SOURCE_TYPES.filter { it in enabledSources }
+            }
+        if (enabledStage2Sources.isNotEmpty()) {
+            sourceStatusRepository.observeAll().first { statuses: List<SourceStatus> ->
+                enabledStage2Sources.all { sourceType ->
+                    statuses.any { it.sourceType == sourceType && it.status in TERMINAL_STATUSES }
+                }
             }
         }
 

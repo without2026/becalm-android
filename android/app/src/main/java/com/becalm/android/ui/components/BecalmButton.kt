@@ -7,6 +7,8 @@
 package com.becalm.android.ui.components
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,13 +34,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.becalmColors
 import com.becalm.android.ui.theme.becalmFocusRing
 import com.becalm.android.ui.theme.dimens
-import com.becalm.android.ui.theme.glassPanel
 
 // ─── Variant enum ──────────────────────────────────────────────────────────────
 
@@ -116,11 +119,13 @@ public fun BecalmButton(
         }
 
         BecalmButtonVariant.Secondary -> {
+            val shape = MaterialTheme.shapes.small
             Button(
                 onClick = { if (isInteractive) onClick() },
                 modifier = effectiveModifier
-                    .glassPanel(MaterialTheme.shapes.small)
-                    .becalmFocusRing(MaterialTheme.shapes.small, interactionSource),
+                    .background(MaterialTheme.becalmColors.glassPanelFill, shape)
+                    .border(1.dp, MaterialTheme.becalmColors.glassBorder, shape)
+                    .becalmFocusRing(shape, interactionSource),
                 enabled = isInteractive,
                 interactionSource = interactionSource,
                 colors = ButtonDefaults.buttonColors(
@@ -179,7 +184,12 @@ private fun ButtonContent(
                 strokeWidth = 2.dp,
             )
             Spacer(modifier = Modifier.width(ButtonLeadingIconSpacing))
-            Text(text = text, style = MaterialTheme.typography.labelLarge)
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     } else {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -191,7 +201,12 @@ private fun ButtonContent(
                 )
                 Spacer(modifier = Modifier.width(ButtonLeadingIconSpacing))
             }
-            Text(text = text, style = MaterialTheme.typography.labelLarge)
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

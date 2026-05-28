@@ -59,6 +59,28 @@ public data class CompletionMatchCandidateRow(
     val conversationRef: String?,
 )
 
+public data class OnboardingActivationPreviewRow(
+    val commitmentId: String,
+    val personId: String?,
+    val personName: String?,
+    val participantId: String?,
+    val participantName: String?,
+    val participantEmail: String?,
+    val participantPhone: String?,
+    val contactMatched: Boolean,
+    val title: String,
+    val itemType: String,
+    val direction: String?,
+    val scheduleStatus: String?,
+    val decisionStatus: String?,
+    val dueAt: Instant?,
+    val dueHint: String?,
+    val sourceType: String,
+    val sourceTitle: String?,
+    val sourceEventOccurredAt: Instant,
+    val confidence: Double,
+)
+
 /**
  * Room DAO for the `commitments` table.
  *
@@ -462,6 +484,23 @@ public interface CommitmentDao {
 
     @Query(
         """
+        SELECT * FROM commitments
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND source_ref IN (:sourceRefs)
+          AND item_type IN ('action', 'decision')
+          AND deleted_at IS NULL
+        ORDER BY source_event_occurred_at DESC, created_at DESC
+        """,
+    )
+    public suspend fun findLiveReviewableCommitmentsForSourceRefs(
+        userId: String,
+        sourceType: String,
+        sourceRefs: List<String>,
+    ): List<CommitmentEntity>
+
+    @Query(
+        """
         SELECT c.id AS id,
                c.title AS title,
                c.quote AS quote,
@@ -576,22 +615,66 @@ public interface CommitmentDao {
                          AND cp.commitment_id = c.id
                        ORDER BY cp.confidence DESC, cp.created_at ASC
                        LIMIT 1
-                   ),
-                   CASE
-                       WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
-                       ELSE SUBSTR(c.counterparty_raw, 1, 30)
-                   END
-               ) AS counterpartyDisplayName,
+	                   ),
+	                   CASE
+	                       WHEN c.source_type NOT IN (
+	                           'voice',
+	                           'call_recording',
+	                           'meeting',
+	                           'message_screenshot',
+	                           'gmail',
+	                           'outlook_mail',
+	                           'naver_imap',
+	                           'daum_imap',
+	                           'google_calendar',
+	                           'outlook_calendar'
+	                       ) AND c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
+	                       WHEN c.source_type NOT IN (
+	                           'voice',
+	                           'call_recording',
+	                           'meeting',
+	                           'message_screenshot',
+	                           'gmail',
+	                           'outlook_mail',
+	                           'naver_imap',
+	                           'daum_imap',
+	                           'google_calendar',
+	                           'outlook_calendar'
+	                       ) THEN SUBSTR(c.counterparty_raw, 1, 30)
+	                       ELSE NULL
+	                   END
+	               ) AS counterpartyDisplayName,
                c.source_type AS sourceType,
                c.source_event_title AS sourceTitle,
                c.source_event_occurred_at AS sourceOccurredAt,
                c.due_hint AS dueHint
-        FROM commitments AS c
-        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.counterparty_ref
-        WHERE c.user_id = :userId
-          AND c.deleted_at IS NULL
-        ORDER BY
-            CASE
+	        FROM commitments AS c
+	        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.counterparty_ref
+		        WHERE c.user_id = :userId
+		          AND c.deleted_at IS NULL
+		          AND c.item_type != 'schedule'
+		          AND (
+		              c.source_type NOT IN (
+		                  'voice',
+		                  'call_recording',
+	                  'meeting',
+	                  'message_screenshot',
+	                  'gmail',
+	                  'outlook_mail',
+	                  'naver_imap',
+	                  'daum_imap',
+	                  'google_calendar',
+	                  'outlook_calendar'
+	              )
+	              OR EXISTS (
+	                  SELECT 1
+	                  FROM commitment_participants AS cp_guard
+	                  WHERE cp_guard.user_id = c.user_id
+	                    AND cp_guard.commitment_id = c.id
+	              )
+	          )
+	        ORDER BY
+	            CASE
                 WHEN c.due_at IS NOT NULL AND c.due_is_approximate = 0 THEN 0
                 ELSE 1
             END ASC,
@@ -617,11 +700,12 @@ public interface CommitmentDao {
     public suspend fun countForUser(userId: String): Int
 
     /**
-     * Emits live action/schedule commitment items for [userId] in the Today timeline.
+     * Emits live schedule commitment items for [userId] in the schedule timeline range.
      *
-     * Action and schedule commitments are included only when their due time falls
-     * within today's KST day window. Older follow-ups stay available in person detail
-     * history, not in the Today operational surface.
+     * Schedules are included when their due time falls within the caller-provided
+     * KST-backed range, regardless of action lifecycle. Action items stay in the
+     * Commitments tab so the Schedule tab remains calendar-like and does not mix
+     * obligations with events.
      *
      * `endOfTodayEpochMs` is an inclusive UTC epoch-millisecond upper bound. The caller
      * must compute it as `Asia/Seoul` 23:59:59.999 converted to UTC epoch ms so that the
@@ -631,7 +715,8 @@ public interface CommitmentDao {
      * Soft-deleted rows (`deleted_at IS NOT NULL`) are excluded per
      * `.spec/contracts/data-model.yml:204-205` MUST-invariant.
      *
-     * Used by the daily reminder widget and the home screen "due today" timeline.
+     * Used by legacy Today/reminder surfaces that still need action and schedule rows
+     * within the current local day window.
      *
      * @param userId Supabase auth.users UUID of the owning user.
      * @param endOfTodayEpochMs Inclusive upper bound as UTC epoch ms (Asia/Seoul 23:59:59.999).
@@ -642,16 +727,32 @@ public interface CommitmentDao {
         """
         SELECT * FROM commitments
         WHERE user_id      = :userId
-          AND item_type    IN ('action', 'schedule')
-          AND action_state = 'pending'
-          AND (
-              (item_type = 'action' AND due_at >= :startOfTodayEpochMs AND due_at <= :endOfTodayEpochMs)
-              OR
-              (item_type = 'schedule' AND due_at >= :startOfTodayEpochMs AND due_at <= :endOfTodayEpochMs)
-          )
-          AND deleted_at IS NULL
-        ORDER BY due_at IS NULL ASC, due_at ASC, created_at DESC
-        """
+	          AND action_state = 'pending'
+	          AND due_at >= :startOfTodayEpochMs
+	          AND due_at <= :endOfTodayEpochMs
+	          AND deleted_at IS NULL
+	          AND (
+	              source_type NOT IN (
+	                  'voice',
+	                  'call_recording',
+	                  'meeting',
+	                  'message_screenshot',
+	                  'gmail',
+	                  'outlook_mail',
+	                  'naver_imap',
+	                  'daum_imap',
+	                  'google_calendar',
+	                  'outlook_calendar'
+	              )
+	              OR EXISTS (
+	                  SELECT 1
+	                  FROM commitment_participants AS cp_guard
+	                  WHERE cp_guard.user_id = commitments.user_id
+	                    AND cp_guard.commitment_id = commitments.id
+	              )
+	          )
+	        ORDER BY due_at IS NULL ASC, due_at ASC, created_at DESC
+	        """
     )
     public fun observePendingForToday(
         userId: String,
@@ -682,12 +783,35 @@ public interface CommitmentDao {
                          AND cp.commitment_id = c.id
                        ORDER BY cp.confidence DESC, cp.created_at ASC
                        LIMIT 1
-                   ),
-                   CASE
-                       WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
-                       ELSE SUBSTR(c.counterparty_raw, 1, 30)
-                   END
-               ) AS counterpartyDisplayName,
+	                   ),
+	                   CASE
+	                       WHEN c.source_type NOT IN (
+	                           'voice',
+	                           'call_recording',
+	                           'meeting',
+	                           'message_screenshot',
+	                           'gmail',
+	                           'outlook_mail',
+	                           'naver_imap',
+	                           'daum_imap',
+	                           'google_calendar',
+	                           'outlook_calendar'
+	                       ) AND c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
+	                       WHEN c.source_type NOT IN (
+	                           'voice',
+	                           'call_recording',
+	                           'meeting',
+	                           'message_screenshot',
+	                           'gmail',
+	                           'outlook_mail',
+	                           'naver_imap',
+	                           'daum_imap',
+	                           'google_calendar',
+	                           'outlook_calendar'
+	                       ) THEN SUBSTR(c.counterparty_raw, 1, 30)
+	                       ELSE NULL
+	                   END
+	               ) AS counterpartyDisplayName,
                c.source_type AS sourceType,
                c.source_ref AS sourceRef,
                c.source_event_title AS sourceTitle,
@@ -698,13 +822,9 @@ public interface CommitmentDao {
         FROM commitments AS c
         LEFT JOIN persons_enrichment AS p ON p.person_ref = c.counterparty_ref
         WHERE c.user_id      = :userId
-          AND c.item_type    IN ('action', 'schedule')
-          AND c.action_state = 'pending'
-          AND (
-              (c.item_type = 'action' AND c.due_at >= :startOfTodayEpochMs AND c.due_at <= :endOfTodayEpochMs)
-              OR
-              (c.item_type = 'schedule' AND c.due_at >= :startOfTodayEpochMs AND c.due_at <= :endOfTodayEpochMs)
-          )
+          AND c.item_type    = 'schedule'
+          AND c.due_at >= :startOfTodayEpochMs
+          AND c.due_at <= :endOfTodayEpochMs
           AND c.deleted_at IS NULL
         ORDER BY c.due_at IS NULL ASC, c.due_at ASC, c.created_at DESC
         """
@@ -834,12 +954,32 @@ public interface CommitmentDao {
         SELECT * FROM commitments
         WHERE user_id = :userId
           AND due_at IS NOT NULL
-          AND item_type = 'action'
-          AND due_at < :cutoff
-          AND action_state IN ('pending', 'reminded', 'followed_up')
-          AND deleted_at IS NULL
-        ORDER BY due_at ASC
-        LIMIT :limit
+	          AND item_type = 'action'
+	          AND due_at < :cutoff
+	          AND action_state IN ('pending', 'reminded', 'followed_up')
+	          AND deleted_at IS NULL
+	          AND (
+	              source_type NOT IN (
+	                  'voice',
+	                  'call_recording',
+	                  'meeting',
+	                  'message_screenshot',
+	                  'gmail',
+	                  'outlook_mail',
+	                  'naver_imap',
+	                  'daum_imap',
+	                  'google_calendar',
+	                  'outlook_calendar'
+	              )
+	              OR EXISTS (
+	                  SELECT 1
+	                  FROM commitment_participants AS cp_guard
+	                  WHERE cp_guard.user_id = commitments.user_id
+	                    AND cp_guard.commitment_id = commitments.id
+	              )
+	          )
+	        ORDER BY due_at ASC
+	        LIMIT :limit
         """
     )
     public suspend fun findOverdueCandidates(
@@ -847,6 +987,104 @@ public interface CommitmentDao {
         cutoff: Instant,
         limit: Int,
     ): List<CommitmentEntity>
+
+    @Query(
+        """
+        WITH candidate_participants AS (
+            SELECT sep.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY sep.user_id, sep.source_type, sep.source_ref
+                       ORDER BY
+                           CASE sep.resolution_status
+                               WHEN 'person_resolved' THEN 0
+                               WHEN 'resolved' THEN 0
+                               ELSE 1
+                           END ASC,
+                           CASE sep.relation_to_user
+                               WHEN 'counterparty' THEN 0
+                               ELSE 1
+                           END ASC,
+                           sep.confidence DESC,
+                           sep.created_at ASC
+                   ) AS rn
+            FROM source_event_participants AS sep
+            WHERE sep.user_id = :userId
+              AND sep.source_type = :sourceType
+              AND sep.relation_to_user IN ('counterparty', 'participant')
+              AND sep.resolution_status IN ('person_resolved', 'resolved', 'unresolved')
+        )
+        SELECT c.id AS commitmentId,
+               sep.person_id AS personId,
+               COALESCE(
+                   NULLIF((
+                       SELECT COALESCE(NULLIF(pe.display_name, ''), NULLIF(pe.nickname, ''))
+                       FROM persons_enrichment AS pe
+                       WHERE pe.person_ref IN (
+                           LOWER(COALESCE(sep.email_raw, '')),
+                           COALESCE(sep.phone_raw, ''),
+                           LOWER(COALESCE(sep.normalized_value, '')),
+                           LOWER(COALESCE(sep.display_name_raw, ''))
+                       )
+                       LIMIT 1
+                   ), ''),
+                   NULLIF(sep.display_name_raw, ''),
+                   NULLIF(sep.email_raw, ''),
+                   NULLIF(sep.phone_raw, ''),
+                   NULLIF(sep.normalized_value, ''),
+                   CASE
+                       WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
+                       ELSE NULLIF(SUBSTR(c.counterparty_raw, 1, 30), '')
+                   END
+               ) AS personName,
+               sep.id AS participantId,
+               sep.display_name_raw AS participantName,
+               sep.email_raw AS participantEmail,
+               sep.phone_raw AS participantPhone,
+               EXISTS (
+                   SELECT 1
+                   FROM persons_enrichment AS pe
+                   WHERE pe.person_ref IN (
+                       LOWER(COALESCE(sep.email_raw, '')),
+                       COALESCE(sep.phone_raw, ''),
+                       LOWER(COALESCE(sep.normalized_value, '')),
+                       LOWER(COALESCE(sep.display_name_raw, ''))
+                   )
+                   LIMIT 1
+               ) AS contactMatched,
+               c.title AS title,
+               c.item_type AS itemType,
+               c.direction AS direction,
+               c.schedule_status AS scheduleStatus,
+               c.decision_status AS decisionStatus,
+               c.due_at AS dueAt,
+               c.due_hint AS dueHint,
+               c.source_type AS sourceType,
+               c.source_event_title AS sourceTitle,
+               c.source_event_occurred_at AS sourceEventOccurredAt,
+               c.confidence AS confidence
+        FROM commitments AS c
+        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.counterparty_ref
+        LEFT JOIN candidate_participants AS sep
+          ON sep.user_id = c.user_id
+         AND sep.source_type = c.source_type
+         AND sep.source_ref = c.source_ref
+         AND sep.rn = 1
+        WHERE c.user_id = :userId
+          AND c.source_type = :sourceType
+          AND c.deleted_at IS NULL
+          AND c.item_type IN ('action', 'schedule', 'decision')
+          AND c.action_state != 'completed'
+          AND c.confidence >= :minConfidence
+        ORDER BY c.source_event_occurred_at DESC, c.created_at DESC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findOnboardingActivationPreview(
+        userId: String,
+        sourceType: String,
+        minConfidence: Double,
+        limit: Int,
+    ): List<OnboardingActivationPreviewRow>
 
     /**
      * Marks the rows identified by [ids] as `action_state='overdue'`, preserving the

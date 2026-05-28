@@ -28,6 +28,8 @@ import com.becalm.android.ui.persons.PersonsUiState
 import com.becalm.android.ui.persons.SourceEventCardProjection
 import com.becalm.android.ui.persons.SourceEventCardRow
 import com.becalm.android.ui.persons.UnassignedEventSummary
+import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.onboarding.FirstMemoryFollowUpAction
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -86,7 +88,7 @@ class PersonsUiTest {
         composeRule.onNodeWithText("김철수").assertExists()
         composeRule.onAllNodesWithText("김철수 · ABC Corp · 팀장").assertCountEquals(0)
         composeRule.onNodeWithText(string(R.string.persons_pending_commitments_fmt, 2)).assertExists()
-        composeRule.onAllNodesWithText("계약서 검토 요청").assertCountEquals(0)
+        composeRule.onNodeWithText("계약서 검토 요청").assertExists()
         composeRule.onNodeWithTag("persons-list")
             .performScrollToNode(hasText(string(R.string.persons_unassigned_title)))
         composeRule.onNodeWithText(string(R.string.persons_unassigned_title)).assertExists()
@@ -204,6 +206,74 @@ class PersonsUiTest {
     }
 
     @Test
+    fun `person detail load more action is exposed after capped timeline`() {
+        var loadMoreRequests = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonDetailScreenContent(
+                    state = PersonDetailUiState(
+                        personId = "person-1",
+                        displayName = "김철수",
+                        eventCount = 150,
+                        sourceEventCards = (0 until 150).map { index ->
+                            SourceEventCardProjection(
+                                sourceEventKey = "raw:event-$index",
+                                sourceType = "gmail",
+                                rawEventId = "event-$index",
+                                occurredAt = Instant.fromEpochMilliseconds(index * 1_000L),
+                                title = "고객 메일 $index",
+                                snippet = null,
+                            )
+                        },
+                        canLoadMoreTimeline = true,
+                        loading = false,
+                    ),
+                    title = "김철수",
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onEventTap = {},
+                    onLoadMoreTimeline = { loadMoreRequests += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText(string(R.string.person_detail_load_more)))
+        composeRule.onNodeWithText(string(R.string.person_detail_load_more)).performClick()
+
+        composeRule.runOnIdle { assertEquals(1, loadMoreRequests) }
+    }
+
+    @Test
+    fun `person detail blocking error exposes retry action`() {
+        var retryRequests = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonDetailScreenContent(
+                    state = PersonDetailUiState(
+                        personId = "person-1",
+                        displayName = "김철수",
+                        loading = false,
+                        error = UiMessage.resource(R.string.person_detail_error_load_failed),
+                    ),
+                    title = "김철수",
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onEventTap = {},
+                    onRetry = { retryRequests += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.error_state_retry)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.error_state_retry)).performClick()
+
+        composeRule.runOnIdle { assertEquals(1, retryRequests) }
+    }
+
+    @Test
     fun `source event card dispatches raw event tap`() {
         var tappedEventId: String? = null
 
@@ -263,6 +333,45 @@ class PersonsUiTest {
 
         composeRule.onNodeWithTag("person-detail-next-action-panel").assertIsDisplayed()
         composeRule.onAllNodesWithText(string(R.string.person_detail_next_action_email_reply)).assertCountEquals(1)
+    }
+
+    @Test
+    fun `person detail first memory recommendation rows are actionable`() {
+        var clicked: FirstMemoryFollowUpAction? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonDetailScreenContent(
+                    state = PersonDetailUiState(
+                        personId = "person-1",
+                        displayName = "민지",
+                        sourceEventCards = listOf(
+                            SourceEventCardProjection(
+                                sourceEventKey = "manual:mail-1",
+                                sourceType = "manual",
+                                rawEventId = null,
+                                occurredAt = Instant.parse("2026-05-26T00:00:00Z"),
+                                title = "민지님과 직접 입력한 약속",
+                                snippet = "금요일까지 제안서 초안 보내기",
+                                firstMemoryOrigin = "email",
+                            ),
+                        ),
+                        loading = false,
+                    ),
+                    title = "민지",
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onEventTap = {},
+                    onFirstMemoryFollowUpAction = { clicked = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("first-memory-action-gmail").assertIsDisplayed().performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(FirstMemoryFollowUpAction.GMAIL, clicked)
+        }
     }
 
     @Test

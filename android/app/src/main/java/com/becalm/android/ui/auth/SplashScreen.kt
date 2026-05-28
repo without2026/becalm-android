@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmColors
@@ -34,14 +35,14 @@ import com.becalm.android.ui.theme.becalmColors
  *
  * Observes [AuthUiState] and routes the user to:
  * - [BecalmRoute.Terms] when signed out (first run or logged out).
- * - [BecalmRoute.Today] when a valid session is already present.
+ * - [BecalmRoute.Persons] when a valid session is already present.
  * Back-stack is cleared via `popUpTo` so the user cannot navigate back to splash.
  *
  * spec: AUTH-003, AUTH-004
  *
  * Primary VM: [AuthViewModel]
  * Navigation entry: start destination (splash)
- * Navigation exit: [BecalmRoute.Terms] | [BecalmRoute.Today]
+ * Navigation exit: [BecalmRoute.Terms] | [BecalmRoute.Persons]
  */
 @Composable
 public fun SplashScreen(
@@ -96,7 +97,7 @@ internal fun splashDestinationFor(state: AuthUiState): String? =
     when (state) {
         is AuthUiState.SignedIn ->
             if (state.onboardingCompleted) {
-                BecalmRoute.Today.path
+                BecalmNavigationDefaults.authenticatedHomeRoute
             } else {
                 state.onboardingResumeRoute
             }

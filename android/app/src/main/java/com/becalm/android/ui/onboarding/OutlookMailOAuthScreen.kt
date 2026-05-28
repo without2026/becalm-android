@@ -5,6 +5,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
@@ -108,6 +110,10 @@ public fun OutlookMailOAuthScreen(
                     is EmailConnectEvent.PendingIntentRequired -> {
                         launchPendingIntent(IntentSenderRequest.Builder(event.pendingIntent).build())
                     }
+                    is EmailConnectEvent.Syncing -> Unit
+                    is EmailConnectEvent.NotConnected -> {
+                        pendingOAuthResumeRefresh = false
+                    }
                     is EmailConnectEvent.Failed -> {
                         pendingOAuthResumeRefresh = false
                         if (event.errorCode != "user_cancelled") {
@@ -153,6 +159,7 @@ internal fun OutlookMailOAuthContent(
 ) {
     OAuthPlaceholderContent(
         modifier = modifier,
+        icon = Icons.Outlined.Email,
         headline = stringResource(R.string.onb_outlook_mail_headline),
         body = stringResource(R.string.onb_outlook_mail_body),
         connectLabel = stringResource(R.string.action_connect),

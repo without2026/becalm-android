@@ -210,7 +210,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
         )
 
         val notification = NotificationCompat.Builder(context, spec.channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_stat_becalm)
             .setContentTitle(spec.title)
             .setContentText(spec.body)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

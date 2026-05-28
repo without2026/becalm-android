@@ -4,11 +4,12 @@ import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.StringRes
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -21,9 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -210,6 +209,8 @@ private fun EmailConnectionEventsEffect(
                     when (event) {
                         is EmailConnectEvent.Connected -> navigate(copy.skipAheadRoute)
                         is EmailConnectEvent.PendingIntentRequired -> Unit
+                        is EmailConnectEvent.Syncing -> Unit
+                        is EmailConnectEvent.NotConnected -> Unit
                         is EmailConnectEvent.Failed -> snackbarHostState.showSnackbar(
                             oauthFailureCopy ?: fallbackFailureCopy,
                         )
@@ -221,6 +222,8 @@ private fun EmailConnectionEventsEffect(
                     when (event) {
                         is EmailConnectEvent.Connected -> navigate(copy.skipAheadRoute)
                         is EmailConnectEvent.PendingIntentRequired -> Unit
+                        is EmailConnectEvent.Syncing -> Unit
+                        is EmailConnectEvent.NotConnected -> Unit
                         is EmailConnectEvent.Failed -> snackbarHostState.showSnackbar(
                             imapErrorCopyByCode[event.errorCode]
                                 ?: imapErrorCopyByCode.getValue("unknown"),
@@ -378,7 +381,7 @@ private fun ImapConsentConnectContent(
         header = {
             EmailPipaDisclosureHeader(copy)
             Spacer(modifier = Modifier.height(24.dp))
-            ImapFormHeader()
+            ImapCredentialInfoPanel()
         },
         initialProvider = copy.initialImapProvider,
     )
@@ -413,21 +416,14 @@ private fun OnboardingEmailPipaConsentContent(
     agreeConnect: Boolean = false,
     agreeLoading: Boolean = false,
 ) {
-    Column(
-        modifier = modifier
-            .padding(horizontal = 16.dp, vertical = 24.dp)
-            .fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    SourceStoryLayout(
+        icon = Icons.Outlined.Email,
+        headline = stringResource(copy.headlineRes),
+        body = stringResource(emailPipaStoryBodyRes(copy)),
+        modifier = modifier,
     ) {
-        Text(
-            text = stringResource(copy.headlineRes),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(16.dp))
         EmailPipaDisclosurePanel(copy)
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         BecalmButton(
             text = stringResource(
                 if (agreeConnect) {
@@ -455,13 +451,25 @@ private fun OnboardingEmailPipaConsentContent(
     }
 }
 
+@StringRes
+private fun emailPipaStoryBodyRes(copy: EmailPipaCopy): Int =
+    when (copy.connectionTarget) {
+        is EmailPipaConnectionTarget.OAuth -> when (copy.connectionTarget.provider) {
+            EmailPipaProvider.GMAIL -> R.string.settings_source_story_gmail_body
+            EmailPipaProvider.OUTLOOK_MAIL -> R.string.settings_source_story_outlook_mail_body
+            EmailPipaProvider.NAVER_IMAP,
+            EmailPipaProvider.DAUM_IMAP,
+            -> R.string.onb_imap_body
+        }
+        EmailPipaConnectionTarget.Imap -> R.string.onb_imap_body
+    }
+
 @Composable
 private fun EmailPipaDisclosureHeader(copy: EmailPipaCopy) {
-    Text(
-        text = stringResource(copy.headlineRes),
-        style = MaterialTheme.typography.headlineSmall,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth(),
+    SourceStoryHeader(
+        icon = Icons.Outlined.Email,
+        headline = stringResource(copy.headlineRes),
+        body = stringResource(emailPipaStoryBodyRes(copy)),
     )
     Spacer(modifier = Modifier.height(16.dp))
     EmailPipaDisclosurePanel(copy)

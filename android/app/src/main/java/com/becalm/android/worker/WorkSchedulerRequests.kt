@@ -198,6 +198,10 @@ internal object WorkSchedulerRequests {
         UniqueWorkKeys.BACKEND_MAIL,
         UniqueWorkKeys.PERSON_INDEX,
         UniqueWorkKeys.SOURCE_PARTICIPANT_MIRROR,
+        UniqueWorkKeys.sourceRelationRefresh(SourceType.GMAIL),
+        UniqueWorkKeys.sourceRelationRefresh(SourceType.OUTLOOK_MAIL),
+        UniqueWorkKeys.sourceRelationRefresh(SourceType.GOOGLE_CALENDAR),
+        UniqueWorkKeys.sourceRelationRefresh(SourceType.OUTLOOK_CALENDAR),
         UniqueWorkKeys.ENRICHMENT,
         UniqueWorkKeys.UPLOAD,
         UniqueWorkKeys.UPLOAD_PERIODIC,
@@ -289,6 +293,29 @@ internal object WorkSchedulerRequests {
             policy = ExistingWorkPolicy.REPLACE,
             request = sourceParticipantMirrorRequest(initialDelaySeconds.coerceAtLeast(0L)),
             logMessage = "enqueueSourceParticipantMirrorRetry key=${UniqueWorkKeys.SOURCE_PARTICIPANT_MIRROR} delaySec=$initialDelaySeconds",
+        )
+
+    fun sourceRelationRefreshRequest(sourceType: String, initialDelaySeconds: Long): OneTimeWorkRequest {
+        val builder = OneTimeWorkRequest.Builder(SourceRelationRefreshWorker::class.java)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
+            .setInputData(workDataOf(SourceRelationRefreshWorker.KEY_SOURCE_TYPE to sourceType))
+        if (initialDelaySeconds > 0L) {
+            builder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
+        }
+        return builder.build()
+    }
+
+    fun sourceRelationRefreshPlan(sourceType: String, initialDelaySeconds: Long): UniqueOneTimeWorkPlan =
+        UniqueOneTimeWorkPlan(
+            uniqueKey = UniqueWorkKeys.sourceRelationRefresh(sourceType),
+            policy = ExistingWorkPolicy.REPLACE,
+            request = sourceRelationRefreshRequest(sourceType, initialDelaySeconds.coerceAtLeast(0L)),
+            logMessage = "enqueueSourceRelationRefresh source=$sourceType key=${UniqueWorkKeys.sourceRelationRefresh(sourceType)} delaySec=$initialDelaySeconds",
         )
 
     fun profileMemoryRequest(personId: String, initialDelaySeconds: Long): OneTimeWorkRequest {

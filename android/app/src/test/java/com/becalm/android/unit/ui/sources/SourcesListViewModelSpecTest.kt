@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.sources
 
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
@@ -10,6 +11,10 @@ import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.data.repository.ProcessingSourceState
+import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -47,6 +52,7 @@ class SourcesListViewModelSpecTest {
     private val testDispatcher = StandardTestDispatcher()
     private val authRepository: AuthRepository = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk()
+    private val processingStatusRepository: ProcessingStatusRepository = mockk()
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk()
     private val contactsPermissionChecker = FakeContactsPermissionChecker()
     private val logger: Logger = mockk(relaxed = true)
@@ -55,6 +61,7 @@ class SourcesListViewModelSpecTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session()))
+        every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
     }
 
@@ -136,6 +143,49 @@ class SourcesListViewModelSpecTest {
             assertEquals(SourceSyncStatus.Connected, contactsRow.status)
             assertEquals(lastSync, contactsRow.lastSyncAt)
             assertEquals(2, contactsRow.enrichedCount)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `P1-4 source row keeps connection status separate from processing phase`() = runTest {
+        every { sourceStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                SourceStatus(
+                    sourceType = SourceType.GMAIL,
+                    status = SourceConnectionStatus.CONNECTED,
+                    lastSyncedAt = Instant.parse("2026-04-18T09:00:00Z"),
+                    errorMessage = null,
+                ),
+            ),
+        )
+        every { processingStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.GMAIL,
+                    phase = ProcessingPhase.GEMINI,
+                    itemCount = 1,
+                    message = ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED,
+                    updatedAt = Instant.parse("2026-04-18T09:01:00Z"),
+                ),
+            ),
+        )
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
+        contactsPermissionChecker.setGranted(false)
+
+        val viewModel = buildSourcesListViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.items.none { it.sourceType == SourceType.GMAIL }) {
+                emission = awaitItem()
+            }
+
+            val gmail = emission.items.first { it.sourceType == SourceType.GMAIL }
+            assertEquals(SourceSyncStatus.Connected, gmail.status)
+            assertEquals(R.string.processing_phase_memory, gmail.processingLabelRes)
+            assertEquals(R.string.processing_status_source_sync_delayed, gmail.processingMessage?.resId)
+            assertFalse(gmail.processingNeedsAction)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -241,6 +291,7 @@ class SourcesListViewModelSpecTest {
     private fun buildSourcesListViewModel(): SourcesListViewModel = SourcesListViewModel(
         authRepository = authRepository,
         sourceStatusRepository = sourceStatusRepository,
+        processingStatusRepository = processingStatusRepository,
         personEnrichmentRepository = personEnrichmentRepository,
         contactsPermissionChecker = contactsPermissionChecker,
         logger = logger,

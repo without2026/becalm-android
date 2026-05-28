@@ -18,6 +18,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,6 +64,7 @@ public data class SourceEventCardProjection(
     val theirActions: List<PersonDetailCommitmentSummary> = emptyList(),
     val schedules: List<PersonDetailCommitmentSummary> = emptyList(),
     val nextAction: PersonDetailNextAction? = null,
+    val firstMemoryOrigin: String? = null,
     val linkedCalendarEventId: String? = null,
     val relatedSourceTypes: List<String> = emptyList(),
 )
@@ -92,6 +94,7 @@ public data class PersonDetailUiState(
     val pendingCommitmentCount: Int = 0,
     val channelSources: Set<String> = emptySet(),
     val sourceEventCards: List<SourceEventCardProjection> = emptyList(),
+    val canLoadMoreTimeline: Boolean = false,
     val loading: Boolean = true,
     val error: UiMessage? = null,
 )
@@ -100,7 +103,7 @@ public data class PersonDetailUiState(
 
 private const val TAG = "PersonDetailViewModel"
 internal const val ARG_PERSON_ID = "person_id"
-private const val PERSON_INTERACTIONS_LIMIT = 150
+private const val PERSON_INTERACTIONS_PAGE_SIZE = 150
 
 /**
  * ViewModel for PersonDetailScreen (SRC-003, SRC-004, SRC-005).
@@ -130,6 +133,8 @@ public class PersonDetailViewModel @Inject constructor(
     private val _uiState: MutableStateFlow<PersonDetailUiState> =
         MutableStateFlow(PersonDetailUiState(personId = personId))
     public val uiState: StateFlow<PersonDetailUiState> = _uiState.asStateFlow()
+    private val interactionLimit: MutableStateFlow<Int> = MutableStateFlow(PERSON_INTERACTIONS_PAGE_SIZE)
+    private var observeJob: Job? = null
 
     init {
         if (personId.isEmpty()) {
@@ -148,20 +153,41 @@ public class PersonDetailViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    /**
+     * Restarts the detail observation path after a blocking load error.
+     */
+    public fun onRetryLoad() {
+        if (personId.isEmpty()) {
+            _uiState.update { it.copy(loading = false, error = UiMessage.resource(R.string.person_detail_error_missing_id)) }
+            return
+        }
+        _uiState.update { it.copy(loading = true, error = null) }
+        observeDetail()
+    }
+
+    /**
+     * Expands the local Room projection window for long person timelines.
+     */
+    public fun onLoadMoreTimeline() {
+        interactionLimit.update { currentLimit -> currentLimit + PERSON_INTERACTIONS_PAGE_SIZE }
+    }
+
     // ─── Private ──────────────────────────────────────────────────────────────
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeDetail() {
-        viewModelScope.launch {
+        observeJob?.cancel()
+        observeJob = viewModelScope.launch {
             userPrefsStore.observeCurrentUserId()
-                .flatMapLatest { userId ->
+                .combine(interactionLimit) { userId, limit -> userId to limit }
+                .flatMapLatest { (userId, limit) ->
                     if (userId == null) {
                         flowOf(PersonDetailUiState(personId = personId, loading = false))
                     } else {
                         combine(
                             personIndexDao.observeIdentitiesForPerson(userId, personId),
                             personEnrichmentRepository.observeAll(),
-                            personIndexDao.observeInteractionsForPerson(userId, personId, PERSON_INTERACTIONS_LIMIT),
+                            personIndexDao.observeInteractionsForPerson(userId, personId, limit),
                         ) { identities, enrichmentRows, interactions ->
                             Triple(identities, enrichmentRows, interactions)
                         }.flatMapLatest { (identities, enrichmentRows, interactions) ->
@@ -184,7 +210,7 @@ public class PersonDetailViewModel @Inject constructor(
                                         interactions = interactions,
                                         rawEvents = emptyList(),
                                         scheduleLinks = scheduleLinks,
-                                    )
+                                    ).copy(canLoadMoreTimeline = interactions.size >= limit)
                                 },
                             )
                         }.catch { e ->

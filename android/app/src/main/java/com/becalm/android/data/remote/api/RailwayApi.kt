@@ -15,6 +15,8 @@ import com.becalm.android.data.remote.dto.PatchCommitmentRequest
 import com.becalm.android.data.remote.dto.MailOAuthStartResponse
 import com.becalm.android.data.remote.dto.MailOAuthStatusResponse
 import com.becalm.android.data.remote.dto.MailSyncResponse
+import com.becalm.android.data.remote.dto.ManualMemoryCreateRequestDto
+import com.becalm.android.data.remote.dto.ManualMemoryCreateResponseDto
 import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
 import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
@@ -36,13 +38,17 @@ import com.becalm.android.data.remote.dto.SelfIdentityAnchorCreateRequestDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorPatchRequestDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorResponseDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorsResponseDto
+import com.becalm.android.data.remote.dto.OnboardingSelfIdentityCommitRequestDto
+import com.becalm.android.data.remote.dto.OnboardingSelfIdentityCommitResponseDto
 import com.becalm.android.data.remote.dto.SourceConnectionPatchRequestDto
 import com.becalm.android.data.remote.dto.SourceConnectionResponseDto
 import com.becalm.android.data.remote.dto.SourceConnectionsResponseDto
+import com.becalm.android.data.remote.dto.SourceSyncJobResponse
 import com.becalm.android.data.remote.dto.UserProfilePatchRequestDto
 import com.becalm.android.data.remote.dto.UserProfileResponseDto
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.PATCH
@@ -82,6 +88,12 @@ public interface RailwayApi {
     public suspend fun batchProductEvents(
         @Body request: ProductEventsBatchRequest,
     ): Response<ProductEventsBatchResponse>
+
+    @POST("v1/manual_memories")
+    public suspend fun createManualMemory(
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: ManualMemoryCreateRequestDto,
+    ): Response<ManualMemoryCreateResponseDto>
 
     // =========================================================================
     // RAW INGESTION EVENTS
@@ -304,6 +316,11 @@ public interface RailwayApi {
         @Body request: UserProfilePatchRequestDto,
     ): Response<UserProfileResponseDto>
 
+    @POST("v1/onboarding/self_identity")
+    public suspend fun commitOnboardingSelfIdentity(
+        @Body request: OnboardingSelfIdentityCommitRequestDto,
+    ): Response<OnboardingSelfIdentityCommitResponseDto>
+
     @GET("v1/self_identity_anchors")
     public suspend fun getSelfIdentityAnchors(): Response<SelfIdentityAnchorsResponseDto>
 
@@ -325,6 +342,16 @@ public interface RailwayApi {
     public suspend fun patchSourceConnection(
         @Path("id") id: String,
         @Body request: SourceConnectionPatchRequestDto,
+    ): Response<SourceConnectionResponseDto>
+
+    @POST("v1/source_connections/{id}:disconnect")
+    public suspend fun disconnectSourceConnection(
+        @Path("id") id: String,
+    ): Response<SourceConnectionResponseDto>
+
+    @DELETE("v1/source_connections/{id}")
+    public suspend fun deleteSourceConnection(
+        @Path("id") id: String,
     ): Response<SourceConnectionResponseDto>
 
     // =========================================================================
@@ -362,11 +389,20 @@ public interface RailwayApi {
      * Triggers a server-side Gmail / Outlook Mail sync for the authenticated user.
      *
      * @param provider Optional provider scope: `"gmail"` or `"outlook_mail"`.
+     * @param mode Optional backend sync mode. Onboarding uses `"activation_preview"`
+     * to ask Railway for a small first-screen projection while a full sync continues
+     * after the app enters the main surface.
      */
     @POST("v1/mail_sources:sync")
     public suspend fun syncMailSource(
         @Query("provider") provider: String? = null,
+        @Query("mode") mode: String? = null,
     ): Response<MailSyncResponse>
+
+    @GET("v1/source_sync_jobs/{job_id}")
+    public suspend fun getSourceSyncJob(
+        @Path("job_id") jobId: String,
+    ): Response<SourceSyncJobResponse>
 
     /**
      * Starts the backend-managed calendar OAuth flow for [provider].

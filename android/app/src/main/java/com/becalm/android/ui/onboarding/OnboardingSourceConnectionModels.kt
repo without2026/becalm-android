@@ -63,10 +63,16 @@ public enum class SourceConnectionState {
     ConsentRequired,
     Connecting,
     PendingExternalAuth,
+    Syncing,
     Connected,
     Skipped,
     Failed,
 }
+
+internal val SourceConnectionState.isBusy: Boolean
+    get() = this == SourceConnectionState.Connecting ||
+        this == SourceConnectionState.PendingExternalAuth ||
+        this == SourceConnectionState.Syncing
 
 public data class SourceConnectionItemUi(
     val provider: OnboardingSourceProvider,
@@ -75,6 +81,7 @@ public data class SourceConnectionItemUi(
     val description: String,
     val consentCopy: String?,
     val state: SourceConnectionState,
+    val primaryActionLabel: String? = null,
 )
 
 public data class OnboardingSourceOwnershipUi(
@@ -83,6 +90,8 @@ public data class OnboardingSourceOwnershipUi(
     val accountLabel: String,
     val ownership: String,
     val status: String,
+    val provider: String = "",
+    val capability: String = "",
 )
 
 internal enum class SourceConnectionsEntryPoint {

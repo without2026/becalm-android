@@ -5,6 +5,8 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.daoOp
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.NoopSyncCursorStore
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -14,6 +16,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import retrofit2.Response
@@ -57,11 +60,6 @@ public interface RawIngestionRepository {
     // ── Read ──────────────────────────────────────────────────────────────────
 
     /**
-     * Returns distinct non-null person refs recently seen in raw events or commitments.
-     */
-    public suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String>
-
-    /**
      * Emits a live list of the most recent events for a specific [counterpartyRef] owned by [userId],
      * newest-first.
      *
@@ -76,6 +74,14 @@ public interface RawIngestionRepository {
      * @param limit Maximum list size per emission.
      */
     public fun observeForSourceType(userId: String, sourceType: String, limit: Int = 100): Flow<List<RawIngestionEventEntity>>
+
+    /**
+     * Emits user-visible raw evidence items that are still queued or actively being processed.
+     *
+     * This backs the processing-status detail screen, so the user can see which concrete
+     * recordings, screenshots, or source rows are behind an aggregate "N개 정리 중" count.
+     */
+    public fun observeActiveProcessingItems(userId: String, limit: Int = 20): Flow<List<RawIngestionEventEntity>>
 
     /**
      * Emits the count of events for [userId] whose source is in [sourceTypes] and whose
@@ -116,6 +122,25 @@ public interface RawIngestionRepository {
      * Consumed by SP-29 UploadWorker.
      */
     public suspend fun findPendingSync(userId: String, limit: Int): List<RawIngestionEventEntity>
+
+    /**
+     * Returns failed user-imported evidence rows as raw-event units, not per-stage failures.
+     * A meeting row can have both a raw upload failure and a speaker-preview/extraction failure;
+     * callers must see that as one recoverable user item.
+     */
+    public suspend fun findFailedEvidenceImportsForRetry(
+        userId: String,
+        limit: Int = DEFAULT_FAILED_EVIDENCE_RETRY_LIMIT,
+    ): BecalmResult<List<RawIngestionEventEntity>>
+
+    /**
+     * Moves a failed evidence row back to the local pending state before WorkManager retry.
+     */
+    public suspend fun resetFailedEvidenceImportForRetry(
+        id: String,
+        userId: String,
+        now: Instant,
+    ): BecalmResult<Unit>
 
     /**
      * Marks the given event [ids] as "synced" in a single UPDATE.
@@ -205,6 +230,10 @@ public interface RawIngestionRepository {
      * @return [BecalmResult.Success] with the number of rows deleted.
      */
     public suspend fun deleteAllForUser(userId: String): BecalmResult<Int>
+
+    public companion object {
+        public const val DEFAULT_FAILED_EVIDENCE_RETRY_LIMIT: Int = 20
+    }
 }
 
 // ─── Implementation ───────────────────────────────────────────────────────────
@@ -222,6 +251,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     private val dao: RawIngestionEventDao,
     private val apiProvider: Provider<RailwayApi>,
     private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
+    private val cursorStore: SyncCursorStore,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RawIngestionRepository {
@@ -237,6 +267,20 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         dao = dao,
         apiProvider = Provider { api },
         emailBodyRepositoryProvider = Provider { NoopEmailBodyRepository },
+        cursorStore = NoopSyncCursorStore,
+        logger = logger,
+    )
+
+    public constructor(
+        dao: RawIngestionEventDao,
+        apiProvider: Provider<RailwayApi>,
+        emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
+        logger: Logger,
+    ) : this(
+        dao = dao,
+        apiProvider = apiProvider,
+        emailBodyRepositoryProvider = emailBodyRepositoryProvider,
+        cursorStore = NoopSyncCursorStore,
         logger = logger,
     )
 
@@ -273,9 +317,6 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 
     // ── Read ──────────────────────────────────────────────────────────────────
 
-    override suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String> =
-        dao.findDistinctPersonRefsForUser(userId, limit)
-
     override fun observeForPerson(
         userId: String,
         counterpartyRef: String,
@@ -289,6 +330,12 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         limit: Int,
     ): Flow<List<RawIngestionEventEntity>> =
         dao.observeRecentForSourceType(userId, sourceType, limit)
+
+    override fun observeActiveProcessingItems(
+        userId: String,
+        limit: Int,
+    ): Flow<List<RawIngestionEventEntity>> =
+        dao.observeActiveProcessingItems(userId, limit)
 
     override fun observeCountForSourceTypesSince(
         userId: String,
@@ -317,6 +364,24 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             limit = limit,
             maxLegacyRepairAttempts = MAX_LEGACY_FAILED_MAIL_REPAIR_ATTEMPTS,
         )
+
+    override suspend fun findFailedEvidenceImportsForRetry(
+        userId: String,
+        limit: Int,
+    ): BecalmResult<List<RawIngestionEventEntity>> =
+        logger.daoOp(TAG, "findFailedEvidenceImportsForRetry failed") {
+            dao.findFailedEvidenceImportsForRetry(userId = userId, limit = limit)
+        }
+
+    override suspend fun resetFailedEvidenceImportForRetry(
+        id: String,
+        userId: String,
+        now: Instant,
+    ): BecalmResult<Unit> =
+        logger.daoOp(TAG, "resetFailedEvidenceImportForRetry failed") {
+            dao.resetFailedEvidenceImportForRetry(id = id, userId = userId, now = now)
+            logger.d(TAG, "resetFailedEvidenceImportForRetry id=$id")
+        }
 
     override suspend fun markSynced(ids: List<String>): BecalmResult<Unit> {
         if (ids.isEmpty()) return BecalmResult.Success(Unit)
@@ -362,7 +427,9 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         sourceType: String?,
         since: Instant?,
     ): BecalmResult<RawIngestionRepository.RefreshStats> = withContext(ioDispatcher) {
-        var cursor: String? = null
+        val cursorKey = rawMirrorCursorKey(sourceType)
+        val useStoredCursor = since == null
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -405,6 +472,9 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             lastHasMore = body.hasMore
             lastCursor = body.cursor
             cursor = body.cursor
+            if (useStoredCursor) {
+                cursorStore.setCursor(cursorKey, body.cursor)
+            }
         }
 
         logger.d(TAG, "refreshSince done sourceType=$sourceType fetched=$totalFetched upserted=$totalUpserted")
@@ -511,6 +581,8 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         private const val MAX_LEGACY_FAILED_MAIL_REPAIR_ATTEMPTS = 3
     }
 }
+
+private fun rawMirrorCursorKey(sourceType: String?): String = "raw_ingestion_events:${sourceType ?: "all"}"
 
 private object NoopEmailBodyRepository : EmailBodyRepository {
     override suspend fun insert(entity: com.becalm.android.data.local.db.entity.EmailBodyEntity) = Unit

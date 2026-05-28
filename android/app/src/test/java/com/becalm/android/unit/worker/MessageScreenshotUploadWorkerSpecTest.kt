@@ -128,6 +128,7 @@ class MessageScreenshotUploadWorkerSpecTest {
                 selfSpeakerId = any(),
                 speakerMappings = any(),
                 speakerPreviewId = any(),
+                processingConfirmed = any(),
             )
         } returns Response.success(
             SourceExtractionResponse(
@@ -144,11 +145,11 @@ class MessageScreenshotUploadWorkerSpecTest {
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         assertEquals("image/jpeg", imageSlot.captured.body.contentType().toString())
-        coVerify(exactly = 1) { sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any()) }
+        coVerify(exactly = 1) { sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any(), processingConfirmed = any()) }
         coVerifyOrder {
             rawIngestionRepository.uploadBatch(listOf(entity))
             rawIngestionRepository.markSynced(listOf(RAW_ID))
-            sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any())
+            sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any(), processingConfirmed = any())
         }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
@@ -178,7 +179,7 @@ class MessageScreenshotUploadWorkerSpecTest {
 
         assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
         coVerify(exactly = 1) { rawIngestionRepository.uploadBatch(listOf(entity)) }
-        coVerify(exactly = 0) { sourceExtractionApi.commitmentExtract(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { sourceExtractionApi.commitmentExtract(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     private fun buildWorker(): MessageScreenshotUploadWorker =

@@ -13,8 +13,12 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.evidence.EvidenceImportSheet
 import com.becalm.android.ui.evidence.EvidenceImportSheetHost
+import com.becalm.android.ui.evidence.EvidenceImportStatusAction
+import com.becalm.android.ui.evidence.EvidenceImportStatusPhase
+import com.becalm.android.ui.evidence.EvidenceImportStatusSurfaceUi
 import com.becalm.android.ui.evidence.EvidenceImportUiState
 import com.becalm.android.ui.evidence.MeetingSpeakerReviewUiState
 import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
@@ -128,17 +132,16 @@ class EvidenceImportUiTest {
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
                     state = EvidenceImportUiState(
-                        statusMessage = com.becalm.android.ui.components.UiMessage.resource(
-                            R.string.evidence_import_status_review_required,
-                        ),
+                        statusSurface = reviewRequiredSurface(),
                     ),
                     onReviewRequiredClick = { reviewClicks += 1 },
                 )
             }
         }
 
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag("evidence-import-status").assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.evidence_import_status_review_required)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.evidence_import_status_review_required_title, "1")).assertIsDisplayed()
         composeRule.onNodeWithTag("evidence-import-review-action")
             .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.runOnIdle {
@@ -156,21 +159,47 @@ class EvidenceImportUiTest {
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
                     state = EvidenceImportUiState(
-                        statusMessage = com.becalm.android.ui.components.UiMessage.resource(
-                            R.string.evidence_import_status_review_required,
-                        ),
+                        statusSurface = reviewRequiredSurface(),
                     ),
                     onReviewRequiredClick = { navigatedToReview = true },
                 )
             }
         }
 
+        composeRule.waitForIdle()
         composeRule.onNodeWithText(string(R.string.evidence_import_review_action)).assertIsDisplayed()
         composeRule.onNodeWithTag("evidence-import-review-action")
             .performSemanticsAction(SemanticsActions.OnClick)
 
         composeRule.runOnIdle {
             assertEquals(true, navigatedToReview)
+        }
+    }
+
+    @Test
+    fun `consent required banner CTA routes to consent settings`() {
+        var navigatedToConsent = false
+        composeRule.setContent {
+            BecalmTheme {
+                EvidenceImportSheetHost(
+                    controller = rememberEvidenceImportSheetController(),
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    state = EvidenceImportUiState(
+                        statusSurface = consentRequiredSurface(),
+                    ),
+                    onConsentRequiredClick = { navigatedToConsent = true },
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText(string(R.string.evidence_import_status_action_consent)).assertIsDisplayed()
+        composeRule.onNodeWithTag("evidence-import-consent-action")
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        composeRule.runOnIdle {
+            assertEquals(true, navigatedToConsent)
         }
     }
 
@@ -190,6 +219,28 @@ class EvidenceImportUiTest {
         }
     }
 
-    private fun string(resId: Int): String =
-        ApplicationProvider.getApplicationContext<Context>().getString(resId)
+    private fun reviewRequiredSurface(): EvidenceImportStatusSurfaceUi =
+        EvidenceImportStatusSurfaceUi(
+            phase = EvidenceImportStatusPhase.REVIEW_REQUIRED,
+            title = UiMessage.resource(R.string.evidence_import_status_review_required_title, "1"),
+            body = UiMessage.resource(R.string.evidence_import_status_review_required_body),
+            primaryAction = EvidenceImportStatusAction.REVIEW,
+            primaryActionLabel = UiMessage.resource(R.string.evidence_import_review_action),
+            secondaryAction = EvidenceImportStatusAction.DETAILS,
+            secondaryActionLabel = UiMessage.resource(R.string.evidence_import_status_action_details),
+            transitionKey = "review:1",
+        )
+
+    private fun consentRequiredSurface(): EvidenceImportStatusSurfaceUi =
+        EvidenceImportStatusSurfaceUi(
+            phase = EvidenceImportStatusPhase.CONSENT_REQUIRED,
+            title = UiMessage.resource(R.string.evidence_import_status_consent_required_title, "1"),
+            body = UiMessage.resource(R.string.evidence_import_status_consent_required_body),
+            primaryAction = EvidenceImportStatusAction.CONSENT_SETTINGS,
+            primaryActionLabel = UiMessage.resource(R.string.evidence_import_status_action_consent),
+            transitionKey = "consent:1",
+        )
+
+    private fun string(resId: Int, vararg args: Any): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
 }

@@ -18,36 +18,29 @@ import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 
 internal object CommitmentManagementProjector {
-    fun buildUiState(
-        current: CommitmentUiState,
-        rows: List<CommitmentManagementRow>,
-        scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
-        filter: CommitmentFilter = current.filter,
-        loading: Boolean = current.loading,
-        now: Instant,
-    ): CommitmentUiState {
-        val projectedRows = applyFilter(rows, scheduleLinks, filter, now)
-        val activeRows = projectedRows.filterNot(::isTerminalRow)
-        val schedulePastRows = if (filter == CommitmentFilter.SCHEDULE) {
-            projectedRows.filter { it.isPastSchedule(now) }
-        } else {
-            emptyList()
-        }
-        return current.copy(
-            filter = filter,
-            items = projectedRows,
-            activeItems = activeRows,
-            scheduleUpcomingItems = if (filter == CommitmentFilter.SCHEDULE) {
-                projectedRows.filterNot { it.isPastSchedule(now) }
-            } else {
-                emptyList()
-            },
-            schedulePastSection = CommitmentSectionUiState(
-                count = schedulePastRows.size,
-                items = schedulePastRows,
-                expanded = current.schedulePastSection.expanded,
-                dimmed = true,
-            ),
+	    fun buildUiState(
+	        current: CommitmentUiState,
+	        rows: List<CommitmentManagementRow>,
+	        scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
+	        filter: CommitmentFilter = current.filter,
+	        loading: Boolean = current.loading,
+	        now: Instant,
+	    ): CommitmentUiState {
+	        val effectiveFilter = filter.takeUnless { it == CommitmentFilter.SCHEDULE } ?: CommitmentFilter.ALL
+	        val commitmentRows = rows.filterNot { it.itemType == CommitmentItemType.SCHEDULE }
+	        val projectedRows = applyFilter(commitmentRows, scheduleLinks, effectiveFilter, now)
+	        val activeRows = projectedRows.filterNot(::isTerminalRow)
+	        return current.copy(
+	            filter = effectiveFilter,
+	            items = projectedRows,
+	            activeItems = activeRows,
+	            scheduleUpcomingItems = emptyList(),
+	            schedulePastSection = CommitmentSectionUiState(
+	                count = 0,
+	                items = emptyList(),
+	                expanded = false,
+	                dimmed = true,
+	            ),
             confirmedSection = buildDueSectionState(
                 rows = activeRows,
                 bucket = CommitmentDueBucket.CONFIRMED,
@@ -129,10 +122,10 @@ internal object CommitmentManagementProjector {
                     isTakeDirection(it.row.direction) &&
                     !it.state.isClosed()
             }
-            CommitmentFilter.SCHEDULE -> rowsWithState.filter { it.row.itemType == CommitmentItemType.SCHEDULE }
-            CommitmentFilter.CLOSED -> rowsWithState.filter {
-                it.row.itemType == CommitmentItemType.ACTION && it.state.isClosed()
-            }
+	            CommitmentFilter.SCHEDULE -> emptyList()
+	            CommitmentFilter.CLOSED -> rowsWithState.filter {
+	                it.row.itemType == CommitmentItemType.ACTION && it.state.isClosed()
+	            }
         }
         return filtered
             .sortedForDisplay(now)

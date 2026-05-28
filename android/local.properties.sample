@@ -18,13 +18,18 @@ SUPABASE_URL=https://xxxxxxxxxxxxxxxxxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
 
 # Google Web OAuth 2.0 Client ID used by Credential Manager for Supabase sign-in.
+# Keep this key name aligned with protected release runtime verification.
 # Example: 1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com
-google.web.client.id=
+GOOGLE_WEB_CLIENT_ID=
 
 # Product analytics / operational crash telemetry.
 # google-services.json is generated from CI secrets and must not be committed.
 AMPLITUDE_API_KEY=
 TELEMETRY_ENABLED=true
+
+# Rollback switch for Supabase phone OTP sign-in. Set to false to hide the
+# phone CTA while leaving Google/email auth untouched.
+PHONE_AUTH_ENABLED=true
 
 # Optional Android release upload signing. Local debug/release smoke builds can
 # omit these. Protected CI builds with require_signing=true fail unless all four

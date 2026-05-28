@@ -88,7 +88,7 @@ class ColdSyncRuntimeCoordinatorSpecTest {
     }
 
     @Test
-    fun `COLD-004 startStage2 marks stage2 syncing and fans out IMAP plus voice sources`() = runTest {
+    fun `COLD-004 startStage2 marks stage2 syncing and fans out IMAP plus recording sources`() = runTest {
         val coordinator = buildCoordinator()
 
         val result = coordinator.startStage2(Instant.parse("2026-04-23T01:00:00Z"))
@@ -100,6 +100,23 @@ class ColdSyncRuntimeCoordinatorSpecTest {
         verify(exactly = 1) { foregroundWorkScheduler.enqueueImapNaverOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueImapDaumOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueMediaStoreOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS) }
+    }
+
+    @Test
+    fun `COLD-004 startStage2 schedules MediaStore when only call recordings are enabled`() = runTest {
+        every { userPrefsStore.observeEnabledSources() } returns flowOf(setOf(SourceType.CALL_RECORDING))
+        val coordinator = buildCoordinator()
+
+        val result = coordinator.startStage2(Instant.parse("2026-04-23T01:00:00Z"))
+
+        assertTrue(result is BecalmResult.Success<*>)
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncStart(SourceType.CALL_RECORDING) }
+        coVerify(exactly = 0) { sourceStatusRepository.recordSyncStart(SourceType.VOICE) }
+        verify(exactly = 1) {
+            foregroundWorkScheduler.enqueueMediaStoreOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS)
+        }
+        verify(exactly = 0) { foregroundWorkScheduler.enqueueImapNaverOneShotNow(any()) }
+        verify(exactly = 0) { foregroundWorkScheduler.enqueueImapDaumOneShotNow(any()) }
     }
 
     @Test

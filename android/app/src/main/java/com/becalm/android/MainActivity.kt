@@ -22,7 +22,9 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.receiver.ReminderBroadcastReceiver
+import com.becalm.android.share.ShareImportNavigation
 import com.becalm.android.ui.navigation.AppDeepLinks
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.theme.BecalmTheme
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
@@ -69,6 +71,7 @@ public class MainActivity : ComponentActivity() {
      * consumption.
      */
     private val pendingDeepLinkRoute = mutableStateOf<String?>(null)
+    private val pendingShareImportNotice = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Swap the launch-time splash theme for the real app theme BEFORE super.onCreate
@@ -80,14 +83,18 @@ public class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
         )
 
+        pendingShareImportNotice.value = ShareImportNavigation.hasCompletedImport(intent)
         pendingDeepLinkRoute.value = intent?.let(::routeAndTrackDeepLink)
 
         setContent {
             BecalmTheme {
                 var deepLinkRoute by remember { pendingDeepLinkRoute }
+                var shareImportNotice by remember { pendingShareImportNotice }
                 BecalmApp(
                     pendingDeepLinkRoute = deepLinkRoute,
                     onDeepLinkConsumed = { deepLinkRoute = null },
+                    showShareImportNotice = shareImportNotice,
+                    onShareImportNoticeShown = { shareImportNotice = false },
                     productAnalytics = productAnalytics,
                 )
             }
@@ -97,10 +104,14 @@ public class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (ShareImportNavigation.hasCompletedImport(intent)) {
+            pendingShareImportNotice.value = true
+        }
         routeAndTrackDeepLink(intent)?.let { pendingDeepLinkRoute.value = it }
     }
 
     private fun routeAndTrackDeepLink(intent: Intent): String? {
+        internalStartRoute(intent)?.let { return it }
         handleDebugCrashDeepLink(intent)?.let { return null }
         val route = AppDeepLinks.routeFrom(intent) ?: return null
         if (route.startsWith("commitments/")) {
@@ -108,6 +119,10 @@ public class MainActivity : ComponentActivity() {
         }
         return route
     }
+
+    private fun internalStartRoute(intent: Intent): String? =
+        intent.getStringExtra(EXTRA_START_ROUTE)
+            ?.takeIf { route -> route in BecalmNavigationDefaults.mainTabRoutes }
 
     private fun trackCommitmentNotificationOpened(intent: Intent, route: String) {
         val now = Clock.System.now()
@@ -165,7 +180,9 @@ public class MainActivity : ComponentActivity() {
         return Unit
     }
 
-    private companion object {
+    public companion object {
+        public const val EXTRA_START_ROUTE: String = "com.becalm.android.extra.START_ROUTE"
+
         private fun availableActionsAtOpen(state: CommitmentState?, isDeleted: Boolean): List<String> {
             if (state == null || isDeleted) return emptyList()
             val actions = when (state) {

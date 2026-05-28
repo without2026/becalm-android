@@ -229,16 +229,16 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     override fun observeAll(): Flow<List<SourceStatus>> {
         // PRODUCT_SOURCES (user-facing sources) — NOT the schema-level ALL set.
         // Local audio sources are shown separately even though the MediaStore worker
-        // shares the same parent Recordings SAF grant.
+        // shares the same app-owned Recordings path selection.
         return combine(
             userPrefs.data.map { prefs ->
                 SourceType.PRODUCT_SOURCES.map { source ->
-                    prefs.toSourceStatus(source)
+                    prefs.toSourceStatusSnapshot(source)
                 }
             },
             observeConnectedSourceTypes(),
-        ) { statuses, connectedSourceTypes ->
-            statuses.map { status -> status.withConnectedSourceOverlay(connectedSourceTypes) }
+        ) { snapshots, connectedSourceTypes ->
+            snapshots.map { snapshot -> snapshot.withConnectedSourceOverlay(connectedSourceTypes) }
         }
             .distinctUntilChanged()
     }
@@ -248,10 +248,10 @@ public class SourceStatusRepositoryImpl @Inject constructor(
 
     override fun observeFor(sourceType: String): Flow<SourceStatus> =
         combine(
-            userPrefs.data.map { prefs -> prefs.toSourceStatus(sourceType) },
+            userPrefs.data.map { prefs -> prefs.toSourceStatusSnapshot(sourceType) },
             observeConnectedSourceTypes(),
-        ) { status, connectedSourceTypes ->
-            status.withConnectedSourceOverlay(connectedSourceTypes)
+        ) { snapshot, connectedSourceTypes ->
+            snapshot.withConnectedSourceOverlay(connectedSourceTypes)
         }.distinctUntilChanged()
 
     private fun observeConnectedSourceTypes(): Flow<Set<String>> =
@@ -281,13 +281,31 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             }
         }.distinctUntilChanged()
 
-    private fun Preferences.toSourceStatus(sourceType: String): SourceStatus =
-        SourceStatusDeriver.derive(
-            sourceType = sourceType,
-            lastSyncedAtMs = this[SourceStatusPrefsKeys.lastSyncedAt(sourceType)],
-            lastError = this[SourceStatusPrefsKeys.lastError(sourceType)],
-            isInProgress = this[SourceStatusPrefsKeys.inProgress(sourceType)] ?: false,
+    private data class SourceStatusSnapshot(
+        val status: SourceStatus,
+        val serverConnectionState: String?,
+    )
+
+    private fun Preferences.toSourceStatusSnapshot(sourceType: String): SourceStatusSnapshot {
+        val serverConnectionState = this[SourceStatusPrefsKeys.connectionState(sourceType)]
+        return SourceStatusSnapshot(
+            status = SourceStatusDeriver.derive(
+                sourceType = sourceType,
+                lastSyncedAtMs = this[SourceStatusPrefsKeys.lastSyncedAt(sourceType)],
+                lastError = this[SourceStatusPrefsKeys.lastError(sourceType)],
+                isInProgress = this[SourceStatusPrefsKeys.inProgress(sourceType)] ?: false,
+                serverConnectionState = serverConnectionState,
+            ),
+            serverConnectionState = serverConnectionState,
         )
+    }
+
+    private fun SourceStatusSnapshot.withConnectedSourceOverlay(connectedSourceTypes: Set<String>): SourceStatus {
+        if (isAuthoritativeServerConnectionState(serverConnectionState)) {
+            return status
+        }
+        return status.withConnectedSourceOverlay(connectedSourceTypes)
+    }
 
     private fun SourceStatus.withConnectedSourceOverlay(connectedSourceTypes: Set<String>): SourceStatus =
         if (sourceType in connectedSourceTypes && status == SourceConnectionStatus.NEVER_CONNECTED) {
@@ -323,6 +341,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 lastSyncedAt = SourceStatusPrefsKeys::lastSyncedAt,
                 lastError = SourceStatusPrefsKeys::lastError,
                 inProgress = SourceStatusPrefsKeys::inProgress,
+                connectionState = SourceStatusPrefsKeys::connectionState,
             )
             logger.d(TAG, "refreshFromServer merged=${body.sources.size}")
             trackStatusRefresh(success = true, sourceCount = body.sources.size, result = "success")
@@ -383,6 +402,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 prefs.remove(SourceStatusPrefsKeys.lastSyncedAt(sourceType))
                 prefs.remove(SourceStatusPrefsKeys.lastError(sourceType))
                 prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
+                prefs.remove(SourceStatusPrefsKeys.connectionState(sourceType))
             }
             logger.d(TAG, "clear source=$sourceType")
         }
@@ -396,6 +416,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 prefs.remove(SourceStatusPrefsKeys.lastSyncedAt(source))
                 prefs.remove(SourceStatusPrefsKeys.lastError(source))
                 prefs.remove(SourceStatusPrefsKeys.inProgress(source))
+                prefs.remove(SourceStatusPrefsKeys.connectionState(source))
             }
         }
         logger.d(TAG, "clearAll completed")

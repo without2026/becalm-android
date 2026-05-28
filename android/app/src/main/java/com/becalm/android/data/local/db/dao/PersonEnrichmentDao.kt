@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
@@ -84,18 +85,21 @@ public interface PersonEnrichmentDao {
      * Returns a cold [Flow] that emits the full list of enrichment rows ordered by
      * [PersonEnrichmentEntity.personRef], re-emitting on every table change.
      *
-     * Used by PersonsScreen to join display names into the virtual persons list
-     * derived from `raw_ingestion_events` and `commitments`.
+     * Used by person matching and by legacy person-ref display joins.
      */
     @Query("SELECT * FROM persons_enrichment ORDER BY person_ref ASC")
     public fun observeAll(): Flow<List<PersonEnrichmentEntity>>
 
     /**
+     * Returns the current contact-baseline snapshot for worker-side matching.
+     */
+    @Query("SELECT * FROM persons_enrichment ORDER BY person_ref ASC")
+    public suspend fun findAllSnapshot(): List<PersonEnrichmentEntity>
+
+    /**
      * Emits only the aggregate fields needed by source/settings UI.
      *
-     * The count is the number of distinct ContactsContract rows actually matched. Minimal
-     * "no contact found" cache rows have a null source_contact_id and are intentionally
-     * excluded so the UI does not present app-internal personRef cache size as contact count.
+     * The count is the number of distinct ContactsContract rows in the local baseline.
      */
     @Query("SELECT COUNT(DISTINCT source_contact_id) AS count, MAX(last_synced_at) AS lastSyncedAt FROM persons_enrichment")
     public fun observeSummary(): Flow<PersonEnrichmentSummary>
@@ -112,6 +116,15 @@ public interface PersonEnrichmentDao {
      */
     @Query("DELETE FROM persons_enrichment")
     public suspend fun deleteAll(): Int
+
+    /**
+     * Replaces the local contacts baseline atomically after a successful ContactsContract scan.
+     */
+    @Transaction
+    public suspend fun replaceAll(entities: List<PersonEnrichmentEntity>): Int {
+        deleteAll()
+        return upsertAll(entities).size
+    }
 
     @Query("SELECT COUNT(*) FROM persons_enrichment")
     public suspend fun countAll(): Int

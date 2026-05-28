@@ -15,16 +15,13 @@ import com.becalm.android.core.analytics.ProductAnalyticsEvent
 import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.ui.components.BecalmBottomNavigation
 import com.becalm.android.ui.navigation.BecalmNavHost
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.navigation.BecalmRoute
 import java.util.UUID
 import kotlinx.datetime.Clock
 
 /** Routes where the bottom navigation bar is visible. */
-private val TAB_ROUTES = setOf(
-    BecalmRoute.Today.path,
-    BecalmRoute.Persons.path,
-    BecalmRoute.Commitments.path,
-)
+private val TAB_ROUTES = BecalmNavigationDefaults.mainTabRoutes.toSet()
 
 /**
  * Root composable that hosts the nav controller, scaffold, and bottom navigation.
@@ -41,6 +38,8 @@ private val TAB_ROUTES = setOf(
 public fun BecalmApp(
     pendingDeepLinkRoute: String? = null,
     onDeepLinkConsumed: () -> Unit = {},
+    showShareImportNotice: Boolean = false,
+    onShareImportNoticeShown: () -> Unit = {},
     productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
 ) {
     val navController = rememberNavController()
@@ -69,6 +68,8 @@ public fun BecalmApp(
             navController = navController,
             startDestination = BecalmRoute.Splash.path,
             modifier = Modifier.padding(padding),
+            showShareImportNotice = showShareImportNotice,
+            onShareImportNoticeShown = onShareImportNoticeShown,
         )
     }
 }

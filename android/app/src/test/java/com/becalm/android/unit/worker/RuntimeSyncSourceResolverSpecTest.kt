@@ -5,6 +5,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.onboarding.RecordingPathSelection
 import com.becalm.android.worker.DefaultRuntimeSyncSourceResolver
 import com.becalm.android.worker.MediaAudioPermissionChecker
 import io.mockk.coEvery
@@ -26,8 +27,8 @@ class RuntimeSyncSourceResolverSpecTest {
     fun `filters stale local imap flags before enqueueing workers`() = runTest {
         stubSourceFlags()
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
-        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
-        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf("content://tree/voice")
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf(RecordingPathSelection.VOICE)
         every { mediaAudioPermissionChecker.isGranted() } returns true
         every { userPrefsStore.observeSourceEnabled(SourceType.GOOGLE_CALENDAR) } returns flowOf(true)
         every { userPrefsStore.observeSourceEnabled(SourceType.OUTLOOK_CALENDAR) } returns flowOf(false)

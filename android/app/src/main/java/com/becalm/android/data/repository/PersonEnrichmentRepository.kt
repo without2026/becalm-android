@@ -92,6 +92,11 @@ public interface PersonEnrichmentRepository {
     public suspend fun upsertAll(entities: List<PersonEnrichmentEntity>): BecalmResult<Int>
 
     /**
+     * Atomically replaces the local contacts baseline after a successful ContactsContract scan.
+     */
+    public suspend fun replaceAll(entities: List<PersonEnrichmentEntity>): BecalmResult<Int>
+
+    /**
      * Deletes every row in the `persons_enrichment` table, returning
      * [BecalmResult.Success] with the count of deleted rows on success.
      *
@@ -153,6 +158,17 @@ public class PersonEnrichmentRepositoryImpl @Inject constructor(
                     e.rethrowIfCancellation()
                     logger.e(TAG, "upsertAll failed for ${entities.size} entities", e)
                     BecalmResult.Failure(e.toBecalmError("enrichment batch write failed"))
+                },
+            )
+
+    override suspend fun replaceAll(entities: List<PersonEnrichmentEntity>): BecalmResult<Int> =
+        runCatching { dao.replaceAll(entities) }
+            .fold(
+                onSuccess = { count -> BecalmResult.Success(count) },
+                onFailure = { e ->
+                    e.rethrowIfCancellation()
+                    logger.e(TAG, "replaceAll failed for ${entities.size} entities", e)
+                    BecalmResult.Failure(e.toBecalmError("enrichment baseline replace failed"))
                 },
             )
 

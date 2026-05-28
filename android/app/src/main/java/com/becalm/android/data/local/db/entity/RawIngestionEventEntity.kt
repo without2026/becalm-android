@@ -198,9 +198,21 @@ public data class RawIngestionEventEntity(
      * - "awaiting_consent"  — device-owned extraction sources. pipa_third_party_consent=false at worker
      *                         run time; upload blocked until consent is granted (VOI-004).
      *                         Transitions to "pending" when [com.becalm.android.data.local.db.dao.RawIngestionEventDao.releaseAwaitingConsentVoiceAndReturnIds] is called.
+     * - "detected_pending_confirmation" — local audio file was discovered, but the user has
+     *                         not approved CLOVA/STT processing for that file.
+     * - "skipped_by_user"    — user dismissed a detected local audio file without processing it.
      */
     @ColumnInfo(name = "sync_status")
     val syncStatus: String = "pending",
+
+    /**
+     * Room-only user approval timestamp for billable local audio processing.
+     *
+     * Local audio files may be discovered automatically, but upload/STT/diarization must not
+     * start until this field is non-null. Manual imports set it at the explicit import action.
+     */
+    @ColumnInfo(name = "processing_confirmed_at")
+    val processingConfirmedAt: Instant? = null,
 
     /**
      * Room-only retry counter. Never uploaded to Railway or Supabase.

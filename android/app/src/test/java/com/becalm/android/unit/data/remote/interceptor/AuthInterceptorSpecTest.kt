@@ -61,6 +61,45 @@ class AuthInterceptorSpecTest {
     }
 
     @Test
+    fun `debug local-only token is never attached or refreshed`() {
+        every { authTokenProvider.currentAccessToken() } returns
+            "header.payload.${AuthInterceptor.DEBUG_LOCAL_ONLY_TOKEN_SIGNATURE}"
+
+        val interceptor = buildInterceptor()
+        val chain = FakeChain(
+            request = request("https://railway.example.com/v1/resource"),
+            responses = mutableListOf(response(code = 401, body = "debug-local-only")),
+        )
+
+        val result = interceptor.intercept(chain)
+
+        assertEquals(401, result.code)
+        assertEquals("debug-local-only", result.body!!.string())
+        assertNull(chain.proceededRequests.single().header("Authorization"))
+        coVerify(exactly = 0) { authTokenProvider.refresh(any()) }
+        coVerify(exactly = 0) { invalidator.invalidate() }
+    }
+
+    @Test
+    fun `legacy debug local-only token is never attached or refreshed`() {
+        every { authTokenProvider.currentAccessToken() } returns "header.payload.debug"
+
+        val interceptor = buildInterceptor()
+        val chain = FakeChain(
+            request = request("https://railway.example.com/v1/resource"),
+            responses = mutableListOf(response(code = 401, body = "legacy-debug-local-only")),
+        )
+
+        val result = interceptor.intercept(chain)
+
+        assertEquals(401, result.code)
+        assertEquals("legacy-debug-local-only", result.body!!.string())
+        assertNull(chain.proceededRequests.single().header("Authorization"))
+        coVerify(exactly = 0) { authTokenProvider.refresh(any()) }
+        coVerify(exactly = 0) { invalidator.invalidate() }
+    }
+
+    @Test
     fun `railway request without token omits bearer header and does not invalidate on unauthenticated refresh`() {
         every { authTokenProvider.currentAccessToken() } returns null
         coEvery { authTokenProvider.refresh("") } returns AuthTokenProvider.RefreshResult.Unauthenticated

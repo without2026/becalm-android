@@ -34,6 +34,13 @@ internal fun sourceConnectionPresentationFor(state: SourceConnectionState): Sour
             actionRequired = false,
             terminal = false,
         )
+        SourceConnectionState.Syncing -> SourceStatePresentation(
+            labelRes = R.string.onb_sources_status_syncing,
+            tone = StatusTone.Progress,
+            recommendedCtaRes = null,
+            actionRequired = false,
+            terminal = false,
+        )
         SourceConnectionState.Connected -> SourceStatePresentation(
             labelRes = R.string.onb_sources_status_connected,
             tone = StatusTone.Success,

@@ -2,6 +2,8 @@ package com.becalm.android.ui.onboarding
 
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
@@ -86,9 +88,15 @@ public fun OutlookCalendarOAuthScreen(
             .filter { it.provider == CalendarOAuthProvider.OUTLOOK_CALENDAR }
             .collect { event ->
                 when (event) {
+                    is CalendarConnectEvent.Syncing -> {
+                        pendingOAuthResumeRefresh = true
+                    }
                     is CalendarConnectEvent.Connected -> {
                         pendingOAuthResumeRefresh = false
                         navigateDownstream()
+                    }
+                    is CalendarConnectEvent.NotConnected -> {
+                        pendingOAuthResumeRefresh = false
                     }
                     is CalendarConnectEvent.Failed -> {
                         pendingOAuthResumeRefresh = false
@@ -140,6 +148,7 @@ internal fun OutlookCalendarOAuthContent(
 ) {
     OAuthPlaceholderContent(
         modifier = modifier,
+        icon = Icons.Outlined.CalendarMonth,
         headline = stringResource(R.string.onb_outlook_cal_headline),
         body = stringResource(R.string.onb_outlook_cal_body),
         connectLabel = stringResource(R.string.action_connect),

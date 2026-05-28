@@ -2,6 +2,8 @@ package com.becalm.android.ui.sources
 
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.ui.components.UiMessage
@@ -11,6 +13,7 @@ internal object SourceDetailProjector {
     fun buildUiState(
         sourceType: String,
         status: SourceStatus?,
+        processingState: ProcessingSourceState?,
         sourceEvents: List<RawIngestionEventEntity>,
         showDisconnectConfirmDialog: Boolean,
         disconnectOutcome: SourceDisconnectOutcome?,
@@ -31,6 +34,8 @@ internal object SourceDetailProjector {
             status = sourceSyncStatusFor(status?.status),
             lastSyncAt = status?.lastSyncedAt,
             eventsSyncedCount = eventSummaries.size,
+            processingPhase = processingState?.phase ?: ProcessingPhase.IDLE,
+            processingMessage = processingState?.message,
             hasError = status?.status == SourceConnectionStatus.ERROR || status?.errorMessage != null,
             showReconnectButton = connectionButtons.showReconnectButton,
             showDisconnectButton = connectionButtons.showDisconnectButton,

@@ -141,6 +141,16 @@ public data class CalendarEventListResponse(
 public data class CalendarSyncResponse(
     /** Number of calendar events synced from upstream provider(s) during this request. */
     @field:Json(name = "synced") val synced: Int,
+    @field:Json(name = "job_id") val jobId: String? = null,
+    @field:Json(name = "status") val status: String? = null,
+    @field:Json(name = "accepted") val accepted: Boolean = false,
+    @field:Json(name = "retry_after_seconds") val retryAfterSeconds: Long? = null,
+    @field:Json(name = "error_code") val errorCode: String? = null,
+    @field:Json(name = "error_message") val errorMessage: String? = null,
+    @field:Json(name = "stage") val stage: String? = null,
+    @field:Json(name = "progress") val progress: Double? = null,
+    @field:Json(name = "message") val message: String? = null,
+    @field:Json(name = "sync_mode") val syncMode: String? = null,
 )
 
 /**

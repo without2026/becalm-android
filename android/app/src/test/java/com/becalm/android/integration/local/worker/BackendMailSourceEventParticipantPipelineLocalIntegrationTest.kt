@@ -3,6 +3,8 @@ package com.becalm.android.integration.local.worker
 import androidx.work.ListenableWorker
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
+import com.becalm.android.data.local.datastore.ImapCursorState
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
@@ -21,7 +23,9 @@ import com.becalm.android.worker.WorkScheduler
 import io.mockk.mockk
 import javax.inject.Provider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -502,6 +506,53 @@ class BackendMailSourceEventParticipantPipelineLocalIntegrationTest {
         assertTrue(dirtySources.any { it.sourceRef == "commitment:commitment-stale" })
     }
 
+    @Test
+    fun `incremental commitment participant refresh keeps existing mirror when server returns empty page`() = runTest {
+        val cursorStore = InMemorySyncCursorStore(
+            initialCursors = mapOf("commitment_participants" to "cursor-existing"),
+        )
+        db.personIndexDao().upsertCommitmentParticipants(
+            listOf(
+                commitmentParticipant(
+                    id = "cp-existing",
+                    commitmentId = "commitment-existing",
+                    personId = "person-existing",
+                ),
+            ),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "data": [],
+                      "cursor": "cursor-next",
+                      "has_more": false
+                    }
+                    """.trimIndent(),
+                ),
+        )
+
+        val refresh = CommitmentParticipantRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            apiProvider = Provider { LocalIntegrationSupport.railwayApi(server) },
+            cursorStore = cursorStore,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        ).refreshSince(userId = USER_ID, since = null)
+
+        assertTrue(refresh is BecalmResult.Success)
+        assertEquals(
+            "/v1/commitment_participants?cursor=cursor-existing&limit=100",
+            server.takeRequest().path,
+        )
+        assertEquals("cursor-next", cursorStore.cursor("commitment_participants"))
+        val stored = db.personIndexDao().findCommitmentParticipantsForUser(USER_ID)
+        assertEquals(listOf("cp-existing"), stored.map { it.id })
+        assertTrue(db.personIndexDao().findDirtySourcesForUser(USER_ID, limit = 10).isEmpty())
+    }
+
     private fun newPersonIndexWorker(): PersonInteractionIndexWorker =
         PersonInteractionIndexWorker(
             appContext = LocalIntegrationSupport.appContext(),
@@ -591,6 +642,48 @@ class BackendMailSourceEventParticipantPipelineLocalIntegrationTest {
             resolutionStatus = resolutionStatus,
             createdAt = Instant.parse("2026-04-29T00:00:05Z"),
         )
+
+    private class InMemorySyncCursorStore(
+        initialCursors: Map<String, String?> = emptyMap(),
+    ) : SyncCursorStore {
+        private val cursors = initialCursors.toMutableMap()
+
+        fun cursor(source: String): String? = cursors[source]
+
+        override fun observeCursor(source: String): Flow<String?> = flowOf(cursors[source])
+
+        override suspend fun setCursor(source: String, cursor: String?) {
+            if (cursor == null) {
+                cursors.remove(source)
+            } else {
+                cursors[source] = cursor
+            }
+        }
+
+        override suspend fun clearCursor(source: String) {
+            cursors.remove(source)
+        }
+
+        override suspend fun clearAll() {
+            cursors.clear()
+        }
+
+        override fun observeGmailHistoryId(): Flow<Long?> = flowOf(null)
+
+        override suspend fun setGmailHistoryId(historyId: Long?) = Unit
+
+        override fun observeImapState(mailbox: String): Flow<ImapCursorState?> = flowOf(null)
+
+        override suspend fun setImapState(mailbox: String, state: ImapCursorState?) = Unit
+
+        override fun observeMediaStoreLastSeen(kind: String): Flow<Long?> = flowOf(null)
+
+        override suspend fun setMediaStoreLastSeen(kind: String, epochMs: Long?) = Unit
+
+        override suspend fun runOutlookMailCursorMigrationV2() = Unit
+
+        override suspend fun runImapCursorMigrationV2() = Unit
+    }
 
     private companion object {
         private const val USER_ID = "user-1"

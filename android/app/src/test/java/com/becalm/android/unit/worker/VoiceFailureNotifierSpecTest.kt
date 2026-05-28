@@ -16,8 +16,8 @@ class VoiceFailureNotifierSpecTest {
     @Test
     fun `voice failure notifier builds output truncated copy`() {
         every { context.getString(R.string.voice_failure_notification_title) } returns "Voice processing failed"
-        every { context.getString(R.string.voice_failure_notification_body_output_truncated, "긴 회의 녹음") } returns
-            "긴 회의 녹음 was too long to process. Try a shorter recording."
+        every { context.getString(R.string.voice_failure_notification_body_output_truncated) } returns
+            "Recording was too long to process. Try a shorter recording."
 
         val spec = notifier.buildNotificationSpec(
             context = context,
@@ -28,8 +28,12 @@ class VoiceFailureNotifierSpecTest {
 
         assertEquals(VoiceFailureNotifier.CHANNEL_ID, spec.channelId)
         assertEquals("Voice processing failed", spec.title)
-        assertEquals("긴 회의 녹음 was too long to process. Try a shorter recording.", spec.body)
+        assertEquals("Recording was too long to process. Try a shorter recording.", spec.body)
         assertEquals("raw-1", spec.rawEventId)
     }
-}
 
+    @Test
+    fun `voice failure notifier uses one replacing notification id`() {
+        assertEquals(VoiceFailureNotifier.NOTIFICATION_ID, VoiceFailureNotifier.notificationId())
+    }
+}

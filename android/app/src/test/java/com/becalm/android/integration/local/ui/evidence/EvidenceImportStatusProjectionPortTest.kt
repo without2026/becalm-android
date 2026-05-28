@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -49,7 +50,27 @@ class EvidenceImportStatusProjectionPortTest {
             ),
         )
 
-        assertEquals(EvidenceImportPersistentStatus.PROCESSING, projection().observeStatus().first())
+        assertEquals(
+            EvidenceImportPersistentStatus.processing(processingCount = 1, oldestStartedAt = NOW),
+            projection().observeStatus().first(),
+        )
+    }
+
+    @Test
+    fun `awaiting consent evidence import projects consent required not processing`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-meeting-awaiting-consent",
+                sourceType = SourceType.MEETING,
+                syncStatus = "awaiting_consent",
+            ),
+        )
+
+        assertEquals(
+            EvidenceImportPersistentStatus.consentRequired(consentRequiredCount = 1),
+            projection().observeStatus().first(),
+        )
     }
 
     @Test
@@ -62,7 +83,10 @@ class EvidenceImportStatusProjectionPortTest {
             ),
         )
 
-        assertEquals(EvidenceImportPersistentStatus.PROCESSING, projection().observeStatus().first())
+        assertEquals(
+            EvidenceImportPersistentStatus.processing(processingCount = 1, oldestStartedAt = NOW),
+            projection().observeStatus().first(),
+        )
     }
 
     @Test
@@ -72,10 +96,78 @@ class EvidenceImportStatusProjectionPortTest {
             meetingPreview(
                 rawEventId = "raw-meeting-review",
                 status = MeetingSpeakerPreviewStatus.REVIEW_REQUIRED,
+                speakersJson = SPEAKERS_JSON,
             ),
         )
 
-        assertEquals(EvidenceImportPersistentStatus.REVIEW_REQUIRED, projection().observeStatus().first())
+        assertEquals(
+            EvidenceImportPersistentStatus.reviewRequired(
+                reviewRequiredCount = 1,
+                meetingReviewRequiredCount = 1,
+                personReviewRequiredCount = 0,
+            ),
+            projection().observeStatus().first(),
+        )
+    }
+
+    @Test
+    fun `empty meeting speaker preview does not project unrecoverable review required status`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.meetingSpeakerPreviewDao().upsert(
+            meetingPreview(
+                rawEventId = "raw-meeting-empty-review",
+                status = MeetingSpeakerPreviewStatus.REVIEW_REQUIRED,
+                speakersJson = "[]",
+            ),
+        )
+
+        assertEquals(EvidenceImportPersistentStatus.NONE, projection().observeStatus().first())
+    }
+
+    @Test
+    fun `failed raw event and failed meeting preview count as one failed evidence item`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-meeting-failed",
+                sourceType = SourceType.MEETING,
+                syncStatus = "failed",
+            ),
+        )
+        db.meetingSpeakerPreviewDao().upsert(
+            meetingPreview(
+                rawEventId = "raw-meeting-failed",
+                status = MeetingSpeakerPreviewStatus.FAILED,
+            ),
+        )
+
+        assertEquals(
+            EvidenceImportPersistentStatus.failed(failedCount = 1),
+            projection().observeStatus().first(),
+        )
+    }
+
+    @Test
+    fun `failed meeting preview with synced raw event still projects one failed evidence item`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-meeting-preview-failed",
+                sourceType = SourceType.MEETING,
+                syncStatus = "synced",
+            ),
+        )
+        db.meetingSpeakerPreviewDao().upsert(
+            meetingPreview(
+                rawEventId = "raw-meeting-preview-failed",
+                status = MeetingSpeakerPreviewStatus.FAILED,
+            ),
+        )
+
+        assertEquals(
+            EvidenceImportPersistentStatus.failed(failedCount = 1),
+            projection().observeStatus().first(),
+        )
     }
 
     @Test
@@ -97,19 +189,51 @@ class EvidenceImportStatusProjectionPortTest {
                     sourceRef = "raw:raw-message-pending",
                     interactionKind = "meeting",
                     title = "회의 녹음",
-                    snippet = "SPEAKER_02 확인 필요",
-                    suggestedLabel = "SPEAKER_02",
+                    snippet = "김민홍님에게 자료를 보내기로 했습니다.",
+                    suggestedLabel = "김민홍",
                     occurredAt = NOW,
                     createdAt = NOW,
                 ),
             ),
         )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-counterparty-1",
+                    userId = USER_ID,
+                    sourceEventId = "raw-message-pending",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-file-1",
+                    personId = null,
+                    role = "counterparty",
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "김민홍",
+                    displayNameRaw = "김민홍",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "김민홍님에게 자료를 보내기로 했습니다.",
+                    confidence = 0.72,
+                    resolutionStatus = "unresolved",
+                    createdAt = NOW,
+                ),
+            ),
+        )
 
-        assertEquals(EvidenceImportPersistentStatus.REVIEW_REQUIRED, projection().observeStatus().first())
+        assertEquals(
+            EvidenceImportPersistentStatus.reviewRequired(
+                reviewRequiredCount = 1,
+                processingCount = 1,
+                oldestStartedAt = NOW,
+            ),
+            projection().observeStatus().first(),
+        )
     }
 
     @Test
-    fun `unresolved source event participant projects review required status`() = runTest {
+    fun `meeting speaker labels do not project person review required status`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.personIndexDao().upsertSourceEventParticipants(
             listOf(
@@ -137,7 +261,254 @@ class EvidenceImportStatusProjectionPortTest {
             ),
         )
 
-        assertEquals(EvidenceImportPersistentStatus.REVIEW_REQUIRED, projection().observeStatus().first())
+        assertEquals(EvidenceImportPersistentStatus.NONE, projection().observeStatus().first())
+    }
+
+    @Test
+    fun `direct meeting counterparty participant projects one event review`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-counterparty-1",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting-1",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-file-1",
+                    personId = null,
+                    role = "counterparty",
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "김민홍",
+                    displayNameRaw = "김민홍",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "김민홍님에게 자료를 보내기로 했습니다.",
+                    confidence = 0.72,
+                    resolutionStatus = "unresolved",
+                    createdAt = NOW,
+                ),
+                SourceEventParticipantEntity(
+                    id = "participant-counterparty-duplicate",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting-1",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-file-1",
+                    personId = null,
+                    role = "counterparty",
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "김민홍",
+                    displayNameRaw = "김민홍",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "김민홍님에게 자료를 보내기로 했습니다.",
+                    confidence = 0.72,
+                    resolutionStatus = "unresolved",
+                    createdAt = NOW,
+                ),
+            ),
+        )
+
+        assertEquals(
+            EvidenceImportPersistentStatus.reviewRequired(
+                reviewRequiredCount = 1,
+                meetingReviewRequiredCount = 0,
+                personReviewRequiredCount = 1,
+            ),
+            projection().observeStatus().first(),
+        )
+    }
+
+    @Test
+    fun `referenced meeting names and organization only rows do not project person review`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-mentioned-name",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting-1",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-file-1",
+                    personId = null,
+                    role = "mentioned",
+                    relationToUser = "referenced",
+                    identityType = "name",
+                    normalizedValue = "범진",
+                    displayNameRaw = null,
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "범진님 이야기가 언급되었습니다.",
+                    confidence = 0.5,
+                    resolutionStatus = "unresolved",
+                    createdAt = NOW,
+                ),
+                SourceEventParticipantEntity(
+                    id = "participant-organization",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting-1",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-file-1",
+                    personId = null,
+                    role = "mentioned",
+                    relationToUser = "referenced",
+                    identityType = "organization",
+                    normalizedValue = "오뚜기",
+                    displayNameRaw = null,
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = "오뚜기",
+                    titleRaw = null,
+                    evidence = "오뚜기 사례가 언급되었습니다.",
+                    confidence = 0.5,
+                    resolutionStatus = "unresolved",
+                    createdAt = NOW,
+                ),
+            ),
+        )
+
+        assertEquals(EvidenceImportPersistentStatus.NONE, projection().observeStatus().first())
+    }
+
+    @Test
+    fun `repair ignores non reviewable evidence participants and removes derived unmatched rows`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-meeting-1",
+                    userId = USER_ID,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:raw-meeting-1",
+                    interactionKind = "meeting",
+                    title = "회의 녹음",
+                    snippet = "범진님이 언급되었습니다.",
+                    suggestedLabel = "범진",
+                    occurredAt = NOW,
+                    createdAt = NOW,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-mentioned-name",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting-1",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-file-1",
+                    personId = null,
+                    role = "mentioned",
+                    relationToUser = "referenced",
+                    identityType = "name",
+                    normalizedValue = "범진",
+                    displayNameRaw = null,
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "범진님 이야기가 언급되었습니다.",
+                    confidence = 0.5,
+                    resolutionStatus = "unresolved",
+                    createdAt = NOW,
+                ),
+            ),
+        )
+
+        assertEquals(1, db.personIndexDao().ignoreNonReviewableEvidenceImportParticipants(USER_ID))
+        assertEquals(1, db.personIndexDao().deleteEvidenceImportUnmatchedWithoutReviewableParticipants(USER_ID))
+
+        assertEquals(EvidenceImportPersistentStatus.NONE, projection().observeStatus().first())
+        assertEquals(emptyList<UnmatchedPersonInteractionEntity>(), db.personIndexDao().findUnmatchedInteractions(USER_ID, 20))
+    }
+
+    @Test
+    fun `resolved evidence participants suppress stale unmatched review count and are repaired`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-meeting-resolved",
+                    userId = USER_ID,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:raw-meeting-resolved",
+                    interactionKind = "meeting",
+                    title = "회의 녹음",
+                    snippet = "이미 연결된 기록입니다.",
+                    suggestedLabel = "김민홍",
+                    occurredAt = NOW,
+                    createdAt = NOW,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-resolved-counterparty",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting-resolved",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-file-resolved",
+                    personId = "person-minhong",
+                    role = "counterparty",
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "김민홍",
+                    displayNameRaw = "김민홍",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "김민홍님에게 자료를 보내기로 했습니다.",
+                    confidence = 0.91,
+                    resolutionStatus = "resolved",
+                    createdAt = NOW,
+                ),
+            ),
+        )
+
+        assertEquals(EvidenceImportPersistentStatus.NONE, projection().observeStatus().first())
+        assertEquals(1, db.personIndexDao().deleteEvidenceImportUnmatchedWithoutReviewableParticipants(USER_ID))
+        assertEquals(emptyList<UnmatchedPersonInteractionEntity>(), db.personIndexDao().findUnmatchedInteractions(USER_ID, 20))
+    }
+
+    @Test
+    fun `legacy evidence unmatched without participants remains reviewable`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-meeting-legacy",
+                    userId = USER_ID,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:raw-meeting-legacy",
+                    interactionKind = "meeting",
+                    title = "회의 녹음",
+                    snippet = "사람 연결이 필요한 오래된 기록입니다.",
+                    suggestedLabel = "김민홍",
+                    occurredAt = NOW,
+                    createdAt = NOW,
+                ),
+            ),
+        )
+
+        assertEquals(
+            EvidenceImportPersistentStatus.reviewRequired(
+                reviewRequiredCount = 1,
+                meetingReviewRequiredCount = 0,
+                personReviewRequiredCount = 1,
+            ),
+            projection().observeStatus().first(),
+        )
+        assertEquals(0, db.personIndexDao().deleteEvidenceImportUnmatchedWithoutReviewableParticipants(USER_ID))
+        assertEquals(1, db.personIndexDao().findUnmatchedInteractions(USER_ID, 20).size)
     }
 
     @Test
@@ -209,14 +580,18 @@ class EvidenceImportStatusProjectionPortTest {
             syncStatus = syncStatus,
         )
 
-    private fun meetingPreview(rawEventId: String, status: String): MeetingSpeakerPreviewEntity =
+    private fun meetingPreview(
+        rawEventId: String,
+        status: String,
+        speakersJson: String = "[]",
+    ): MeetingSpeakerPreviewEntity =
         MeetingSpeakerPreviewEntity(
             id = "preview-$rawEventId",
             userId = USER_ID,
             rawEventId = rawEventId,
             sourceRef = "content://meeting/$rawEventId",
             speakerPreviewId = "speaker-preview-$rawEventId",
-            speakersJson = "[]",
+            speakersJson = speakersJson,
             transcriptSegmentsJson = "[]",
             billableSeconds = 0,
             status = status,
@@ -229,6 +604,7 @@ class EvidenceImportStatusProjectionPortTest {
 
     private companion object {
         const val USER_ID = "user-evidence-import"
-        val NOW: Instant = Instant.parse("2026-05-13T00:00:00Z")
+        const val SPEAKERS_JSON = """[{"speaker_id":"SPEAKER_01","total_seconds":12,"sample_texts":["제가 보낼게요"]}]"""
+        val NOW: Instant = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
     }
 }

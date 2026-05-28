@@ -13,6 +13,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -57,10 +58,10 @@ import kotlinx.datetime.Clock
  *    `"mediastore:call_recording:<mediaId>"`) so
  *    re-running the worker against the same file is idempotent — the DB unique index
  *    on (user_id, client_event_id) silently drops duplicates.
- * 2. If the row was freshly inserted (not a duplicate), `WorkScheduler.enqueueVoiceUpload`
- *    is called with the row's UUID and the content URI so that
- *    [com.becalm.android.worker.VoiceUploadWorker] can stream audio bytes upstream.
- *    Both source_types share the same upload pipeline (VOI-001).
+     * 2. A freshly inserted row stays at `detected_pending_confirmation`. No STT,
+     *    diarization, or upload work is enqueued until the user confirms that exact file
+     *    from processing status. Both source_types still use the same upload pipeline after
+     *    that confirmation.
  *
  * The audio content URI is built via
  * `ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, _ID)`.
@@ -87,11 +88,10 @@ import kotlinx.datetime.Clock
  * one-shot triggered by [com.becalm.android.worker.ContentObserverBootstrap]'s voice
  * observer (pending `refactor/worker/voice/ingestion-realign`).
  *
- * ## SAF grant contract
- * ONB-003 now requires a persisted Recordings-tree SAF URI grant before voice ingestion
- * is enabled. This worker still discovers files through MediaStore, but it refuses to
- * run unless that persisted Recordings tree grant exists. Full `DocumentsContract`
- * subtree traversal remains out of scope for the current local-owner implementation.
+ * ## Recording path contract
+ * ONB-003 persists an app-owned MediaStore path selection before recording ingestion is
+ * enabled. This worker discovers files through MediaStore.Audio and the probe constrains
+ * the query to recorder-owned paths; no SAF tree grant is required.
  */
 @HiltWorker
 public class MediaStoreWorker @AssistedInject constructor(
@@ -159,8 +159,12 @@ public class MediaStoreWorker @AssistedInject constructor(
         val voiceEnabled = userPrefsStore.observeSourceEnabled(SourceType.VOICE).first()
         val callRecordingEnabled = userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING).first()
         val meetingEnabled = userPrefsStore.observeSourceEnabled(SourceType.MEETING).first()
+        val voicePathSelected = userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE).first().isNullOrBlank().not()
+        val callRecordingPathSelected =
+            userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING).first().isNullOrBlank().not()
+        val meetingPathSelected = userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING).first().isNullOrBlank().not()
 
-        if (audioMissing && (voiceEnabled || callRecordingEnabled)) {
+        if (audioMissing && (voiceEnabled || callRecordingEnabled || meetingEnabled)) {
             logger.w(TAG, "audio permission missing — blocked until user grants permission")
             if (voiceEnabled) {
                 processingStatusRepository.recordBlocked(SourceType.VOICE, "Audio permission missing")
@@ -168,38 +172,37 @@ public class MediaStoreWorker @AssistedInject constructor(
             if (callRecordingEnabled) {
                 processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Audio permission missing")
             }
+            if (meetingEnabled) {
+                processingStatusRepository.recordBlocked(SourceType.MEETING, "Audio permission missing")
+            }
         }
-
-        val voiceTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE).first()
-        val callRecordingTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING).first()
-        val meetingTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING).first()
-        val voiceHasTree = !voiceTreeUri.isNullOrBlank()
-        val callRecordingHasTree = !callRecordingTreeUri.isNullOrBlank()
-        val meetingHasTree = !meetingTreeUri.isNullOrBlank()
-        if (voiceEnabled && !voiceHasTree) {
-            processingStatusRepository.recordBlocked(SourceType.VOICE, "Recording folder permission missing")
+        if (voiceEnabled && !voicePathSelected) {
+            processingStatusRepository.recordBlocked(SourceType.VOICE, "Recording path selection missing")
         }
-        if (callRecordingEnabled && !callRecordingHasTree) {
-            processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Recording folder permission missing")
+        if (callRecordingEnabled && !callRecordingPathSelected) {
+            processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Recording path selection missing")
         }
-        if (meetingEnabled && !meetingHasTree) {
-            processingStatusRepository.recordBlocked(SourceType.MEETING, "Recording folder permission missing")
+        if (meetingEnabled && !meetingPathSelected) {
+            processingStatusRepository.recordBlocked(SourceType.MEETING, "Recording path selection missing")
         }
         val hasRunnableRecordingSource =
-            (voiceEnabled && voiceHasTree) ||
-                (callRecordingEnabled && callRecordingHasTree) ||
-                (meetingEnabled && meetingHasTree)
+            !audioMissing &&
+                ((voiceEnabled && voicePathSelected) ||
+                    (callRecordingEnabled && callRecordingPathSelected) ||
+                    (meetingEnabled && meetingPathSelected))
         if (!hasRunnableRecordingSource && (voiceEnabled || callRecordingEnabled || meetingEnabled)) {
-            logger.w(TAG, "all enabled recording sources are blocked until user grants their folder access")
+            logger.w(TAG, "all enabled recording sources are blocked until user selects their recording path")
             return@withContext Result.success()
         }
 
+        val userId = userPrefsStore.observeCurrentUserId().first()
         val scanResult = runScanTasks(
             now = Clock.System.now(),
             lookbackDays = lookbackDays,
-            voiceEnabled = voiceEnabled && voiceHasTree,
-            callRecordingEnabled = callRecordingEnabled && callRecordingHasTree,
-            meetingEnabled = meetingEnabled && meetingHasTree,
+            userId = userId,
+            voiceEnabled = voiceEnabled && voicePathSelected,
+            callRecordingEnabled = callRecordingEnabled && callRecordingPathSelected,
+            meetingEnabled = meetingEnabled && meetingPathSelected,
             audioMissing = audioMissing,
         )
         if (scanResult.shouldRetry) return@withContext Result.retry()
@@ -215,6 +218,7 @@ public class MediaStoreWorker @AssistedInject constructor(
     private suspend fun runScanTasks(
         now: kotlinx.datetime.Instant,
         lookbackDays: Int?,
+        userId: String?,
         voiceEnabled: Boolean,
         callRecordingEnabled: Boolean,
         meetingEnabled: Boolean,
@@ -225,13 +229,13 @@ public class MediaStoreWorker @AssistedInject constructor(
             LocalFileScanTask(
                 sourceType = SourceType.VOICE,
                 enabled = voiceEnabled && !audioMissing,
-                scanMessage = "Queued upload",
+                scanMessage = ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
                 onScan = { LocalFileScanOutcome.Success(voiceProbe.ingestVoiceRecordings(now, lookbackDays)) },
             ),
             LocalFileScanTask(
                 sourceType = SourceType.CALL_RECORDING,
                 enabled = callRecordingEnabled && !audioMissing,
-                scanMessage = "Queued upload",
+                scanMessage = ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
                 onScan = {
                     when (val outcome = voiceProbe.ingestCallRecordings(now, lookbackDays)) {
                         is CallRecordingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
@@ -242,7 +246,7 @@ public class MediaStoreWorker @AssistedInject constructor(
             LocalFileScanTask(
                 sourceType = SourceType.MEETING,
                 enabled = meetingEnabled && !audioMissing,
-                scanMessage = "Queued meeting import",
+                scanMessage = ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
                 onScan = {
                     when (val outcome = voiceProbe.ingestMeetingAudio(now, lookbackDays)) {
                         is MeetingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
@@ -278,9 +282,16 @@ public class MediaStoreWorker @AssistedInject constructor(
         if (!shouldRetry) {
             enabledTasks.groupBy { it.sourceType }
                 .forEach { (sourceType, sourceTasks) ->
+                    val pendingConfirmationCount = userId
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { currentUserId ->
+                            rawIngestionEventDaoProvider.get()
+                                .countDetectedAudioConfirmationsForSource(currentUserId, sourceType)
+                        }
+                        ?: 0
                     processingStatusRepository.recordScanResult(
                         sourceType = sourceType,
-                        itemCount = insertedBySource.getValue(sourceType),
+                        itemCount = maxOf(insertedBySource.getValue(sourceType), pendingConfirmationCount),
                         newItemsMessage = sourceTasks.first().scanMessage,
                     )
                 }

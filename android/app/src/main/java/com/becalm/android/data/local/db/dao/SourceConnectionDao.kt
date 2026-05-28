@@ -28,6 +28,9 @@ public interface SourceConnectionDao {
     @Query("SELECT * FROM source_connections WHERE id = :id LIMIT 1")
     public suspend fun findById(id: String): SourceConnectionEntity?
 
+    @Query("DELETE FROM source_connections WHERE id = :id")
+    public suspend fun deleteById(id: String): Int
+
     @Query("DELETE FROM source_connections WHERE user_id = :userId")
     public suspend fun deleteAllForUser(userId: String): Int
 

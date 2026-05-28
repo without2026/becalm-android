@@ -50,6 +50,9 @@ public object UniqueWorkKeys {
     /** Durable retry queue for backend source-participant manual/self match mirrors. */
     public const val SOURCE_PARTICIPANT_MIRROR: String = "person.source_participant_mirror"
 
+    /** Follow-up backend mirror pagination after a source relation refresh page cap is reached. */
+    public const val SOURCE_RELATION_REFRESH_PREFIX: String = "source.relation_refresh"
+
     /**
      * Person memory markdown generation via [com.becalm.android.worker.ProfileMemoryWorker].
      *
@@ -90,6 +93,8 @@ public object UniqueWorkKeys {
     public fun messageScreenshotUpload(rawEventId: String): String = "$MESSAGE_SCREENSHOT_UPLOAD_PREFIX.$rawEventId"
 
     public fun profileMemory(personId: String): String = "$PROFILE_MEMORY_PREFIX.$personId"
+
+    public fun sourceRelationRefresh(sourceType: String): String = "$SOURCE_RELATION_REFRESH_PREFIX.$sourceType"
 
     /**
      * Daily retention sweep via [com.becalm.android.worker.RetentionSweepWorker].

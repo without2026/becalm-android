@@ -30,7 +30,8 @@ if (localPropsFile.exists()) {
 } else {
     logger.warn(
         "WARNING: local.properties not found. " +
-            "BECALM_API_BASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY, AMPLITUDE_API_KEY will be empty strings. " +
+            "BECALM_API_BASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY, GOOGLE_WEB_CLIENT_ID, " +
+            "AMPLITUDE_API_KEY will be empty strings. " +
             "Copy local.properties.sample → local.properties and fill in values."
     )
 }
@@ -115,6 +116,11 @@ val configuredTelemetryEnabled = optionalGradleEnvOrLocalProp(
     envKey = "TELEMETRY_ENABLED",
 )?.toBooleanStrictOrNull()
 val telemetryEnabled = if (isJvmUnitTestInvocation()) false else configuredTelemetryEnabled ?: true
+val configuredPhoneAuthEnabled = optionalGradleEnvOrLocalProp(
+    gradleKey = "phone.auth.enabled",
+    envKey = "PHONE_AUTH_ENABLED",
+)?.toBooleanStrictOrNull()
+val phoneAuthEnabled = configuredPhoneAuthEnabled ?: true
 val requiredReleaseRuntimeConfig = mapOf(
     "BECALM_API_BASE_URL" to becalmApiBaseUrl,
     "SUPABASE_URL" to supabaseUrl,
@@ -153,6 +159,7 @@ android {
         )
         buildConfigField("String", "AMPLITUDE_API_KEY", amplitudeApiKey.asBuildConfigString())
         buildConfigField("boolean", "TELEMETRY_ENABLED", telemetryEnabled.toString())
+        buildConfigField("boolean", "PHONE_AUTH_ENABLED", phoneAuthEnabled.toString())
     }
 
     signingConfigs {

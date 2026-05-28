@@ -117,7 +117,7 @@ private fun Modifier.glassInsetHighlight(
 @Composable
 public fun Modifier.glassPanel(shape: Shape = MaterialTheme.shapes.medium): Modifier {
     val colors = MaterialTheme.becalmColors
-    val fill = colors.glassPanelFillSdkLegacy
+    val fill = colors.glassPanelFill
     val cornerRadius = 20.dp
 
     return this
@@ -146,7 +146,7 @@ public fun Modifier.glassPanel(shape: Shape = MaterialTheme.shapes.medium): Modi
 @Composable
 public fun Modifier.glassPanelElevated(shape: Shape = MaterialTheme.shapes.large): Modifier {
     val colors = MaterialTheme.becalmColors
-    val fill = colors.glassPanelFillElevatedLegacy
+    val fill = colors.glassPanelFillElevated
     val cornerRadius = 28.dp
 
     return this

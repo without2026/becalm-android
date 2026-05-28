@@ -2,8 +2,10 @@ package com.becalm.android.data.local.secure
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.becalm.android.BuildConfig
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.remote.supabase.SupabaseSession
+import com.becalm.android.data.remote.supabase.SupabaseSessionAuthority
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
@@ -83,6 +85,10 @@ public class EncryptedTokenStore @Inject constructor(
         const val KEY_USER_ID = "user_id"
         const val KEY_EMAIL = "email"
         const val KEY_EXPIRES_AT_EPOCH_MILLIS = "expires_at_epoch_millis"
+        const val KEY_AUTH_ISSUER = "auth_issuer"
+        const val KEY_PHONE = "phone"
+        const val KEY_AUTH_PROVIDER = "auth_provider"
+        const val KEY_PROFILE_NAME = "profile_name"
     }
 
     // Lazily constructed so that the first disk access is always off the main thread.
@@ -127,12 +133,29 @@ public class EncryptedTokenStore @Inject constructor(
      * dispatched on [Dispatchers.IO].
      */
     override suspend fun save(session: SupabaseSession): Unit = withContext(ioDispatcher) {
+        val expectedIssuer = SupabaseSessionAuthority.expectedIssuerFor(BuildConfig.SUPABASE_URL)
+        if (expectedIssuer != null && !SupabaseSessionAuthority.hasExpectedIssuer(session.accessToken, expectedIssuer)) {
+            Timber.w("EncryptedTokenStore: rejected session for auth issuer mismatch, expected=%s", expectedIssuer)
+            throw IllegalStateException("Supabase session issuer mismatch")
+        }
         prefs.edit()
             .putString(KEY_ACCESS_TOKEN, session.accessToken)
             .putString(KEY_REFRESH_TOKEN, session.refreshToken)
             .putString(KEY_USER_ID, session.userId)
             .putString(KEY_EMAIL, session.email)
             .putLong(KEY_EXPIRES_AT_EPOCH_MILLIS, session.expiresAt.toEpochMilliseconds())
+            .putString(KEY_AUTH_PROVIDER, session.authProvider.wireValue)
+            .apply {
+                session.phone?.takeIf { it.isNotBlank() }?.let { putString(KEY_PHONE, it) }
+                    ?: remove(KEY_PHONE)
+                session.profileName?.takeIf { it.isNotBlank() }?.let { putString(KEY_PROFILE_NAME, it) }
+                    ?: remove(KEY_PROFILE_NAME)
+                if (expectedIssuer != null) {
+                    putString(KEY_AUTH_ISSUER, expectedIssuer)
+                } else {
+                    remove(KEY_AUTH_ISSUER)
+                }
+            }
             .apply()
         Timber.d("EncryptedTokenStore: session saved, expires=%d", session.expiresAt.toEpochMilliseconds())
         cacheMutex.withLock {
@@ -172,7 +195,22 @@ public class EncryptedTokenStore @Inject constructor(
         val userId = prefs.getString(KEY_USER_ID, null) ?: return@withContext null
         val email = prefs.getString(KEY_EMAIL, null) ?: return@withContext null
         if (!prefs.contains(KEY_EXPIRES_AT_EPOCH_MILLIS)) return@withContext null
+        val phone = prefs.getString(KEY_PHONE, null)?.takeIf { it.isNotBlank() }
+        val authProvider = com.becalm.android.data.remote.supabase.SupabaseAuthProvider.fromWire(
+            prefs.getString(KEY_AUTH_PROVIDER, null),
+        )
+        val profileName = prefs.getString(KEY_PROFILE_NAME, null)?.takeIf { it.isNotBlank() }
         val expiresAtMillis = prefs.getLong(KEY_EXPIRES_AT_EPOCH_MILLIS, 0L)
+        val expectedIssuer = SupabaseSessionAuthority.expectedIssuerFor(BuildConfig.SUPABASE_URL)
+        if (expectedIssuer != null && !SupabaseSessionAuthority.hasExpectedIssuer(accessToken, expectedIssuer)) {
+            clearPersistedSessionForAuthorityMismatch(expectedIssuer)
+            return@withContext null
+        }
+        val persistedIssuer = prefs.getString(KEY_AUTH_ISSUER, null)
+        if (expectedIssuer != null && persistedIssuer != null && persistedIssuer != expectedIssuer) {
+            clearPersistedSessionForAuthorityMismatch(expectedIssuer)
+            return@withContext null
+        }
 
         Timber.d("EncryptedTokenStore: session loaded, expires=%d", expiresAtMillis)
 
@@ -182,6 +220,15 @@ public class EncryptedTokenStore @Inject constructor(
             userId = userId,
             email = email,
             expiresAt = Instant.fromEpochMilliseconds(expiresAtMillis),
+            phone = phone,
+            authProvider = authProvider,
+            profileName = profileName,
         )
+    }
+
+    private fun clearPersistedSessionForAuthorityMismatch(expectedIssuer: String) {
+        prefs.edit().clear().apply()
+        Timber.w("EncryptedTokenStore: cleared session for auth issuer mismatch, expected=%s", expectedIssuer)
+        sessionChanges.tryEmit(null)
     }
 }

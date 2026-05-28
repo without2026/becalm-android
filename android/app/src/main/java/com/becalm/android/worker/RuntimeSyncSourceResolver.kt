@@ -69,6 +69,7 @@ public class DefaultRuntimeSyncSourceResolver @Inject constructor(
 
     private suspend fun canRunMeeting(): Boolean =
         userPrefsStore.observeSourceEnabled(SourceType.MEETING).first() &&
+            mediaAudioPermissionChecker.isGranted() &&
             !userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING).first().isNullOrBlank()
 
     private suspend fun canRunBackendMail(provider: EmailPipaProvider): Boolean =

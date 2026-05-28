@@ -95,6 +95,10 @@ public class WorkSchedulerImpl @Inject constructor(
         planRunner.run(WorkSchedulerRequests.sourceParticipantMirrorPlan(initialDelaySeconds))
     }
 
+    override fun enqueueSourceRelationRefresh(sourceType: String, initialDelaySeconds: Long) {
+        planRunner.run(WorkSchedulerRequests.sourceRelationRefreshPlan(sourceType, initialDelaySeconds))
+    }
+
     override fun enqueueProfileMemory(personId: String, initialDelaySeconds: Long) {
         val normalizedPersonId = personId.trim()
         if (normalizedPersonId.isEmpty()) {

@@ -23,13 +23,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
+import com.becalm.android.data.remote.supabase.SupabaseAuthProvider
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.components.StatusPill
+import com.becalm.android.ui.components.StatusTone
 
 internal data class OnboardingSelfIdentityUi(
     val displayName: String,
@@ -38,6 +41,11 @@ internal data class OnboardingSelfIdentityUi(
     val alias: String,
     val confirmed: Boolean,
     val saving: Boolean,
+    val authProvider: SupabaseAuthProvider = SupabaseAuthProvider.EMAIL,
+    val displayNameReadOnly: Boolean = false,
+    val emailReadOnly: Boolean = false,
+    val phoneReadOnly: Boolean = false,
+    val phoneVerified: Boolean = false,
 )
 
 @Composable
@@ -73,6 +81,7 @@ internal fun SelfIdentitySetupPanel(
     onPhoneChange: (String) -> Unit,
     onAliasChange: (String) -> Unit,
     onSave: () -> Unit,
+    showSaveButton: Boolean = true,
 ) {
     QuietPanel(modifier = Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -106,7 +115,23 @@ internal fun SelfIdentitySetupPanel(
                 onValueChange = onDisplayNameChange,
                 label = stringResource(R.string.onb_setup_identity_display_name_label),
                 placeholder = stringResource(R.string.onb_setup_identity_display_name_placeholder),
-                supportingText = stringResource(R.string.onb_setup_identity_display_name_help),
+                supportingText = stringResource(
+                    if (state.displayNameReadOnly) {
+                        R.string.onb_setup_identity_display_name_auth_help
+                    } else {
+                        R.string.onb_setup_identity_display_name_help
+                    },
+                ),
+                enabled = !state.displayNameReadOnly,
+                trailingIcon = {
+                    if (state.displayNameReadOnly) {
+                        StatusPill(
+                            label = stringResource(R.string.onb_setup_identity_login_account),
+                            tone = StatusTone.Muted,
+                            compact = true,
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onboarding-self-display-name"),
@@ -116,8 +141,24 @@ internal fun SelfIdentitySetupPanel(
                 onValueChange = onEmailChange,
                 label = stringResource(R.string.onb_setup_identity_email_label),
                 placeholder = stringResource(R.string.onb_setup_identity_email_placeholder),
-                supportingText = stringResource(R.string.onb_setup_identity_email_help),
+                supportingText = stringResource(
+                    if (state.emailReadOnly) {
+                        R.string.onb_setup_identity_email_login_account
+                    } else {
+                        R.string.onb_setup_identity_email_help
+                    },
+                ),
                 keyboardType = KeyboardType.Email,
+                enabled = !state.emailReadOnly,
+                trailingIcon = {
+                    if (state.emailReadOnly) {
+                        StatusPill(
+                            label = stringResource(R.string.onb_setup_identity_login_account),
+                            tone = StatusTone.Muted,
+                            compact = true,
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onboarding-self-email"),
@@ -127,30 +168,38 @@ internal fun SelfIdentitySetupPanel(
                 onValueChange = onPhoneChange,
                 label = stringResource(R.string.onb_setup_identity_phone_label),
                 placeholder = "+82 10 0000 0000",
-                supportingText = stringResource(R.string.onb_setup_identity_phone_help),
+                supportingText = stringResource(
+                    if (state.phoneVerified) {
+                        R.string.onb_setup_identity_phone_verified_help
+                    } else {
+                        R.string.onb_setup_identity_phone_help
+                    },
+                ),
                 keyboardType = KeyboardType.Phone,
+                enabled = !state.phoneReadOnly,
+                trailingIcon = {
+                    if (state.phoneVerified) {
+                        StatusPill(
+                            label = stringResource(R.string.onb_setup_identity_verified),
+                            tone = StatusTone.Success,
+                            compact = true,
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onboarding-self-phone"),
             )
-            BecalmTextField(
-                value = state.alias,
-                onValueChange = onAliasChange,
-                label = stringResource(R.string.onb_setup_identity_alias_label),
-                placeholder = stringResource(R.string.onb_setup_identity_alias_placeholder),
-                supportingText = stringResource(R.string.onb_setup_identity_alias_help),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("onboarding-self-alias"),
-            )
-            BecalmButton(
-                text = stringResource(R.string.onb_setup_identity_save),
-                onClick = onSave,
-                loading = state.saving,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("onboarding-self-save"),
-            )
+            if (showSaveButton) {
+                BecalmButton(
+                    text = stringResource(R.string.onb_setup_identity_save),
+                    onClick = onSave,
+                    loading = state.saving,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("onboarding-self-save"),
+                )
+            }
         }
     }
 }
@@ -200,6 +249,9 @@ internal fun SetupConnectionRow(
                     primaryLabel = connectLabel(item.state, requiresConsent = false),
                     onPrimary = onConnect,
                     onSkip = onSkip,
+                    primaryEnabled = !item.state.isBusy,
+                    primaryLoading = item.state.isBusy,
+                    skipEnabled = !item.state.isBusy,
                     skipLabel = skipLabel,
                 )
             }
@@ -226,6 +278,14 @@ internal fun SourceOwnershipSetupRow(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (item.ownership == "unknown") {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.settings_identity_connection_ownership_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(modifier = Modifier.height(12.dp))
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             listOf(
@@ -240,7 +300,12 @@ internal fun SourceOwnershipSetupRow(
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
                     modifier = Modifier.testTag("source-ownership-${item.id}-${option.first}"),
                 ) {
-                    Text(stringResource(option.second))
+                    Text(
+                        text = stringResource(option.second),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
@@ -313,15 +378,12 @@ private fun SourceConnectionRow(
             }
             if (!item.state.hidesActions) {
                 SourceConnectionActions(
-                    primaryLabel = connectLabel(item.state, item.consentCopy != null),
+                    primaryLabel = connectLabel(item),
                     onPrimary = onConnect,
-                    primaryEnabled = item.state != SourceConnectionState.Connecting &&
-                        item.state != SourceConnectionState.PendingExternalAuth,
-                    primaryLoading = item.state == SourceConnectionState.Connecting ||
-                        item.state == SourceConnectionState.PendingExternalAuth,
+                    primaryEnabled = !item.state.isBusy,
+                    primaryLoading = item.state.isBusy,
                     onSkip = onSkip,
-                    skipEnabled = item.state != SourceConnectionState.Connecting &&
-                        item.state != SourceConnectionState.PendingExternalAuth,
+                    skipEnabled = !item.state.isBusy,
                     skipLabel = skipLabel,
                 )
             }
@@ -355,7 +417,7 @@ private fun SourceConnectionActions(
         BecalmButton(
             text = skipLabel,
             onClick = onSkip,
-            variant = BecalmButtonVariant.Text,
+            variant = BecalmButtonVariant.Secondary,
             enabled = skipEnabled,
             modifier = Modifier.testTag("source-connection-skip"),
         )
@@ -369,6 +431,12 @@ private fun SourceConnectionStatusPill(state: SourceConnectionState) {
         label = stringResource(presentation.labelRes),
         tone = presentation.tone,
     )
+}
+
+@Composable
+private fun connectLabel(item: SourceConnectionItemUi): String {
+    item.primaryActionLabel?.let { return it }
+    return connectLabel(item.state, item.consentCopy != null)
 }
 
 @Composable

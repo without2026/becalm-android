@@ -1,7 +1,7 @@
 # Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
-# Meeting ingestion is Android-owned: the app accepts user-selected meeting audio or
-# transcript files, saves/copies them under the already-granted Recordings tree, and
-# also runs a meeting-specific scanner over Recordings/BeCalm Meetings/.
+# Meeting ingestion is Android-owned: manual audio/transcript import may use a
+# user-picked document tree for app-created copies, while automatic audio discovery
+# uses READ_MEDIA_AUDIO plus the app-owned MediaStore path selection.
 
 module: meeting-ingestion
 platform: android
@@ -68,8 +68,8 @@ behaviors:
     type: lifecycle
     description: "Meeting 전용 scanner는 Recordings/BeCalm Meetings/ 하위 파일을 source_type='meeting'으로만 수집하고 voice scanner와 겹치지 않는다"
     trigger: "MediaStoreWorker one-shot/foreground catch-up 또는 ContentObserver nudge"
-    precondition: "인증 완료, Recordings SAF tree URI grant 존재, source_type='meeting' enabled"
-    expected: "Audio branch는 MediaStore.Audio에서 RELATIVE_PATH LIKE 'Recordings/BeCalm Meetings/Audio/%' 파일을 독립 cursor(kind='meeting')로 스캔하고 source_type='meeting' raw event를 INSERT한다. Transcript branch는 SAF DocumentsContract로 Recordings/BeCalm Meetings/Transcripts/ 하위를 스캔하고 .txt/.md/.pdf/.docx allowlist를 통과한 파일만 source_type='meeting' raw event로 INSERT한다. voice branch는 Recordings/BeCalm Meetings/% 를 NOT LIKE로 제외해 중복 voice raw event를 만들지 않는다. client_event_id는 저장 파일명/문서 ID 기반 deterministic UUID라 앱 수동 import와 scanner 재발견이 중복 INSERT되지 않는다"
+    precondition: "인증 완료, READ_MEDIA_AUDIO 권한 부여, 앱 내부 meeting recording path selection 저장, source_type='meeting' enabled"
+    expected: "Audio branch는 MediaStore.Audio에서 RELATIVE_PATH LIKE 'Recordings/BeCalm Meetings/Audio/%' 파일을 독립 cursor(kind='meeting')로 스캔하고 source_type='meeting' raw event를 INSERT한다. Transcript branch는 자동 MediaStore scanner에서 traverse하지 않고 명시적 file picker/manual import path가 소유한다. voice branch는 Recordings/BeCalm Meetings/% 를 NOT LIKE로 제외해 중복 voice raw event를 만들지 않는다. client_event_id는 저장 파일명/문서 ID 기반 deterministic UUID라 앱 수동 import와 scanner 재발견이 중복 INSERT되지 않는다"
     source: user-request
     tests: []
 

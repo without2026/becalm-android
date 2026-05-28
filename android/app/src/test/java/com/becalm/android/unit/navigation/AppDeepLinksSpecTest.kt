@@ -29,12 +29,49 @@ class AppDeepLinksSpecTest {
             BecalmRoute.PersonsUnassigned.path,
             AppDeepLinks.routeFrom(Uri.parse(AppDeepLinks.PERSONS_UNASSIGNED_URI)),
         )
+        assertEquals(
+            BecalmRoute.PersonDetail("qa-scale-person").path,
+            AppDeepLinks.routeFrom(Uri.parse("becalm://persons/qa-scale-person")),
+        )
+        assertEquals(
+            BecalmRoute.PrivacyManagement.path,
+            AppDeepLinks.routeFrom(Uri.parse("becalm://settings/privacy")),
+        )
+        assertEquals(
+            BecalmRoute.ConsentWithdraw.path,
+            AppDeepLinks.routeFrom(Uri.parse("becalm://settings/privacy/consents")),
+        )
+        assertEquals(
+            BecalmRoute.ActivityLog.path,
+            AppDeepLinks.routeFrom(Uri.parse("becalm://settings/privacy/activity-log")),
+        )
+        assertEquals(
+            BecalmRoute.SettingsSources.path,
+            AppDeepLinks.routeFrom(Uri.parse("becalm://settings/sources")),
+        )
+        assertEquals(
+            BecalmRoute.SourceDetail("gmail").path,
+            AppDeepLinks.routeFrom(Uri.parse("becalm://settings/sources/gmail")),
+        )
+        assertEquals(
+            BecalmRoute.SettingsSourceConnections.path,
+            AppDeepLinks.routeFrom(Uri.parse("becalm://settings/sources/connect")),
+        )
+        assertEquals(
+            BecalmRoute.SettingsSourceConnection("google_calendar").path,
+            AppDeepLinks.routeFrom(Uri.parse("becalm://settings/sources/connect/google_calendar")),
+        )
+        assertNull(
+            AppDeepLinks.routeFrom(Uri.parse("becalm://oauth-complete?provider=google_calendar&family=calendar&result=success")),
+        )
     }
 
     @Test
     fun `routeFrom ignores unsupported intents`() {
         assertNull(AppDeepLinks.routeFrom(Uri.parse("https://example.com/persons/unassigned")))
         assertNull(AppDeepLinks.routeFrom(Intent(Intent.ACTION_SEND)))
+        assertNull(AppDeepLinks.routeFrom(Uri.parse(AppDeepLinks.OAUTH_COMPLETE_URI)))
+        assertNull(AppDeepLinks.routeFrom(Uri.parse("becalm://persons/qa-scale-person/events/raw-1")))
     }
 
     @Test

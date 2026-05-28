@@ -40,21 +40,24 @@ internal object OnboardingProgressResolver {
             !OnboardingTerminalStatusPolicy.isTerminal(stepStates[step] ?: StepStatus.NOT_STARTED)
         } ?: OnboardingStep.COLD_SYNC
 
-    fun resumeRoute(stepStates: Map<OnboardingStep, StepStatus>): String = when (firstIncompleteStep(stepStates)) {
+    fun resumeRoute(
+        stepStates: Map<OnboardingStep, StepStatus>,
+        setupRoute: String? = null,
+    ): String = when (val firstIncomplete = firstIncompleteStep(stepStates)) {
         OnboardingStep.TERMS -> BecalmRoute.Terms.path
         OnboardingStep.LOGIN -> BecalmRoute.Login.path
-        OnboardingStep.PIPA_CONSENT,
-        OnboardingStep.RECORDING_FOLDER,
-        OnboardingStep.CALL_LOG_MATCHING,
-        OnboardingStep.CONTACTS_PERM,
-        OnboardingStep.LINK_GMAIL,
-        OnboardingStep.LINK_OUTLOOK_MAIL,
-        OnboardingStep.LINK_IMAP,
-        OnboardingStep.LINK_GOOGLE_CALENDAR,
-        OnboardingStep.LINK_OUTLOOK_CALENDAR,
-        OnboardingStep.NOTIFICATION_PERM,
-        OnboardingStep.BATTERY_OPT,
-        OnboardingStep.COLD_SYNC,
-        -> BecalmRoute.OnboardingSetup.path
+        else -> setupRoute
+            ?.takeIf(OnboardingSetupDestination::isSetupRoute)
+            ?: if (hasPostLoginProgress(stepStates)) {
+                OnboardingSetupDestination.defaultForFirstIncompleteStep(firstIncomplete).routePath
+            } else {
+                OnboardingSetupDestination.defaultRoutePath
+            }
     }
+
+    private fun hasPostLoginProgress(stepStates: Map<OnboardingStep, StepStatus>): Boolean =
+        stepStates
+            .filterKeys { it != OnboardingStep.TERMS && it != OnboardingStep.LOGIN }
+            .values
+            .any { it != StepStatus.NOT_STARTED }
 }

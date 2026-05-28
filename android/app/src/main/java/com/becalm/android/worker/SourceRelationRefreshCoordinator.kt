@@ -41,6 +41,7 @@ internal class SourceRelationRefreshCoordinator(
         var commitmentUpserted = 0
         var commitmentParticipantUpserted = 0
         var scheduleEventLinkUpserted = 0
+        var hasMore = false
 
         plan.rawSourceType?.let { sourceType ->
             val repository = rawIngestionRepository
@@ -48,6 +49,7 @@ internal class SourceRelationRefreshCoordinator(
             when (val result = repository.refreshSince(userId = userId, sourceType = sourceType, since = null)) {
                 is BecalmResult.Success -> {
                     rawUpserted = result.value.upserted
+                    hasMore = hasMore || result.value.hasMore
                     logger.d(
                         TAG,
                         "raw refresh source=$sourceType fetched=${result.value.fetched} upserted=${result.value.upserted}",
@@ -70,6 +72,7 @@ internal class SourceRelationRefreshCoordinator(
             ) {
                 is BecalmResult.Success -> {
                     calendarUpserted = result.value.upserted
+                    hasMore = hasMore || result.value.hasMore
                     logger.d(
                         TAG,
                         "calendar refresh source=${plan.sourceType} fetched=${result.value.fetched} upserted=${result.value.upserted}",
@@ -90,6 +93,7 @@ internal class SourceRelationRefreshCoordinator(
                 ) {
                     is BecalmResult.Success -> {
                         sourceParticipantUpserted = result.value.upserted
+                        hasMore = hasMore || result.value.hasMore
                         logger.d(
                             TAG,
                             "source participant refresh source=${plan.sourceType} fetched=${result.value.fetched} upserted=${result.value.upserted}",
@@ -102,6 +106,7 @@ internal class SourceRelationRefreshCoordinator(
                 when (val result = sourceEventParticipantRepository.refreshSince(userId = userId, since = null)) {
                     is BecalmResult.Success -> {
                         sourceParticipantUpserted = result.value.upserted
+                        hasMore = hasMore || result.value.hasMore
                         logger.d(
                             TAG,
                             "source participant refresh all fetched=${result.value.fetched} upserted=${result.value.upserted}",
@@ -115,6 +120,7 @@ internal class SourceRelationRefreshCoordinator(
         when (val result = commitmentRepository.refreshSince(userId = userId, since = null)) {
             is BecalmResult.Success -> {
                 commitmentUpserted = result.value.upserted
+                hasMore = hasMore || result.value.hasMore
                 logger.d(
                     TAG,
                     "commitment refresh source=${plan.sourceType} fetched=${result.value.fetched} upserted=${result.value.upserted}",
@@ -126,6 +132,7 @@ internal class SourceRelationRefreshCoordinator(
         when (val result = commitmentParticipantRepository.refreshSince(userId = userId, since = null)) {
             is BecalmResult.Success -> {
                 commitmentParticipantUpserted = result.value.upserted
+                hasMore = hasMore || result.value.hasMore
                 logger.d(
                     TAG,
                     "commitment participant refresh source=${plan.sourceType} fetched=${result.value.fetched} upserted=${result.value.upserted}",
@@ -138,6 +145,7 @@ internal class SourceRelationRefreshCoordinator(
             when (val result = repository.refreshSince(userId = userId, since = null)) {
                 is BecalmResult.Success -> {
                     scheduleEventLinkUpserted = result.value.upserted
+                    hasMore = hasMore || result.value.hasMore
                     logger.d(
                         TAG,
                         "schedule event link refresh source=${plan.sourceType} fetched=${result.value.fetched} upserted=${result.value.upserted}",
@@ -155,9 +163,13 @@ internal class SourceRelationRefreshCoordinator(
             commitmentParticipantUpserted = commitmentParticipantUpserted,
             scheduleEventLinkUpserted = scheduleEventLinkUpserted,
             localWriteCount = plan.localWriteCount,
+            hasMore = hasMore,
         )
         if (stats.changedCount > 0) {
             SourceGraphChangedNotifier(workScheduler).notifyChanged()
+        }
+        if (stats.hasMore) {
+            workScheduler.enqueueSourceRelationRefresh(plan.sourceType, initialDelaySeconds = 0L)
         }
         return BecalmResult.Success(stats)
     }
@@ -196,6 +208,7 @@ internal data class SourceRelationRefreshStats(
     val commitmentParticipantUpserted: Int,
     val scheduleEventLinkUpserted: Int,
     val localWriteCount: Int,
+    val hasMore: Boolean = false,
 ) {
     val changedCount: Int =
         rawUpserted +

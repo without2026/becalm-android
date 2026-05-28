@@ -8,12 +8,15 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import com.becalm.android.data.remote.dto.MailSyncResponse
+import com.becalm.android.data.remote.dto.SourceSyncJobResponse
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
@@ -24,6 +27,7 @@ import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.verify
 import javax.inject.Provider
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -44,6 +48,7 @@ class SourceSyncPortSpecTest {
     private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
     private val selfIdentityRepository: SelfIdentityRepository = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
+    private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
     private val productAnalytics = RecordingProductAnalyticsClient()
@@ -59,6 +64,7 @@ class SourceSyncPortSpecTest {
         sourceConnectionRepository = sourceConnectionRepository,
         selfIdentityRepository = selfIdentityRepository,
         sourceStatusRepository = sourceStatusRepository,
+        processingStatusRepository = processingStatusRepository,
         workScheduler = workScheduler,
         logger = logger,
         productAnalytics = productAnalytics,
@@ -133,7 +139,112 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { selfIdentityRepository.refresh("user-1") }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
         coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, any()) }
+        coVerify(exactly = 1) { processingStatusRepository.recordScanning(SourceType.GMAIL, null) }
+        coVerify(exactly = 1) { processingStatusRepository.recordUploading(SourceType.GMAIL, null) }
+        coVerify(exactly = 1) { processingStatusRepository.recordSynced(SourceType.GMAIL, any(), null) }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `manual gmail sync polls accepted backend job before mirror refresh`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery { api.syncMailSource(provider = SourceType.GMAIL) } returns Response.success(
+            MailSyncResponse(
+                synced = 0,
+                jobId = "job-mail-1",
+                status = "pending",
+                accepted = true,
+                retryAfterSeconds = 0,
+            ),
+        )
+        coEvery { api.getSourceSyncJob("job-mail-1") } returns Response.success(
+            SourceSyncJobResponse(
+                jobId = "job-mail-1",
+                status = "succeeded",
+                accepted = false,
+                synced = 2,
+                provider = "gmail",
+                capability = "mail",
+                sourceConnectionId = "conn-mail",
+            ),
+        )
+        coEvery { rawIngestionRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) } returns
+            BecalmResult.Success(
+                RawIngestionRepository.RefreshStats(
+                    fetched = 2,
+                    upserted = 2,
+                    hasMore = false,
+                    nextCursor = "raw-cursor-1",
+                ),
+            )
+        coEvery { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) } returns
+            BecalmResult.Success(
+                SourceEventParticipantRepository.RefreshStats(
+                    fetched = 1,
+                    upserted = 1,
+                    hasMore = false,
+                    nextCursor = "candidate-cursor-1",
+                ),
+            )
+        coEvery { commitmentRepository.refreshSince(userId = "user-1", since = null) } returns
+            BecalmResult.Success(
+                CommitmentRepository.RefreshStats(
+                    fetched = 1,
+                    upserted = 1,
+                    hasMore = false,
+                    nextCursor = "cursor-1",
+                ),
+            )
+        coEvery { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) } returns
+            BecalmResult.Success(
+                CommitmentParticipantRepository.RefreshStats(
+                    fetched = 1,
+                    upserted = 1,
+                    hasMore = false,
+                    nextCursor = "commitment-participant-cursor-1",
+                ),
+            )
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
+        coEvery { selfIdentityRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
+        coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
+
+        val result = subject.requestManualSync(SourceType.GMAIL)
+
+        assertTrue(result is BecalmResult.Success)
+        coVerify(exactly = 1) { api.getSourceSyncJob("job-mail-1") }
+        coVerify(exactly = 1) { rawIngestionRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, any()) }
+    }
+
+    @Test
+    fun `manual gmail sync surfaces backend backpressure as delayed processing status`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery { api.syncMailSource(provider = SourceType.GMAIL) } returns Response.success(
+            MailSyncResponse(
+                synced = 0,
+                jobId = "job-mail-delayed",
+                status = "retry",
+                accepted = true,
+                retryAfterSeconds = 10,
+                errorCode = "backpressure_delayed",
+                errorMessage = "Source sync accepted but delayed because worker backlog is high",
+            ),
+        )
+
+        val result = subject.requestManualSync(SourceType.GMAIL)
+
+        assertTrue(result is BecalmResult.Success)
+        coVerify(exactly = 0) { api.getSourceSyncJob(any()) }
+        coVerify(exactly = 0) { rawIngestionRepository.refreshSince(any(), any(), any()) }
+        coVerify(exactly = 0) { sourceStatusRepository.recordSyncSuccess(any(), any()) }
+        coVerify(exactly = 1) { processingStatusRepository.recordScanning(SourceType.GMAIL, null) }
+        coVerify(exactly = 1) {
+            processingStatusRepository.recordScanning(
+                SourceType.GMAIL,
+                ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED,
+            )
+        }
+        verify(exactly = 1) { workScheduler.enqueueSourceRelationRefresh(SourceType.GMAIL, 45L) }
     }
 
     @Test
@@ -216,6 +327,36 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
         coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GOOGLE_CALENDAR, any()) }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `manual calendar sync surfaces backend backpressure and schedules delayed mirror refresh`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery { calendarEventRepository.triggerServerSync() } returns BecalmResult.Success(
+            CalendarSyncResponse(
+                synced = 0,
+                jobId = "job-calendar-delayed",
+                status = "retry",
+                accepted = true,
+                retryAfterSeconds = 10,
+                errorCode = "backpressure_delayed",
+                errorMessage = "Source sync accepted but delayed because worker backlog is high",
+            ),
+        )
+
+        val result = subject.requestManualSync(SourceType.GOOGLE_CALENDAR)
+
+        assertTrue(result is BecalmResult.Success)
+        coVerify(exactly = 0) { calendarEventRepository.refreshSince(any(), any()) }
+        coVerify(exactly = 0) { sourceStatusRepository.recordSyncSuccess(any(), any()) }
+        coVerify(exactly = 1) { processingStatusRepository.recordScanning(SourceType.GOOGLE_CALENDAR, null) }
+        coVerify(exactly = 1) {
+            processingStatusRepository.recordScanning(
+                SourceType.GOOGLE_CALENDAR,
+                ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED,
+            )
+        }
+        verify(exactly = 1) { workScheduler.enqueueSourceRelationRefresh(SourceType.GOOGLE_CALENDAR, 45L) }
     }
 
     @Test

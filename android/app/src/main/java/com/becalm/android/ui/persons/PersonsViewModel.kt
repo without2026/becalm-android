@@ -10,7 +10,14 @@ import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.repository.FirstMemoryRepository
 import com.becalm.android.data.repository.PersonManualMatchRepository
+import com.becalm.android.domain.onboarding.FirstMemoryDraft
+import com.becalm.android.domain.onboarding.FirstMemoryInput
+import com.becalm.android.domain.onboarding.FirstMemoryKind
+import com.becalm.android.domain.onboarding.FirstMemoryOrigin
+import com.becalm.android.domain.onboarding.FirstMemoryValidator
+import com.becalm.android.ui.onboarding.FirstMemoryActivationUiState
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
@@ -19,6 +26,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
@@ -132,13 +142,28 @@ public data class PersonsUiState(
     val savingMatchEventIds: Set<String> = emptySet(),
     val resolvedMatchEventIds: Set<String> = emptySet(),
     val notSelfMatchEventIds: Set<String> = emptySet(),
+    val firstMemory: FirstMemoryActivationUiState = FirstMemoryActivationUiState(),
     val loading: Boolean = true,
     val error: UiMessage? = null,
 )
 
+public sealed interface PersonsEffect {
+    public data class NavigateToPersonDetail(val personId: String) : PersonsEffect
+}
+
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val QUERY_DEBOUNCE_MS = 300L
+
+private fun FirstMemoryActivationUiState.toDraft(): FirstMemoryDraft =
+    FirstMemoryDraft(
+        clientMemoryId = clientMemoryId,
+        origin = origin,
+        personName = personName,
+        promiseText = promiseText,
+        kind = kind,
+        dueHint = dueHint,
+    )
 
 /**
  * ViewModel for PersonsScreen (SRC-001, SRC-002).
@@ -155,6 +180,7 @@ public class PersonsViewModel @Inject constructor(
     projectionPort: PersonsScreenProjectionPort,
     private val refreshCoordinator: PersonsRefreshCoordinator,
     private val manualMatchRepository: PersonManualMatchRepository,
+    private val firstMemoryRepository: FirstMemoryRepository,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
@@ -165,6 +191,8 @@ public class PersonsViewModel @Inject constructor(
 
     private val _uiState: MutableStateFlow<PersonsUiState> = MutableStateFlow(PersonsUiState())
     public val uiState: StateFlow<PersonsUiState> = _uiState.asStateFlow()
+    private val _effects: MutableSharedFlow<PersonsEffect> = MutableSharedFlow(extraBufferCapacity = 1)
+    public val effects: SharedFlow<PersonsEffect> = _effects.asSharedFlow()
 
     /** Backing flow for the debounced search query. */
     private val _query: MutableStateFlow<String> = MutableStateFlow("")
@@ -222,6 +250,74 @@ public class PersonsViewModel @Inject constructor(
                     ),
                 ),
             )
+        }
+    }
+
+    public fun onFirstMemoryOriginChange(origin: FirstMemoryOrigin) {
+        _uiState.update { state ->
+            state.copy(firstMemory = state.firstMemory.copy(origin = origin, errorMessageRes = null))
+        }
+    }
+
+    public fun onFirstMemoryPersonNameChange(value: String) {
+        _uiState.update { state ->
+            state.copy(firstMemory = state.firstMemory.copy(personName = value, errorMessageRes = null))
+        }
+    }
+
+    public fun onFirstMemoryPromiseTextChange(value: String) {
+        _uiState.update { state ->
+            state.copy(firstMemory = state.firstMemory.copy(promiseText = value, errorMessageRes = null))
+        }
+    }
+
+    public fun onFirstMemoryKindChange(kind: FirstMemoryKind) {
+        _uiState.update { state ->
+            val dueHint = if (kind == FirstMemoryKind.SHARED_SCHEDULE) state.firstMemory.dueHint else ""
+            state.copy(firstMemory = state.firstMemory.copy(kind = kind, dueHint = dueHint, errorMessageRes = null))
+        }
+    }
+
+    public fun onFirstMemoryDueHintChange(value: String) {
+        _uiState.update { state ->
+            state.copy(firstMemory = state.firstMemory.copy(dueHint = value, errorMessageRes = null))
+        }
+    }
+
+    public fun onSaveFirstMemory() {
+        when (val validation = FirstMemoryValidator.validate(_uiState.value.firstMemory.toDraft())) {
+            is FirstMemoryValidator.ValidationResult.Err -> {
+                _uiState.update {
+                    it.copy(firstMemory = it.firstMemory.copy(errorMessageRes = R.string.first_memory_error_required))
+                }
+            }
+            is FirstMemoryValidator.ValidationResult.Ok -> saveFirstMemory(validation.input)
+        }
+    }
+
+    private fun saveFirstMemory(input: FirstMemoryInput) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(firstMemory = it.firstMemory.copy(saving = true, errorMessageRes = null))
+            }
+            when (val result = firstMemoryRepository.save(input)) {
+                is BecalmResult.Success -> {
+                    _uiState.update {
+                        it.copy(firstMemory = FirstMemoryActivationUiState())
+                    }
+                    _effects.emit(PersonsEffect.NavigateToPersonDetail(result.value.personId))
+                }
+                is BecalmResult.Failure -> {
+                    _uiState.update {
+                        it.copy(
+                            firstMemory = it.firstMemory.copy(
+                                saving = false,
+                                errorMessageRes = R.string.first_memory_error_save_failed,
+                            ),
+                        )
+                    }
+                }
+            }
         }
     }
 

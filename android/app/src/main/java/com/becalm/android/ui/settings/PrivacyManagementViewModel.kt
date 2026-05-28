@@ -12,10 +12,12 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.ForegroundCatchUpScheduler
@@ -86,6 +88,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val authRepository: AuthRepository,
     private val rawIngestionRepository: RawIngestionRepository,
+    private val sourceConnectionRepository: SourceConnectionRepository,
     private val rawIngestionEventDao: RawIngestionEventDao,
     private val commitmentDao: CommitmentDao,
     private val personEnrichmentDao: PersonEnrichmentDao,
@@ -353,6 +356,16 @@ public class PrivacyManagementViewModel @Inject constructor(
     }
 
     private suspend fun withdrawEmailProvider(provider: EmailPipaProvider) {
+        val sourceType = when (provider) {
+            EmailPipaProvider.GMAIL -> SourceType.GMAIL
+            EmailPipaProvider.OUTLOOK_MAIL -> SourceType.OUTLOOK_MAIL
+            EmailPipaProvider.NAVER_IMAP -> SourceType.NAVER_IMAP
+            EmailPipaProvider.DAUM_IMAP -> SourceType.DAUM_IMAP
+        }
+        if (sourceType in BACKEND_MANAGED_CONSENT_SOURCES) {
+            val disconnected = disconnectBackendConnectionsFor(sourceType)
+            if (!disconnected) return
+        }
         userPrefsStore.setEmailPipaConsent(provider, granted = false)
         userPrefsStore.setEmailSourceConnected(provider, connected = false)
         userPrefsStore.setEmailSourceManagedByBackend(provider, managed = false)
@@ -366,6 +379,10 @@ public class PrivacyManagementViewModel @Inject constructor(
     }
 
     private suspend fun withdrawSource(sourceType: String) {
+        if (sourceType in BACKEND_MANAGED_CONSENT_SOURCES) {
+            val disconnected = disconnectBackendConnectionsFor(sourceType)
+            if (!disconnected) return
+        }
         userPrefsStore.setSourceEnabled(sourceType, false)
         userPrefsStore.appendPipaActionLog(
             PipaActionLogEntry(
@@ -377,9 +394,54 @@ public class PrivacyManagementViewModel @Inject constructor(
         appRuntimeSyncCoordinator.refresh()
     }
 
+    private suspend fun disconnectBackendConnectionsFor(sourceType: String): Boolean {
+        val userId = currentUserId()
+        if (userId.isNullOrBlank()) {
+            _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_sign_in_required))
+            return false
+        }
+        val connections = when (val refresh = sourceConnectionRepository.refresh(userId)) {
+            is BecalmResult.Success -> refresh.value
+            is BecalmResult.Failure -> {
+                _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_source_withdraw_failed))
+                return false
+            }
+        }
+        val activeConnections = connections.filter { connection ->
+            connection.toSourceType() == sourceType &&
+                connection.status !in INACTIVE_CONNECTION_STATUSES
+        }
+        for (connection in activeConnections) {
+            when (sourceConnectionRepository.disconnectConnection(userId, connection.id)) {
+                is BecalmResult.Success -> Unit
+                is BecalmResult.Failure -> {
+                    _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_source_withdraw_failed))
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private fun SourceConnectionEntity.toSourceType(): String? =
+        when {
+            provider == "google" && capability == "mail" -> SourceType.GMAIL
+            provider == "outlook" && capability == "mail" -> SourceType.OUTLOOK_MAIL
+            provider == "google" && capability == "calendar" -> SourceType.GOOGLE_CALENDAR
+            provider == "outlook" && capability == "calendar" -> SourceType.OUTLOOK_CALENDAR
+            else -> null
+        }
+
     private suspend fun currentUserId(): String? = userPrefsStore.observeCurrentUserId().first()
 
     private companion object {
         private const val TAG = "PrivacyManagementVM"
+        private val BACKEND_MANAGED_CONSENT_SOURCES = setOf(
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+        )
+        private val INACTIVE_CONNECTION_STATUSES = setOf("disconnected", "deleted")
     }
 }

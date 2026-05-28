@@ -6,6 +6,10 @@ import androidx.datastore.preferences.core.edit
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.dto.SourceStatusItemDto
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.SERVER_CONNECTION_STATE_CLIENT_MANAGED
+import com.becalm.android.data.repository.SERVER_CONNECTION_STATE_CONNECTED
+import com.becalm.android.data.repository.SERVER_CONNECTION_STATE_NEEDS_REAUTH
+import com.becalm.android.data.repository.SERVER_CONNECTION_STATE_NEVER_CONNECTED
 
 // ─── Wire-state constants (api-contract.yml § GET /v1/source_status) ─────────
 
@@ -13,6 +17,20 @@ internal const val WIRE_STATE_IDLE = "idle"
 internal const val WIRE_STATE_SYNCING = "syncing"
 internal const val WIRE_STATE_SYNCED = "synced"
 internal const val WIRE_STATE_ERROR = "error"
+
+private val KNOWN_WIRE_STATES = setOf(
+    WIRE_STATE_IDLE,
+    WIRE_STATE_SYNCING,
+    WIRE_STATE_SYNCED,
+    WIRE_STATE_ERROR,
+)
+
+private val KNOWN_CONNECTION_STATES = setOf(
+    SERVER_CONNECTION_STATE_CONNECTED,
+    SERVER_CONNECTION_STATE_NEVER_CONNECTED,
+    SERVER_CONNECTION_STATE_NEEDS_REAUTH,
+    SERVER_CONNECTION_STATE_CLIENT_MANAGED,
+)
 
 private const val TAG = "SourceStatusRepository"
 
@@ -34,6 +52,7 @@ internal suspend fun mergeServerState(
     lastSyncedAt: (String) -> Preferences.Key<Long>,
     lastError: (String) -> Preferences.Key<String>,
     inProgress: (String) -> Preferences.Key<Boolean>,
+    connectionState: (String) -> Preferences.Key<String>,
 ) {
     userPrefs.edit { prefs ->
         for (item in items) {
@@ -44,7 +63,31 @@ internal suspend fun mergeServerState(
                 logger.w(TAG, "refreshFromServer skipped unknown source_type='${item.sourceType}'")
                 continue
             }
-            when (item.state) {
+            val syncState = item.syncState ?: item.state
+            if (syncState !in KNOWN_WIRE_STATES) {
+                logger.w(TAG, "refreshFromServer unknown sync_state='$syncState' for source='${item.sourceType}'")
+                continue
+            }
+            val serverConnectionState = item.connectionState
+            if (serverConnectionState != null && serverConnectionState !in KNOWN_CONNECTION_STATES) {
+                logger.w(
+                    TAG,
+                    "refreshFromServer unknown connection_state='$serverConnectionState' for source='${item.sourceType}'",
+                )
+                continue
+            }
+            if (serverConnectionState != null) {
+                prefs[connectionState(item.sourceType)] = serverConnectionState
+            } else if (syncState == WIRE_STATE_IDLE && item.lastSyncAt == null) {
+                prefs.remove(connectionState(item.sourceType))
+            }
+            if (serverConnectionState == SERVER_CONNECTION_STATE_NEVER_CONNECTED) {
+                prefs.remove(inProgress(item.sourceType))
+                prefs.remove(lastError(item.sourceType))
+                prefs.remove(lastSyncedAt(item.sourceType))
+                continue
+            }
+            when (syncState) {
                 WIRE_STATE_SYNCING -> {
                     prefs[inProgress(item.sourceType)] = true
                     prefs.remove(lastError(item.sourceType))

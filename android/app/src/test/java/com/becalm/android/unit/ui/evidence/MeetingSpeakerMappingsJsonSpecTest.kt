@@ -1,7 +1,7 @@
 package com.becalm.android.unit.ui.evidence
 
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
-import com.becalm.android.ui.evidence.MeetingSpeakerMappingsJson
+import com.becalm.android.domain.meeting.MeetingSpeakerMappingsJson
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import org.junit.Assert.assertEquals
@@ -33,7 +33,29 @@ class MeetingSpeakerMappingsJsonSpecTest {
     }
 
     @Test
-    fun `encodes call speaker mapping with selected speaker as counterparty and remaining speaker as self`() {
+    fun `encodes call speaker mapping with selected self and counterparty confirmed`() {
+        val json = MeetingSpeakerMappingsJson.encodeCallSelfAndCounterparty(
+            speakers = listOf(
+                speaker("SPEAKER_01"),
+                speaker("SPEAKER_02"),
+                speaker("SPEAKER_03"),
+            ),
+            selfSpeakerId = "SPEAKER_01",
+            counterpartySpeakerId = "SPEAKER_03",
+        )
+
+        val rows = parseRows(json)
+
+        assertEquals("self", rows[0]["relation_to_user"])
+        assertEquals(true, rows[0]["confirmed_by_user"])
+        assertEquals("participant", rows[1]["relation_to_user"])
+        assertEquals(false, rows[1]["confirmed_by_user"])
+        assertEquals("counterparty", rows[2]["relation_to_user"])
+        assertEquals(true, rows[2]["confirmed_by_user"])
+    }
+
+    @Test
+    fun `legacy call counterparty encoder still infers remaining speaker as self`() {
         val json = MeetingSpeakerMappingsJson.encodeCallCounterparty(
             speakers = listOf(
                 speaker("SPEAKER_01"),

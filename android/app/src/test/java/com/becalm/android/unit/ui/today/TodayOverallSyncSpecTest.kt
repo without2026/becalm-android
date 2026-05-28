@@ -199,7 +199,15 @@ class TodayOverallSyncSpecTest {
             ),
         )
 
-        assertEquals(SourceStatusAttention(disconnectedCount = 1, failedCount = 1), attention)
+        assertEquals(
+            SourceStatusAttention(
+                disconnectedCount = 1,
+                failedCount = 1,
+                disconnectedSources = listOf(SourceType.VOICE),
+                failedSources = listOf(SourceType.GMAIL),
+            ),
+            attention,
+        )
         assertTrue(attention.hasWarning)
     }
 

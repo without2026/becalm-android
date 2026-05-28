@@ -37,6 +37,7 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import com.becalm.android.BuildConfig
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -44,6 +45,7 @@ import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.GoogleSignInButton
 import com.becalm.android.ui.components.uiMessageStringResource
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.onboarding.OnboardingStep
 import com.becalm.android.ui.onboarding.OnboardingViewModel
@@ -66,7 +68,7 @@ import kotlinx.coroutines.launch
  *
  * Primary VM: [AuthViewModel]
  * Navigation entry: [BecalmRoute.Login]
- * Navigation exit: [BecalmRoute.OnboardingSetup] (new user) | [BecalmRoute.Today] (existing session via VM)
+ * Navigation exit: [BecalmRoute.OnboardingSetup] (new user) | [BecalmRoute.Persons] (existing session via VM)
  */
 @Composable
 public fun LoginScreen(
@@ -74,7 +76,10 @@ public fun LoginScreen(
     viewModel: AuthViewModel? = null,
     onboardingViewModel: OnboardingViewModel? = null,
     stateOverride: AuthUiState? = null,
+    phoneOtpStateOverride: PhoneOtpUiState? = null,
     onEmailSignIn: ((String, String) -> Unit)? = null,
+    onRequestPhoneOtp: ((String) -> Unit)? = null,
+    onVerifyPhoneOtp: ((String, String) -> Unit)? = null,
     googleSignInEnabledOverride: Boolean? = null,
     onGoogleSignInLaunch: (() -> Unit)? = null,
     onNavigateToSignUp: (() -> Unit)? = null,
@@ -82,12 +87,20 @@ public fun LoginScreen(
     onGoogleIdToken: ((String) -> Unit)? = null,
     onErrorDismissed: (() -> Unit)? = null,
     onMarkLoginGranted: (() -> Unit)? = null,
+    phoneSignInEnabledOverride: Boolean? = null,
     applySecureFlag: Boolean = true,
 ) {
+    val phoneSignInEnabled = phoneSignInEnabledOverride ?: BuildConfig.PHONE_AUTH_ENABLED
+    val needsPhoneAuthViewModel = phoneSignInEnabled && (
+        phoneOtpStateOverride == null ||
+            onRequestPhoneOtp == null ||
+            onVerifyPhoneOtp == null
+        )
     val needsAuthViewModel = stateOverride == null ||
         onEmailSignIn == null ||
         onGoogleIdToken == null ||
         onErrorDismissed == null ||
+        needsPhoneAuthViewModel ||
         (onGoogleSignInLaunch == null && googleSignInEnabledOverride == null)
     val authViewModel = if (needsAuthViewModel) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
@@ -99,6 +112,14 @@ public fun LoginScreen(
     } else {
         val collectedState by requireNotNull(authViewModel).uiState.collectAsStateWithLifecycle()
         collectedState
+    }
+    val phoneOtpState = if (!phoneSignInEnabled) {
+        PhoneOtpUiState()
+    } else if (phoneOtpStateOverride != null) {
+        phoneOtpStateOverride
+    } else {
+        val collectedPhoneState by requireNotNull(authViewModel).phoneOtpState.collectAsStateWithLifecycle()
+        collectedPhoneState
     }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -125,6 +146,7 @@ public fun LoginScreen(
             onboardingViewModel = onboardingViewModel,
             onMarkLoginGranted = onMarkLoginGranted,
             onSignedInNavigate = onSignedInNavigate,
+            authRouteToRemove = BecalmRoute.Login.path,
         )
     }
 
@@ -173,10 +195,18 @@ public fun LoginScreen(
             modifier = Modifier.padding(padding),
             isLoading = state is AuthUiState.Loading,
             googleSignInEnabled = googleEnabled,
+            phoneSignInEnabled = phoneSignInEnabled,
             authErrorMessage = authErrorMessage,
+            phoneOtpState = phoneOtpState,
             onSignIn = { email, password ->
                 onEmailSignIn?.invoke(email, password)
                     ?: requireNotNull(authViewModel).onEmailSignIn(email, password)
+            },
+            onRequestPhoneOtp = { phone ->
+                onRequestPhoneOtp?.invoke(phone) ?: requireNotNull(authViewModel).requestPhoneOtp(phone)
+            },
+            onVerifyPhoneOtp = { phone, code ->
+                onVerifyPhoneOtp?.invoke(phone, code) ?: requireNotNull(authViewModel).verifyPhoneOtp(phone, code)
             },
             onSignUp = onNavigateToSignUp ?: {
                 navController.navigate(BecalmRoute.SignUp.path) {
@@ -208,7 +238,7 @@ internal fun AuthSignedInNavigationEffect(
         onMarkLoginGranted?.invoke() ?: requireNotNull(resolvedOnboardingViewModel)
             .onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
         val destination = if (signedIn.onboardingCompleted) {
-            BecalmRoute.Today.path
+            BecalmNavigationDefaults.authenticatedHomeRoute
         } else {
             BecalmRoute.OnboardingSetup.path
         }
@@ -230,14 +260,21 @@ internal fun LoginForm(
     modifier: Modifier = Modifier,
     isLoading: Boolean,
     googleSignInEnabled: Boolean,
+    phoneSignInEnabled: Boolean = true,
     authErrorMessage: String? = null,
+    phoneOtpState: PhoneOtpUiState = PhoneOtpUiState(),
     onSignIn: (String, String) -> Unit,
     onSignUp: () -> Unit,
     onGoogleSignIn: () -> Unit,
+    onRequestPhoneOtp: (String) -> Unit = {},
+    onVerifyPhoneOtp: (String, String) -> Unit = { _, _ -> },
 ) {
     // Local UI state only — no PII stored in remembered state
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var phoneCode by remember { mutableStateOf("") }
+    var phonePanelVisible by remember { mutableStateOf(false) }
     var validationErrors by remember { mutableStateOf(emptySet<LoginInputValidationError>()) }
 
     // Box centres the form on tablets / foldables; the inner Column caps at
@@ -258,7 +295,17 @@ internal fun LoginForm(
         ) {
             LoginProviderSection(
                 googleSignInEnabled = googleSignInEnabled,
+                phoneSignInEnabled = phoneSignInEnabled,
                 isLoading = isLoading,
+                phoneOtpState = phoneOtpState,
+                phonePanelVisible = phonePanelVisible,
+                phone = phone,
+                phoneCode = phoneCode,
+                onPhonePanelVisibleChange = { phonePanelVisible = it },
+                onPhoneChange = { phone = it },
+                onPhoneCodeChange = { phoneCode = it },
+                onRequestPhoneOtp = { onRequestPhoneOtp(phone) },
+                onVerifyPhoneOtp = { onVerifyPhoneOtp(phone, phoneCode) },
                 onGoogleSignIn = onGoogleSignIn,
             )
             if (isLoading || !authErrorMessage.isNullOrBlank()) {
@@ -319,7 +366,17 @@ private fun LoginStatusMessages(
 @Composable
 private fun LoginProviderSection(
     googleSignInEnabled: Boolean,
+    phoneSignInEnabled: Boolean,
     isLoading: Boolean,
+    phoneOtpState: PhoneOtpUiState,
+    phonePanelVisible: Boolean,
+    phone: String,
+    phoneCode: String,
+    onPhonePanelVisibleChange: (Boolean) -> Unit,
+    onPhoneChange: (String) -> Unit,
+    onPhoneCodeChange: (String) -> Unit,
+    onRequestPhoneOtp: () -> Unit,
+    onVerifyPhoneOtp: () -> Unit,
     onGoogleSignIn: () -> Unit,
 ) {
     Text(
@@ -343,6 +400,18 @@ private fun LoginProviderSection(
         loading = false,
         modifier = Modifier.fillMaxWidth(),
     )
+    if (phoneSignInEnabled) {
+        Spacer(modifier = Modifier.height(10.dp))
+        BecalmButton(
+            text = stringResource(R.string.login_phone_cta),
+            onClick = { onPhonePanelVisibleChange(true) },
+            variant = BecalmButtonVariant.Secondary,
+            enabled = !isLoading,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("phone-sign-in-button"),
+        )
+    }
     if (!googleSignInEnabled) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
@@ -351,6 +420,95 @@ private fun LoginProviderSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+    if (phoneSignInEnabled &&
+        (phonePanelVisible || phoneOtpState.codeRequested || phoneOtpState.sending || phoneOtpState.verifying)
+    ) {
+        Spacer(modifier = Modifier.height(12.dp))
+        PhoneOtpPanel(
+            phone = phone,
+            code = phoneCode,
+            state = phoneOtpState,
+            isLoading = isLoading,
+            onPhoneChange = onPhoneChange,
+            onCodeChange = onPhoneCodeChange,
+            onRequest = onRequestPhoneOtp,
+            onVerify = onVerifyPhoneOtp,
+        )
+    }
+}
+
+@Composable
+private fun PhoneOtpPanel(
+    phone: String,
+    code: String,
+    state: PhoneOtpUiState,
+    isLoading: Boolean,
+    onPhoneChange: (String) -> Unit,
+    onCodeChange: (String) -> Unit,
+    onRequest: () -> Unit,
+    onVerify: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.testTag("phone-otp-panel"),
+    ) {
+        BecalmTextField(
+            value = phone,
+            onValueChange = onPhoneChange,
+            label = stringResource(R.string.login_phone_label),
+            placeholder = stringResource(R.string.login_phone_placeholder),
+            keyboardType = KeyboardType.Phone,
+            imeAction = ImeAction.Next,
+            supportingText = state.normalizedPhone?.let {
+                stringResource(R.string.login_phone_normalized, it)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("login-phone"),
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        BecalmButton(
+            text = stringResource(R.string.login_phone_request_code),
+            onClick = onRequest,
+            enabled = !isLoading && !state.sending && !state.verifying,
+            loading = state.sending,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("login-phone-request-code"),
+        )
+        if (state.codeRequested) {
+            Spacer(modifier = Modifier.height(10.dp))
+            BecalmTextField(
+                value = code,
+                onValueChange = onCodeChange,
+                label = stringResource(R.string.login_phone_code_label),
+                placeholder = stringResource(R.string.login_phone_code_placeholder),
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("login-phone-code"),
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            BecalmButton(
+                text = stringResource(R.string.login_phone_verify_code),
+                onClick = onVerify,
+                enabled = !isLoading && !state.sending && !state.verifying,
+                loading = state.verifying,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("login-phone-verify-code"),
+            )
+        }
+        state.error?.let { message ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = uiMessageStringResource(message),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 

@@ -103,7 +103,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
-    fun `TDY-001 TDY-004 and TDY-005 room to repository to state-source chain emits only today's rows with enrichment fallback`() = runTest {
+    fun `schedule state-source chain emits upcoming schedules with confirmed participant names`() = runTest {
         val stateSource = TodayScreenStateSource(
             commitmentRepository = commitmentRepository,
             calendarEventRepository = calendarRepository,
@@ -129,6 +129,15 @@ class TodayScreenStateSourceLocalIntegrationTest {
                     lastSyncedAt = Instant.parse("2026-04-23T02:00:00Z"),
                 ),
             )
+            db.personIndexDao().upsertPersons(
+                listOf(
+                    person(
+                        id = "person-younghee",
+                        displayName = "김영희",
+                        primaryEmail = null,
+                    ),
+                ),
+            )
             db.commitmentDao().insert(
                 commitment(
                     id = "commitment-today",
@@ -152,6 +161,15 @@ class TodayScreenStateSourceLocalIntegrationTest {
                     title = "영희와 일정 변경",
                     dueAt = Instant.parse("2026-04-23T09:00:00Z"),
                     sourceEventOccurredAt = Instant.parse("2026-04-23T01:30:00Z"),
+                ),
+            )
+            db.personIndexDao().upsertCommitmentParticipants(
+                listOf(
+                    commitmentParticipant(
+                        id = "cp-schedule-today",
+                        commitmentId = "schedule-today",
+                        personId = "person-younghee",
+                    ),
                 ),
             )
             db.commitmentDao().insert(
@@ -214,20 +232,19 @@ class TodayScreenStateSourceLocalIntegrationTest {
             )
 
             var updated = awaitItem()
-            while (updated.timeline.size < 3) {
+            while (updated.timeline.size < 4) {
                 updated = awaitItem()
             }
 
             val commitments = updated.timeline.filterIsInstance<TimelineItem.Commitment>()
-            val meeting = updated.timeline.filterIsInstance<TimelineItem.Meeting>().single()
-            assertEquals(listOf("영희에게 송금", "영희와 일정 변경"), commitments.map { it.title })
-            assertEquals(listOf(CommitmentItemType.ACTION, CommitmentItemType.SCHEDULE), commitments.map { it.itemType })
-            assertEquals("김영희", commitments.first().counterpartyDisplayName)
-            assertEquals("Daily standup", meeting.title)
-            assertFalse(updated.timeline.any { it.title == "Tomorrow planning" })
+            val meetings = updated.timeline.filterIsInstance<TimelineItem.Meeting>()
+            assertEquals(listOf("4월 초 과거 일정", "영희와 일정 변경"), commitments.map { it.title })
+            assertEquals(listOf(CommitmentItemType.SCHEDULE, CommitmentItemType.SCHEDULE), commitments.map { it.itemType })
+            assertEquals("김영희", commitments.last().counterpartyDisplayName)
+            assertEquals(listOf("Daily standup", "Tomorrow planning"), meetings.map { it.title })
             assertFalse(updated.timeline.any { it.title == "영희와 결정" })
             assertFalse(updated.timeline.any { it.title == "4월 초 과거 액션" })
-            assertFalse(updated.timeline.any { it.title == "4월 초 과거 일정" })
+            assertTrue(updated.timeline.any { it.title == "4월 초 과거 일정" })
             assertFalse(updated.overallSyncing)
 
             cancelAndIgnoreRemainingEvents()
@@ -265,8 +282,11 @@ class TodayScreenStateSourceLocalIntegrationTest {
         )
 
         stateSource.observeUiState(userIdFlow, refreshing).test {
-            val beforeMidnight = awaitItem()
-            assertTrue(beforeMidnight.timeline.isEmpty())
+            var beforeMidnight = awaitItem()
+            while (beforeMidnight.timeline.isEmpty()) {
+                beforeMidnight = awaitItem()
+            }
+            assertEquals(listOf("자정 이후 일정"), beforeMidnight.timeline.map { it.title })
 
             clock.nowInstant = Instant.parse("2026-04-23T15:00:30Z")
             advanceTimeBy(60_000L)
@@ -281,7 +301,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
-    fun `today timeline resolves display name from commitment participant person graph`() = runTest {
+    fun `schedule timeline resolves display name from commitment participant person graph`() = runTest {
         val stateSource = TodayScreenStateSource(
             commitmentRepository = commitmentRepository,
             calendarEventRepository = calendarRepository,
@@ -319,6 +339,9 @@ class TodayScreenStateSourceLocalIntegrationTest {
                 commitment(
                     id = "commitment-graph-person",
                     userId = userId,
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
                     counterpartyRef = null,
                     counterpartyRaw = null,
                     title = "민홍에게 자료 전달",
@@ -338,7 +361,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
 
             val commitment = updated.timeline.single() as TimelineItem.Commitment
             assertEquals("김민홍", commitment.counterpartyDisplayName)
-            assertEquals("김민홍", updated.personFocus.single().displayName)
+            assertTrue(updated.personFocus.isEmpty())
             cancelAndIgnoreRemainingEvents()
         }
     }

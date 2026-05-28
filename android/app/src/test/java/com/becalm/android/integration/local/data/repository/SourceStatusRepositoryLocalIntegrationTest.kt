@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -134,7 +135,7 @@ class SourceStatusRepositoryLocalIntegrationTest {
             }
 
             assertEquals(SourceConnectionStatus.NEVER_CONNECTED, snapshot[SourceType.GMAIL]?.status)
-            assertEquals(null, snapshot[SourceType.GMAIL]?.lastSyncedAt)
+            assertNull(snapshot[SourceType.GMAIL]?.lastSyncedAt)
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -196,7 +197,141 @@ class SourceStatusRepositoryLocalIntegrationTest {
             }
 
             assertEquals(SourceConnectionStatus.CONNECTED, status.status)
-            assertEquals(null, status.lastSyncedAt)
+            assertNull(status.lastSyncedAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `server connected connection state restores provider source without local prefs`() = runTest {
+        coEvery { api.getSourceStatus() } returns Response.success(
+            SourceStatusResponseDto(
+                sources = listOf(
+                    SourceStatusItemDto(
+                        sourceType = SourceType.GMAIL,
+                        state = "idle",
+                        syncState = "idle",
+                        connectionState = "connected",
+                        lastSyncAt = null,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(repository.refreshFromServer() is BecalmResult.Success)
+
+        repository.observeFor(SourceType.GMAIL).test {
+            var status = awaitItem()
+            while (status.status != SourceConnectionStatus.CONNECTED) {
+                status = awaitItem()
+            }
+
+            assertEquals(SourceConnectionStatus.CONNECTED, status.status)
+            assertNull(status.lastSyncedAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `server never connected overrides stale provider local overlay`() = runTest {
+        userPrefsStore.setCurrentUserId("user-1")
+        userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, connected = true)
+        userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, managed = true)
+        assertTrue(
+            repository.recordSyncSuccess(
+                SourceType.GMAIL,
+                Instant.parse("2026-04-23T01:20:00Z"),
+            ) is BecalmResult.Success,
+        )
+        coEvery { api.getSourceStatus() } returns Response.success(
+            SourceStatusResponseDto(
+                sources = listOf(
+                    SourceStatusItemDto(
+                        sourceType = SourceType.GMAIL,
+                        state = "idle",
+                        syncState = "idle",
+                        connectionState = "never_connected",
+                        lastSyncAt = null,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(repository.refreshFromServer() is BecalmResult.Success)
+
+        repository.observeFor(SourceType.GMAIL).test {
+            var status = awaitItem()
+            while (status.lastSyncedAt != null) {
+                status = awaitItem()
+            }
+
+            assertEquals(SourceConnectionStatus.NEVER_CONNECTED, status.status)
+            assertNull(status.lastSyncedAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `server client managed keeps local source overlay`() = runTest {
+        userPrefsStore.setCurrentUserId("user-1")
+        userPrefsStore.setSourceEnabled(SourceType.VOICE, enabled = true)
+        coEvery { api.getSourceStatus() } returns Response.success(
+            SourceStatusResponseDto(
+                sources = listOf(
+                    SourceStatusItemDto(
+                        sourceType = SourceType.VOICE,
+                        state = "idle",
+                        syncState = "idle",
+                        connectionState = "client_managed",
+                        lastSyncAt = null,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(repository.refreshFromServer() is BecalmResult.Success)
+
+        repository.observeFor(SourceType.VOICE).test {
+            var status = awaitItem()
+            while (status.status != SourceConnectionStatus.CONNECTED) {
+                status = awaitItem()
+            }
+
+            assertEquals(SourceConnectionStatus.CONNECTED, status.status)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `server needs reauth connection state renders as action required error`() = runTest {
+        coEvery { api.getSourceStatus() } returns Response.success(
+            SourceStatusResponseDto(
+                sources = listOf(
+                    SourceStatusItemDto(
+                        sourceType = SourceType.GMAIL,
+                        state = "error",
+                        syncState = "error",
+                        connectionState = "needs_reauth",
+                        lastError = "reauth required",
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(repository.refreshFromServer() is BecalmResult.Success)
+
+        repository.observeFor(SourceType.GMAIL).test {
+            var status = awaitItem()
+            while (status.status != SourceConnectionStatus.ERROR) {
+                status = awaitItem()
+            }
+
+            assertEquals(SourceConnectionStatus.ERROR, status.status)
+            assertEquals("reauth required", status.errorMessage)
 
             cancelAndIgnoreRemainingEvents()
         }

@@ -2,10 +2,16 @@ package com.becalm.android.unit.worker
 
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.PersonIndexStaleLinkedSourceRow
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
+import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.data.repository.ProcessingSourceState
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.onboarding.RecordingPathSelection
 import com.becalm.android.ui.sources.ContactsPermissionChecker
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.ContentObserverBootstrap
@@ -30,7 +36,10 @@ class AppRuntimeSyncCoordinatorSpecTest {
     private val contentObserverBootstrap: ContentObserverBootstrap = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
+    private val meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao = mockk(relaxed = true)
     private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
+    private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
     private val runtimeSyncSourceResolver: RuntimeSyncSourceResolver = mockk(relaxed = true)
     private val contactsPermissionChecker: ContactsPermissionChecker = mockk(relaxed = true)
     private val mediaAudioPermissionChecker: MediaAudioPermissionChecker = mockk(relaxed = true)
@@ -42,6 +51,12 @@ class AppRuntimeSyncCoordinatorSpecTest {
         coEvery { personIndexDao.findPendingSourceParticipantMirrors(any(), any()) } returns emptyList()
         coEvery { personIndexDao.findStaleLinkedSourceProjectionRows(any(), any()) } returns emptyList()
         coEvery { personIndexDao.findStaleRawSourceProjectionRows(any(), any()) } returns emptyList()
+        every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
+        coEvery { rawIngestionEventDao.countActiveProcessingForSource(any(), any()) } returns 0
+        coEvery { rawIngestionEventDao.countFailedProcessingItemsForSource(any(), any()) } returns 0
+        coEvery { meetingSpeakerPreviewDao.countProcessingForSource(any(), any()) } returns 0
+        coEvery { meetingSpeakerPreviewDao.markProcessingDoneForSyncedRawEvents(any(), any()) } returns 0
+        coEvery { meetingSpeakerPreviewDao.markProcessingFailedForFailedRawEvents(any(), any(), any()) } returns 0
     }
 
     @Test
@@ -72,6 +87,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 1) { workScheduler.scheduleRetentionSweep() }
         verify(exactly = 1) { workScheduler.scheduleOverdueSweep() }
         verify(exactly = 1) { workScheduler.scheduleEnrichmentSweep() }
+        verify(exactly = 1) { workScheduler.enqueueEnrichment() }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.NAVER_IMAP) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.DAUM_IMAP) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.GOOGLE_CALENDAR) }
@@ -150,11 +166,12 @@ class AppRuntimeSyncCoordinatorSpecTest {
     }
 
     @Test
-    fun `startup keeps observer stopped when SAF tree grant is missing even if voice and permission exist`() = runTest {
+    fun `startup starts observer with app recording path selection even when SAF tree grant is missing`() = runTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
         every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf(RecordingPathSelection.VOICE)
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
         coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
@@ -164,8 +181,8 @@ class AppRuntimeSyncCoordinatorSpecTest {
 
         coordinator.start()
 
-        verify(exactly = 1) { contentObserverBootstrap.stop() }
-        verify(exactly = 0) { contentObserverBootstrap.start() }
+        verify(exactly = 0) { contentObserverBootstrap.stop() }
+        verify(exactly = 1) { contentObserverBootstrap.start() }
         verify(exactly = 1) { workScheduler.scheduleEnrichmentSweep() }
     }
 
@@ -357,6 +374,69 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L) }
     }
 
+    @Test
+    fun `startup repairs completed meeting preview rows and clears stale active processing`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        every { processingStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.MEETING,
+                    phase = ProcessingPhase.GEMINI,
+                    message = "내용 정리 중",
+                ),
+            ),
+        )
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+        coEvery { meetingSpeakerPreviewDao.markProcessingDoneForSyncedRawEvents("user-1", any()) } returns 1
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+
+        coVerify(exactly = 1) {
+            meetingSpeakerPreviewDao.markProcessingDoneForSyncedRawEvents("user-1", any())
+        }
+        coVerify(exactly = 1) {
+            processingStatusRepository.recordSynced(SourceType.MEETING)
+        }
+    }
+
+    @Test
+    fun `startup turns stale active voice status into failure when only failed rows remain`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        every { processingStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.VOICE,
+                    phase = ProcessingPhase.GEMINI,
+                    message = "내용 정리 중",
+                ),
+            ),
+        )
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+        coEvery { rawIngestionEventDao.countFailedProcessingItemsForSource("user-1", SourceType.VOICE) } returns 3
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+
+        coVerify(exactly = 1) {
+            processingStatusRepository.recordError(SourceType.VOICE, itemCount = 3)
+        }
+    }
+
     private fun buildCoordinator(): AppRuntimeSyncCoordinator =
         AppRuntimeSyncCoordinator(
             scope = CoroutineScope(Dispatchers.Unconfined),
@@ -364,7 +444,10 @@ class AppRuntimeSyncCoordinatorSpecTest {
             contentObserverBootstrap = contentObserverBootstrap,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
+            rawIngestionEventDao = rawIngestionEventDao,
+            meetingSpeakerPreviewDao = meetingSpeakerPreviewDao,
             personIndexDao = personIndexDao,
+            processingStatusRepository = processingStatusRepository,
             runtimeSyncSourceResolver = runtimeSyncSourceResolver,
             contactsPermissionChecker = contactsPermissionChecker,
             mediaAudioPermissionChecker = mediaAudioPermissionChecker,

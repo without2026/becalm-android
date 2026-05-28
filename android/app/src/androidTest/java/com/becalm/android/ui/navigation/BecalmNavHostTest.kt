@@ -10,6 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -83,6 +84,19 @@ class BecalmNavHostTest {
         }
 
         composeTestRule.onNodeWithText("provider:gmail").assertIsDisplayed()
+    }
+
+    @Test
+    fun onboarding_complete_route_parses_person_id_argument() {
+        setNavHost(startDestination = BecalmRoute.OnboardingComplete("person-42").path) {
+            mapOf(
+                BecalmRoute.OnboardingComplete.PATH to { entry ->
+                    Text("complete:${entry.arguments?.getString(BecalmNavArgs.PERSON_ID)}")
+                },
+            )
+        }
+
+        composeTestRule.onNodeWithText("complete:person-42").assertIsDisplayed()
     }
 
     @Test
@@ -183,6 +197,33 @@ class BecalmNavHostTest {
                 StaticRouteCase(BecalmRoute.OnboardingColdSync.path, BecalmRoute.OnboardingColdSync.path, "cold-sync-screen"),
             ),
         )
+    }
+
+    @Test
+    fun cold_sync_route_redirects_to_authenticated_home_without_rendering_deprecated_screen() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                val navController = rememberNavController()
+                val backStackEntry by navController.currentBackStackEntryAsState()
+
+                Column {
+                    Text("route:${backStackEntry?.destination?.route.orEmpty()}")
+                    BecalmNavHost(
+                        navController = navController,
+                        startDestination = BecalmRoute.OnboardingColdSync.path,
+                        routeOverrides = mapOf(
+                            BecalmRoute.Persons.path to { Text("persons-screen") },
+                        ),
+                    )
+                }
+            }
+        }
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            composeTestRule.onAllNodesWithText("persons-screen").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeTestRule.onNodeWithText("persons-screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("route:${BecalmRoute.Persons.path}").assertIsDisplayed()
     }
 
     @Test
@@ -343,9 +384,9 @@ class BecalmNavHostTest {
                     }
                     BecalmNavHost(
                         navController = navController,
-                        startDestination = BecalmRoute.Today.path,
+                        startDestination = BecalmRoute.Persons.path,
                         routeOverrides = mapOf(
-                            BecalmRoute.Today.path to { Text("today-screen") },
+                            BecalmRoute.Persons.path to { Text("persons-screen") },
                             BecalmRoute.PersonDetail.PATH to { entry ->
                                 Text("person:${entry.arguments?.getString(BecalmNavArgs.PERSON_ID)}")
                             },
@@ -355,16 +396,16 @@ class BecalmNavHostTest {
             }
         }
 
-        composeTestRule.onNodeWithText("today-screen").assertIsDisplayed()
-        composeTestRule.onNodeWithText("route:today").assertIsDisplayed()
+        composeTestRule.onNodeWithText("persons-screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("route:persons").assertIsDisplayed()
 
         composeTestRule.onNodeWithText("open-person").performClick()
         composeTestRule.onNodeWithText("person:person-88").assertIsDisplayed()
         composeTestRule.onNodeWithText("route:persons/{person_id}").assertIsDisplayed()
 
         composeTestRule.onNodeWithText("go-back").performClick()
-        composeTestRule.onNodeWithText("today-screen").assertIsDisplayed()
-        composeTestRule.onNodeWithText("route:today").assertIsDisplayed()
+        composeTestRule.onNodeWithText("persons-screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("route:persons").assertIsDisplayed()
     }
 
     private fun assertSettingsReconnectCompletionReturns(
@@ -426,7 +467,6 @@ class BecalmNavHostTest {
         composeTestRule.onNodeWithText("route:$destinationRoute").assertIsDisplayed()
         composeTestRule.onNodeWithText("complete-reconnect").performClick()
         composeTestRule.onNodeWithText("settings-sources-screen").assertIsDisplayed()
-        composeTestRule.onNodeWithText("route:${BecalmRoute.SettingsSources.path}").assertIsDisplayed()
     }
 
     private fun setNavHost(

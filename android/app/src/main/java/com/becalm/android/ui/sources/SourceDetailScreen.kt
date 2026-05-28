@@ -1,6 +1,5 @@
 package com.becalm.android.ui.sources
 
-import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +39,7 @@ import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.sourceStatusLabelRes
 import com.becalm.android.ui.components.uiMessageStringResource
@@ -73,12 +73,16 @@ public fun SourceDetailScreen(
         viewModel.onMeetingAudioSelected(uri)
     }
     val audioMimeTypes = remember { MeetingImportFilePolicy.AUDIO_MIME_TYPES }
-    val meetingAudioInitialUri = remember(state.meetingAudioPickerInitialUri) {
-        state.meetingAudioPickerInitialUri?.takeIf { it.isNotBlank() }?.let(Uri::parse)
-    }
 
     CollectFlowEffect(viewModel.effects) { effect ->
         navController.dispatchSourceDetailEffect(effect)
+    }
+    val recoverToSources: () -> Unit = {
+        if (!navController.popBackStack()) {
+            navController.navigate(BecalmRoute.SettingsSources.path) {
+                launchSingleTop = true
+            }
+        }
     }
 
     BecalmScaffold(
@@ -98,9 +102,9 @@ public fun SourceDetailScreen(
     ) { padding ->
         when {
             state.error != null -> {
-                ErrorState(
-                    title = stringResource(R.string.source_detail_error_missing_source),
-                    message = uiMessageStringResource(requireNotNull(state.error)),
+                SourceDetailRouteErrorState(
+                    message = requireNotNull(state.error),
+                    onRecover = recoverToSources,
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -127,7 +131,6 @@ public fun SourceDetailScreen(
                         audioPicker.launch(
                             MeetingOpenDocumentRequest(
                                 mimeTypes = audioMimeTypes,
-                                initialUri = meetingAudioInitialUri,
                             ),
                         )
                     },
@@ -135,6 +138,21 @@ public fun SourceDetailScreen(
             }
         }
     }
+}
+
+@Composable
+public fun SourceDetailRouteErrorState(
+    message: UiMessage,
+    onRecover: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ErrorState(
+        title = stringResource(R.string.source_detail_error_missing_source),
+        message = uiMessageStringResource(message),
+        onRetry = onRecover,
+        retryLabel = stringResource(R.string.source_detail_route_recovery),
+        modifier = modifier,
+    )
 }
 
 @Composable

@@ -4,8 +4,10 @@ import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -78,14 +80,14 @@ class SettingsCheckpoint1E2eTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.action_wipe_data)).performClick()
+        composeTestRule.onNodeWithTag("settings-wipe-button").performScrollTo().performClick()
         composeTestRule.onNodeWithText(string(R.string.settings_wipe_confirm_message)).assertIsDisplayed()
         composeTestRule.onAllNodesWithText(string(R.string.action_wipe_data))[1].performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, wipeCount)
         }
-        composeTestRule.onNodeWithText(string(R.string.settings_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.settings_sign_out_pipa_note)).assertIsDisplayed()
     }
 
     private fun settingsState(): SettingsUiState =

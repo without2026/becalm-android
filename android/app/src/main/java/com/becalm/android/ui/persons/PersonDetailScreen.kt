@@ -1,5 +1,7 @@
 package com.becalm.android.ui.persons
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -7,18 +9,23 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +36,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -47,7 +57,15 @@ import com.becalm.android.ui.components.isCallSource
 import com.becalm.android.ui.components.isEmailSource
 import com.becalm.android.ui.components.isMeetingTimelineSource
 import com.becalm.android.ui.components.uiMessageStringResource
+import com.becalm.android.ui.evidence.EvidenceImportSheetHost
+import com.becalm.android.ui.evidence.EvidenceImportViewModel
+import com.becalm.android.ui.evidence.rememberEvidenceImportActions
+import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.onboarding.FirstMemoryFollowUpAction
+import com.becalm.android.ui.onboarding.dispatchFirstMemoryFollowUpAction
+import com.becalm.android.ui.onboarding.firstMemoryFollowUpActionsFor
 import com.becalm.android.ui.theme.BecalmTheme
 
 /**
@@ -66,11 +84,17 @@ public fun PersonDetailScreen(
     navController: NavHostController,
     personId: String,
     viewModel: PersonDetailViewModel = hiltViewModel(),
+    evidenceImportViewModel: EvidenceImportViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val errorMessage = state.error?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
+    val evidenceImportMessage = evidenceImportState.message?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(evidenceImportMessage, snackbarHostState, evidenceImportViewModel::onMessageShown)
+    val evidenceImportActions = rememberEvidenceImportActions(evidenceImportViewModel)
+    val evidenceImportController = rememberEvidenceImportSheetController()
 
     val onEventTap: (String) -> Unit = { eventId ->
         navController.navigate(
@@ -82,8 +106,46 @@ public fun PersonDetailScreen(
         state = state,
         title = state.displayName ?: personId.take(16),
         snackbarHostState = snackbarHostState,
-        onBack = navController::popBackStack,
+        onBack = {
+            if (!navController.popBackStack()) {
+                navController.navigate(BecalmNavigationDefaults.authenticatedHomeRoute) {
+                    launchSingleTop = true
+                }
+            }
+        },
         onEventTap = onEventTap,
+        onLoadMoreTimeline = viewModel::onLoadMoreTimeline,
+        onRetry = viewModel::onRetryLoad,
+        onFirstMemoryFollowUpAction = { action ->
+            navController.dispatchFirstMemoryFollowUpAction(
+                action = action,
+                onMeetingAudio = evidenceImportActions.openMeetingAudioPicker,
+                onMessageScreenshot = evidenceImportActions.openMessageScreenshotPicker,
+            )
+        },
+    )
+
+    EvidenceImportSheetHost(
+        controller = evidenceImportController,
+        onMessageScreenshotImport = evidenceImportActions.openMessageScreenshotPicker,
+        onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
+        state = evidenceImportState,
+        onMeetingSelfSpeakerSelected = evidenceImportViewModel::onMeetingSelfSpeakerSelected,
+        onMeetingCounterpartySpeakerSelected = evidenceImportViewModel::onMeetingCounterpartySpeakerSelected,
+        onMeetingSpeakerReviewConfirmed = evidenceImportViewModel::onMeetingSpeakerReviewConfirmed,
+        onMeetingSpeakerReviewCancelled = evidenceImportViewModel::onMeetingSpeakerReviewCancelled,
+        onMeetingSpeakerReviewAction = evidenceImportViewModel::onMeetingSpeakerReviewAction,
+        onMeetingPreviewLoadingCancelled = evidenceImportViewModel::onMeetingPreviewLoadingCancelled,
+        onRetryFailedImports = evidenceImportViewModel::onRetryFailedImports,
+        onReviewRequiredClick = {
+            navController.navigate(BecalmRoute.PersonsUnassigned.path)
+        },
+        onStatusDetailsClick = {
+            navController.navigate(BecalmRoute.ProcessingStatus.path)
+        },
+        onConsentRequiredClick = {
+            navController.navigate(BecalmRoute.Settings.path)
+        },
     )
 }
 
@@ -95,6 +157,9 @@ public fun PersonDetailScreenContent(
     onBack: () -> Unit,
     onEventTap: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onLoadMoreTimeline: () -> Unit = {},
+    onRetry: () -> Unit = {},
+    onFirstMemoryFollowUpAction: (FirstMemoryFollowUpAction) -> Unit = {},
 ) {
     BecalmScaffold(
         modifier = modifier,
@@ -115,9 +180,15 @@ public fun PersonDetailScreenContent(
                 BecalmSheetSkeleton(modifier = Modifier.padding(padding))
             }
             state.error != null && !hasAnyInteractions -> {
+                val retryAction = if (state.error.resId == R.string.person_detail_error_load_failed) {
+                    onRetry
+                } else {
+                    null
+                }
                 ErrorState(
                     title = stringResource(R.string.error_generic_title),
                     message = uiMessageStringResource(requireNotNull(state.error)),
+                    onRetry = retryAction,
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -126,6 +197,8 @@ public fun PersonDetailScreenContent(
                 state = state,
                 padding = padding,
                 onEventTap = onEventTap,
+                onLoadMoreTimeline = onLoadMoreTimeline,
+                onFirstMemoryFollowUpAction = onFirstMemoryFollowUpAction,
             )
         }
     }
@@ -166,6 +239,8 @@ private fun PersonDetailList(
     state: PersonDetailUiState,
     padding: PaddingValues,
     onEventTap: (String) -> Unit,
+    onLoadMoreTimeline: () -> Unit,
+    onFirstMemoryFollowUpAction: (FirstMemoryFollowUpAction) -> Unit,
 ) {
     var selectedFilter by rememberSaveable { mutableStateOf(PersonTimelineFilter.ALL) }
     val sourceCards = remember(selectedFilter, state.sourceEventCards) {
@@ -197,6 +272,16 @@ private fun PersonDetailList(
             )
         }
         val nextActionCards = sourceCards.filter { it.nextAction != null }
+        val firstMemoryCards = sourceCards.filter { it.firstMemoryOrigin != null }
+        if (firstMemoryCards.isNotEmpty()) {
+            item(key = "first-memory-recommendations") {
+                PersonFirstMemoryRecommendationPanel(
+                    origin = requireNotNull(firstMemoryCards.first().firstMemoryOrigin),
+                    onActionClick = onFirstMemoryFollowUpAction,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+        }
         if (nextActionCards.isNotEmpty()) {
             item(key = "next-actions") {
                 PersonNextActionsPanel(
@@ -230,10 +315,92 @@ private fun PersonDetailList(
                 EmptyState(title = stringResource(R.string.person_detail_timeline_filter_empty))
             }
         }
+        if (state.canLoadMoreTimeline) {
+            item(key = "load-more-timeline") {
+                TextButton(
+                    onClick = onLoadMoreTimeline,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag("person-detail-load-more"),
+                ) {
+                    Text(text = stringResource(R.string.person_detail_load_more))
+                }
+            }
+        }
     }
 }
 
 // ─── Timeline helpers ─────────────────────────────────────────────────────────
+
+@Composable
+private fun PersonFirstMemoryRecommendationPanel(
+    origin: String,
+    onActionClick: (FirstMemoryFollowUpAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val actions = firstMemoryFollowUpActionsFor(origin)
+    if (actions.isEmpty()) return
+    RecommendationPanel(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("person-detail-first-memory-recommendation"),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = stringResource(R.string.person_detail_first_memory_recommendation_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            actions.forEach { action ->
+                RecommendationActionRow(
+                    text = stringResource(action.labelRes),
+                    testTag = action.testTag,
+                    onClick = { onActionClick(action) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecommendationActionRow(
+    text: String,
+    testTag: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag(testTag)
+            .semantics {
+                contentDescription = text
+            }
+            .clickable(role = Role.Button, onClick = onClick),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.46f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.Outlined.ChevronRight,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
 
 @Composable
 private fun PersonNextActionsPanel(
@@ -303,6 +470,11 @@ private fun TimelineFilterRow(
                 label = {
                     Text(text = label, style = MaterialTheme.typography.labelMedium)
                 },
+                shape = MaterialTheme.shapes.extraSmall,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.58f),
+                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                ),
                 modifier = Modifier.testTag("person-detail-filter-${filter.name.lowercase()}"),
             )
         }

@@ -53,15 +53,16 @@ types:
 
   SourceStatusItem:
     owner: railway_first_with_android_fallback
-    source_id: string           # voice | meeting | message_screenshot | manual_text | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+    source_id: string           # voice | call_recording | meeting | message_screenshot | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
     label: string               # Voice | Meetings | Messenger Captures | Gmail | Outlook Mail | Naver Email | Daum Email | Google Calendar | Outlook Calendar
-    connection_state: string    # connected | disconnected | error
-    visual_state: string        # idle | syncing | error | synced
+    connection_state: string    # connected | never_connected | needs_reauth | client_managed
+    sync_state: string          # idle | syncing | error | synced
+    visual_state: string        # legacy UI projection of sync_state
     last_sync_at?: datetime
     last_error?: string
     events_synced_count?: int
     # Railway가 provider-owned/server-visible source 상태를 반환한다. Android는 이 값을 DataStore cache에 merge한다.
-    # 실패/오프라인 시 DataStore connection flags/cursors, Keystore/SAF credential 존재 여부,
+    # 실패/오프라인 시 DataStore connection flags/cursors, Keystore credential 또는 Android local MediaStore path selection 존재 여부,
     # WorkManager/runtime sync 상태, Room 보조 메타데이터를 조합한 local-derived cache가 fallback으로 쓰인다.
 
   LocalDerivedContactsSourceStatus:
@@ -459,12 +460,14 @@ endpoints:
     response:
       200:
         sources:
-          - source_type: string   # voice | meeting | message_screenshot | manual_text | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
-            state: string         # idle | syncing | synced | error
+          - source_type: string   # voice | call_recording | meeting | message_screenshot | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+            state: string         # legacy sync projection: idle | syncing | synced | error
+            sync_state: string    # idle | syncing | synced | error
+            connection_state: string # connected | never_connected | needs_reauth | client_managed
             last_sync_at?: datetime
             last_error?: string
-        # 서버는 자신이 알고 있는 source 상태만 반환할 수 있다. Android는 반환된 source만 DataStore cache에 merge하고,
-        # 누락 source(예: voice local runtime 상태)는 기존 local-derived 값으로 유지한다.
+        # state는 이전 Android 호환을 위해 유지한다. 새 Android는 sync_state를 우선 사용한다.
+        # connection_state=client_managed 또는 필드 누락 source는 기존 local-derived 값으로 유지한다.
       401: { error: string, message: string }
       500: { error: string, message: string }
       503: { error: string, message: string }

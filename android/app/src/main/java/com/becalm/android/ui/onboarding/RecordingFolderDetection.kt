@@ -2,12 +2,10 @@ package com.becalm.android.ui.onboarding
 
 public data class RecordingFolderDetection(
     val displayPath: String,
-    val preferredDocumentId: String?,
     val voiceFolderDetected: Boolean,
     val callFolderDetected: Boolean,
     val meetingFolderDetected: Boolean,
     val usedFallbackPath: Boolean,
-    val requiresManualPicker: Boolean,
 )
 
 internal object RecordingFolderDetector {
@@ -20,36 +18,30 @@ internal object RecordingFolderDetector {
     fun fallback(): RecordingFolderDetection =
         RecordingFolderDetection(
             displayPath = PRIMARY_PATH,
-            preferredDocumentId = "primary:Recordings",
             voiceFolderDetected = false,
             callFolderDetected = false,
             meetingFolderDetected = false,
             usedFallbackPath = false,
-            requiresManualPicker = true,
         )
 
     fun detect(pathExists: (String) -> Boolean): RecordingFolderDetection {
         if (pathExists(PRIMARY_PATH)) {
             return RecordingFolderDetection(
                 displayPath = PRIMARY_PATH,
-                preferredDocumentId = "primary:Recordings",
                 voiceFolderDetected = pathExists(PRIMARY_VOICE_PATH),
                 callFolderDetected = pathExists(PRIMARY_CALL_PATH),
                 meetingFolderDetected = pathExists(PRIMARY_MEETING_PATH),
                 usedFallbackPath = false,
-                requiresManualPicker = false,
             )
         }
 
         if (pathExists(FALLBACK_PATH)) {
             return RecordingFolderDetection(
                 displayPath = FALLBACK_PATH,
-                preferredDocumentId = "primary:VoiceRecorder",
                 voiceFolderDetected = true,
                 callFolderDetected = false,
                 meetingFolderDetected = false,
                 usedFallbackPath = true,
-                requiresManualPicker = false,
             )
         }
 

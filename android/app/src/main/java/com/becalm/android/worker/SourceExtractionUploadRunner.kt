@@ -14,6 +14,7 @@ import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.SourceExtractionInputAdapter
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.toPlainRequestBody
 import com.squareup.moshi.Moshi
@@ -36,9 +37,11 @@ internal data class SourceExtractionUploadRequest(
     val onRateLimited: (suspend (retryAfterSeconds: Long?) -> ListenableWorker.Result)? = null,
     val onJobAccepted: (suspend (jobId: String, retryAfterSeconds: Long?) -> ListenableWorker.Result)? = null,
     val onJobRetryableFailure: (suspend (retryAfterSeconds: Long?) -> ListenableWorker.Result)? = null,
+    val onRestartSpeakerPreview: (suspend () -> ListenableWorker.Result)? = null,
     val selfSpeakerId: String? = null,
     val speakerMappingsJson: String? = null,
     val speakerPreviewId: String? = null,
+    val processingConfirmed: Boolean = false,
 )
 
 internal class SourceExtractionUploadRunner(
@@ -83,6 +86,7 @@ internal class SourceExtractionUploadRunner(
                 selfSpeakerId = request.selfSpeakerId?.toPlainRequestBody(),
                 speakerMappings = request.speakerMappingsJson?.toPlainRequestBody(),
                 speakerPreviewId = request.speakerPreviewId?.toPlainRequestBody(),
+                processingConfirmed = request.processingConfirmed.toString().toPlainRequestBody(),
             )
         } catch (e: IOException) {
             logger.w(tag, "network error id=${redact(request.rawEventId)} attempt=$runAttemptCount: ${e.message}")
@@ -124,21 +128,60 @@ internal class SourceExtractionUploadRunner(
             }
             502 -> handle502(response.errorBody()?.string(), request)
             429 -> {
+                val envelope = parseExtractionErrorEnvelope(
+                    errorBodyString = response.errorBody()?.string(),
+                    request = request,
+                    httpStatus = 429,
+                )
+                val errorCode = envelope?.error
+                if (errorCode == ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED) {
+                    processingStatusRepository.recordBlocked(
+                        request.entity.sourceType,
+                        ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED,
+                    )
+                } else {
+                    processingStatusRepository.recordGemini(
+                        request.entity.sourceType,
+                        ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING,
+                    )
+                }
                 trackExtraction(
                     eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
                     request = request,
-                    result = "rate_limited",
+                    result = errorCode ?: "rate_limited",
                     retryable = true,
                 )
                 request.onRateLimited?.invoke(response.headers()[HEADER_RETRY_AFTER]?.toLongOrNull())
                     ?: handleTransientFailure(request)
             }
             500, 503 -> {
+                val envelope = parseExtractionErrorEnvelope(
+                    errorBodyString = response.errorBody()?.string(),
+                    request = request,
+                    httpStatus = response.code(),
+                )
+                if (
+                    response.code() == 503 &&
+                    request.onRestartSpeakerPreview != null &&
+                    envelope.isSpeakerPreviewUnavailable()
+                ) {
+                    logger.w(
+                        tag,
+                        "speaker preview unavailable id=${redact(request.rawEventId)} — restarting preview",
+                    )
+                    trackExtraction(
+                        eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                        request = request,
+                        result = SourceExtractionErrorEnvelope.SPEAKER_PREVIEW_UNAVAILABLE,
+                        retryable = true,
+                    )
+                    return request.onRestartSpeakerPreview.invoke()
+                }
                 logger.w(tag, "HTTP ${response.code()} transient id=${redact(request.rawEventId)} attempt=$runAttemptCount")
                 trackExtraction(
                     eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
                     request = request,
-                    result = "transient_http_${response.code()}",
+                    result = envelope?.error ?: "transient_http_${response.code()}",
                     retryable = true,
                 )
                 handleTransientFailure(request)
@@ -395,16 +438,10 @@ internal class SourceExtractionUploadRunner(
         errorBodyString: String?,
         request: SourceExtractionUploadRequest,
     ): ListenableWorker.Result {
-        val envelope = runCatchingNonCancel(
-            logger = logger,
-            tag = tag,
-            op = "HTTP 502 parse failed id=${redact(request.rawEventId)}",
-            block = {
-                errorBodyString?.let {
-                    moshi.adapter(SourceExtractionErrorEnvelope::class.java).fromJson(it)
-                }
-            },
-            onFailure = { null },
+        val envelope = parseExtractionErrorEnvelope(
+            errorBodyString = errorBodyString,
+            request = request,
+            httpStatus = 502,
         )
         val errorCode = envelope?.error
         logger.w(tag, "HTTP 502 id=${redact(request.rawEventId)} error=$errorCode attempt=$runAttemptCount")
@@ -434,6 +471,23 @@ internal class SourceExtractionUploadRunner(
             }
         }
     }
+
+    private fun parseExtractionErrorEnvelope(
+        errorBodyString: String?,
+        request: SourceExtractionUploadRequest,
+        httpStatus: Int,
+    ): SourceExtractionErrorEnvelope? =
+        runCatchingNonCancel(
+            logger = logger,
+            tag = tag,
+            op = "HTTP $httpStatus parse failed id=${redact(request.rawEventId)}",
+            block = {
+                errorBodyString?.let {
+                    moshi.adapter(SourceExtractionErrorEnvelope::class.java).fromJson(it)
+                }
+            },
+            onFailure = { null },
+        )
 
     private suspend fun handleTransientFailure(
         request: SourceExtractionUploadRequest,
@@ -490,3 +544,10 @@ internal class SourceExtractionUploadRunner(
         private const val JOB_STATUS_FAILED: String = "failed"
     }
 }
+
+private fun SourceExtractionErrorEnvelope?.isSpeakerPreviewUnavailable(): Boolean =
+    this != null &&
+        (
+            error == SourceExtractionErrorEnvelope.SPEAKER_PREVIEW_UNAVAILABLE ||
+                clientAction == SourceExtractionErrorEnvelope.RESTART_MEETING_SPEAKER_PREVIEW
+            )

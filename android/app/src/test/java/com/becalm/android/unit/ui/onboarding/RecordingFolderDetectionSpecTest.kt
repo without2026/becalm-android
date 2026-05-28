@@ -1,8 +1,8 @@
 package com.becalm.android.unit.ui.onboarding
 
-import com.becalm.android.ui.onboarding.RecordingFolderDetector
-import com.becalm.android.ui.onboarding.RecordingFolderSelection
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.onboarding.RecordingFolderDetector
+import com.becalm.android.ui.onboarding.RecordingPathSelection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -26,7 +26,6 @@ class RecordingFolderDetectionSpecTest {
         assertTrue(result.callFolderDetected)
         assertTrue(result.meetingFolderDetected)
         assertFalse(result.usedFallbackPath)
-        assertFalse(result.requiresManualPicker)
     }
 
     @Test
@@ -40,11 +39,10 @@ class RecordingFolderDetectionSpecTest {
         assertFalse(result.callFolderDetected)
         assertFalse(result.meetingFolderDetected)
         assertTrue(result.usedFallbackPath)
-        assertFalse(result.requiresManualPicker)
     }
 
     @Test
-    fun `ONB-002 marks manual picker fallback when neither auto-detect path exists`() {
+    fun `ONB-002 still presents default Recordings preset when neither auto-detect path exists`() {
         val result = RecordingFolderDetector.detect { false }
 
         assertEquals("/storage/emulated/0/Recordings", result.displayPath)
@@ -52,62 +50,16 @@ class RecordingFolderDetectionSpecTest {
         assertFalse(result.callFolderDetected)
         assertFalse(result.meetingFolderDetected)
         assertFalse(result.usedFallbackPath)
-        assertTrue(result.requiresManualPicker)
     }
 
     @Test
-    fun `ONB-002 accepts only useful recording folder tree selections`() {
-        assertTrue(
-            RecordingFolderSelection.isSupportedDocumentId("primary:Recordings"),
+    fun `ONB-003 maps recording sources to app-owned MediaStore path selections`() {
+        assertEquals(RecordingPathSelection.COMMON, RecordingPathSelection.forSourceType(null))
+        assertEquals(RecordingPathSelection.VOICE, RecordingPathSelection.forSourceType(SourceType.VOICE))
+        assertEquals(
+            RecordingPathSelection.CALL_RECORDING,
+            RecordingPathSelection.forSourceType(SourceType.CALL_RECORDING),
         )
-        assertTrue(
-            RecordingFolderSelection.isSupportedDocumentId("primary:VoiceRecorder"),
-        )
-        assertFalse(
-            RecordingFolderSelection.isSupportedDocumentId("primary:Download"),
-        )
-        assertFalse(
-            RecordingFolderSelection.isSupportedDocumentId("primary:Recordings/Call"),
-        )
-    }
-
-    @Test
-    fun `settings reconnect accepts only the exact folder for the selected recording source`() {
-        assertTrue(
-            RecordingFolderSelection.isSupportedDocumentId(
-                "primary:Recordings/Call",
-                SourceType.CALL_RECORDING,
-            ),
-        )
-        assertFalse(
-            RecordingFolderSelection.isSupportedDocumentId(
-                "primary:Recordings",
-                SourceType.CALL_RECORDING,
-            ),
-        )
-        assertTrue(
-            RecordingFolderSelection.isSupportedDocumentId(
-                "primary:Recordings",
-                SourceType.MEETING,
-            ),
-        )
-        assertTrue(
-            RecordingFolderSelection.isSupportedDocumentId(
-                "primary:Recordings/BeCalm Meetings",
-                SourceType.MEETING,
-            ),
-        )
-        assertTrue(
-            RecordingFolderSelection.isSupportedDocumentId(
-                "primary:Recordings/BeCalm Meetings/Audio",
-                SourceType.MEETING,
-            ),
-        )
-        assertFalse(
-            RecordingFolderSelection.isSupportedDocumentId(
-                "primary:Recordings/Call",
-                SourceType.MEETING,
-            ),
-        )
+        assertEquals(RecordingPathSelection.MEETING, RecordingPathSelection.forSourceType(SourceType.MEETING))
     }
 }

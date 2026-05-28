@@ -19,22 +19,31 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -55,6 +64,8 @@ import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.isActive
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.CounterpartyText
@@ -63,7 +74,6 @@ import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
-import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.RelationshipCard
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
@@ -77,12 +87,13 @@ import com.becalm.android.ui.evidence.EvidenceImportUiState
 import com.becalm.android.ui.evidence.EvidenceImportViewModel
 import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
 import com.becalm.android.ui.evidence.rememberEvidenceImportActions
-import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchTodayEffect
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 
 /**
@@ -111,16 +122,31 @@ public fun TodayTimelineScreen(
     navController: NavHostController,
     viewModel: TodayViewModel = hiltViewModel(),
     evidenceImportViewModel: EvidenceImportViewModel = hiltViewModel(),
+    showShareImportNotice: Boolean = false,
+    onShareImportNoticeShown: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val shareImportMessage = if (showShareImportNotice) {
+        stringResource(R.string.share_import_completed_message)
+    } else {
+        null
+    }
+    HandleSnackbarMessage(shareImportMessage, snackbarHostState, onShareImportNoticeShown)
     val importMessage = evidenceImportState.message?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(importMessage, snackbarHostState, evidenceImportViewModel::onMessageShown)
     val todayMessage = state.message?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(todayMessage, snackbarHostState, viewModel::onMessageShown)
 
     val evidenceImportActions = rememberEvidenceImportActions(evidenceImportViewModel)
+    LaunchedEffect(evidenceImportState.foregroundReviewRequestKey) {
+        val requestKey = evidenceImportState.foregroundReviewRequestKey ?: return@LaunchedEffect
+        navController.navigate(BecalmRoute.PersonsUnassigned.path) {
+            launchSingleTop = true
+        }
+        evidenceImportViewModel.onForegroundReviewOpened(requestKey)
+    }
 
     CollectFlowEffect(viewModel.effects) { effect ->
         navController.dispatchTodayEffect(effect)
@@ -135,10 +161,17 @@ public fun TodayTimelineScreen(
                 launchSingleTop = true
             }
         },
+        onOpenSource = { sourceType ->
+            navController.navigate(BecalmRoute.SourceDetail(sourceType).path) {
+                launchSingleTop = true
+            }
+        },
         onOpenProcessingStatus = {
             navController.navigate(BecalmRoute.ProcessingStatus.path)
         },
+        onDismissProcessingStatus = viewModel::onDismissProcessingStatus,
         onPullRefresh = viewModel::onPullRefresh,
+        onScheduleRangeChange = viewModel::onScheduleRangeChange,
         onResolveScheduleConflict = viewModel::onResolveScheduleConflict,
         onOpenCommitmentDetail = { commitmentId ->
             navController.navigate(BecalmRoute.CommitmentDetail(commitmentId).path)
@@ -150,9 +183,12 @@ public fun TodayTimelineScreen(
         onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
         evidenceImportState = evidenceImportState,
         onMeetingSelfSpeakerSelected = evidenceImportViewModel::onMeetingSelfSpeakerSelected,
+        onMeetingCounterpartySpeakerSelected = evidenceImportViewModel::onMeetingCounterpartySpeakerSelected,
         onMeetingSpeakerReviewConfirmed = evidenceImportViewModel::onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = evidenceImportViewModel::onMeetingSpeakerReviewCancelled,
+        onMeetingSpeakerReviewAction = evidenceImportViewModel::onMeetingSpeakerReviewAction,
         onMeetingPreviewLoadingCancelled = evidenceImportViewModel::onMeetingPreviewLoadingCancelled,
+        onRetryFailedImports = evidenceImportViewModel::onRetryFailedImports,
         onReviewRequiredClick = {
             navController.navigate(BecalmRoute.PersonsUnassigned.path)
         },
@@ -171,9 +207,12 @@ public fun TodayTimelineContent(
     state: TodayUiState,
     onOpenSettings: () -> Unit,
     onOpenSources: () -> Unit = onOpenSettings,
+    onOpenSource: ((String) -> Unit)? = null,
     onPullRefresh: () -> Unit,
+    onScheduleRangeChange: (ScheduleRangeFilter) -> Unit = {},
     onResolveScheduleConflict: (String, String) -> Unit = { _, _ -> },
     onOpenProcessingStatus: () -> Unit = {},
+    onDismissProcessingStatus: () -> Unit = {},
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onOpenCommitmentDetail: (String) -> Unit = {},
@@ -182,9 +221,12 @@ public fun TodayTimelineContent(
     onMeetingAudioImport: () -> Unit = {},
     evidenceImportState: EvidenceImportUiState = EvidenceImportUiState(),
     onMeetingSelfSpeakerSelected: (String) -> Unit = {},
+    onMeetingCounterpartySpeakerSelected: (String) -> Unit = {},
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
+    onMeetingSpeakerReviewAction: () -> Unit = {},
     onMeetingPreviewLoadingCancelled: () -> Unit = {},
+    onRetryFailedImports: () -> Unit = {},
     onReviewRequiredClick: () -> Unit = {},
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
@@ -192,12 +234,6 @@ public fun TodayTimelineContent(
         refreshing = state.refreshing,
         onRefresh = onPullRefresh,
     )
-    val headerState = MainTabHeaderState(
-        sourceStatus = state.sourceStatus,
-        overallSyncing = state.overallSyncing,
-        overall = state.overall,
-    )
-
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.today_title),
@@ -238,14 +274,10 @@ public fun TodayTimelineContent(
                         )
                     }
                 }
-                MainTabStatusHeader(
-                    state = headerState,
-                    onOpenSettings = onOpenSettings,
-                    onOpenSources = onOpenSources,
-                )
                 TodayProcessingStatusStrip(
                     status = state.processingStatus,
                     onOpenProcessingStatus = onOpenProcessingStatus,
+                    onDismiss = onDismissProcessingStatus,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -253,6 +285,13 @@ public fun TodayTimelineContent(
                 ScheduleConflictReviewPanel(
                     items = state.scheduleConflictReviewItems,
                     onResolveScheduleConflict = onResolveScheduleConflict,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+                ScheduleRangeChipRow(
+                    selectedFilter = state.scheduleRangeFilter,
+                    onFilterSelected = onScheduleRangeChange,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -270,6 +309,7 @@ public fun TodayTimelineContent(
                             ErrorState(
                                 title = stringResource(R.string.error_generic_title),
                                 message = uiMessageStringResource(requireNotNull(state.error)),
+                                onRetry = onPullRefresh,
                             )
                         }
                         state.timeline.isEmpty() -> {
@@ -281,10 +321,10 @@ public fun TodayTimelineContent(
                         else -> {
                             TimelineList(
                                 items = state.timeline,
-                                personFocus = state.personFocus,
+                                today = state.today,
+                                rangeFilter = state.scheduleRangeFilter,
                                 onOpenCommitmentDetail = onOpenCommitmentDetail,
                                 onAddDueTime = onAddDueTime,
-                                onReviewRequiredClick = onReviewRequiredClick,
                                 contentPadding = PaddingValues(vertical = 4.dp),
                             )
                         }
@@ -306,10 +346,15 @@ public fun TodayTimelineContent(
         onMeetingAudioImport = onMeetingAudioImport,
         state = evidenceImportState,
         onMeetingSelfSpeakerSelected = onMeetingSelfSpeakerSelected,
+        onMeetingCounterpartySpeakerSelected = onMeetingCounterpartySpeakerSelected,
         onMeetingSpeakerReviewConfirmed = onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = onMeetingSpeakerReviewCancelled,
+        onMeetingSpeakerReviewAction = onMeetingSpeakerReviewAction,
         onMeetingPreviewLoadingCancelled = onMeetingPreviewLoadingCancelled,
+        onRetryFailedImports = onRetryFailedImports,
         onReviewRequiredClick = onReviewRequiredClick,
+        onStatusDetailsClick = onOpenProcessingStatus,
+        onConsentRequiredClick = onOpenSettings,
     )
 }
 
@@ -348,6 +393,7 @@ private fun TimelineSkeleton(modifier: Modifier = Modifier) {
 private fun TodayProcessingStatusStrip(
     status: TodayProcessingStatusUi,
     onOpenProcessingStatus: () -> Unit,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (!status.visible) return
@@ -362,6 +408,16 @@ private fun TodayProcessingStatusStrip(
         else -> ""
     }
     val label = when {
+        status.activeItemCount > 0 && status.actionCount > 0 -> stringResource(
+            R.string.today_processing_active_items_action_fmt,
+            status.activeItemCount,
+            status.actionCount,
+        )
+        status.activeCount > 0 && status.actionCount > 0 -> stringResource(
+            R.string.today_processing_active_action_fmt,
+            status.activeCount,
+            status.actionCount,
+        )
         status.activeItemCount > 0 -> stringResource(
             R.string.today_processing_active_items_fmt,
             status.activeItemCount,
@@ -407,6 +463,48 @@ private fun TodayProcessingStatusStrip(
             TextButton(onClick = onOpenProcessingStatus) {
                 Text(text = stringResource(R.string.today_processing_open))
             }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .size(36.dp)
+                    .testTag("today-processing-dismiss"),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.today_processing_dismiss),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScheduleRangeChipRow(
+    selectedFilter: ScheduleRangeFilter,
+    onFilterSelected: (ScheduleRangeFilter) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = listOf(
+        ScheduleRangeFilter.UPCOMING to stringResource(R.string.schedule_range_upcoming),
+        ScheduleRangeFilter.PAST to stringResource(R.string.schedule_range_past),
+        ScheduleRangeFilter.ALL to stringResource(R.string.schedule_range_all),
+    )
+    LazyRow(
+        modifier = modifier.testTag("schedule-range-selector"),
+        contentPadding = PaddingValues(horizontal = 0.dp),
+    ) {
+        items(options) { (filter, label) ->
+            FilterChip(
+                selected = selectedFilter == filter,
+                onClick = { onFilterSelected(filter) },
+                label = {
+                    Text(text = label, style = MaterialTheme.typography.labelMedium)
+                },
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .testTag("schedule-range-${filter.name.lowercase()}"),
+            )
         }
     }
 }
@@ -418,22 +516,30 @@ private fun ScheduleConflictReviewPanel(
     modifier: Modifier = Modifier,
 ) {
     val item = items.firstOrNull() ?: return
+    val queueProgressText = stringResource(R.string.today_schedule_conflict_queue_progress_fmt, 1, items.size)
     EvidenceCard(
         modifier = modifier,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.today_schedule_conflict_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = queueProgressText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
-                text = stringResource(R.string.today_schedule_conflict_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = if (items.size > 1) {
-                    stringResource(R.string.today_schedule_conflict_count_fmt, items.size)
-                } else {
-                    stringResource(R.string.today_schedule_conflict_body)
-                },
+                text = stringResource(R.string.today_schedule_conflict_body),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -467,19 +573,50 @@ private fun ScheduleConflictReviewPanel(
             }
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { onResolveScheduleConflict(item.linkId, ScheduleEventLinkResolutionChoice.SAME_SCHEDULE) }) {
-                        Text(text = stringResource(R.string.today_schedule_conflict_same_schedule))
-                    }
-                    TextButton(onClick = { onResolveScheduleConflict(item.linkId, ScheduleEventLinkResolutionChoice.SCHEDULE_ADJUSTMENT_NEEDED) }) {
-                        Text(text = stringResource(R.string.today_schedule_conflict_adjust_needed))
-                    }
-                }
-                TextButton(onClick = { onResolveScheduleConflict(item.linkId, ScheduleEventLinkResolutionChoice.KEEP_BOTH) }) {
-                    Text(text = stringResource(R.string.today_schedule_conflict_keep_both))
+                BecalmButton(
+                    text = stringResource(R.string.today_schedule_conflict_same_schedule),
+                    onClick = {
+                        onResolveScheduleConflict(
+                            item.linkId,
+                            ScheduleEventLinkResolutionChoice.SAME_SCHEDULE,
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("schedule-conflict-primary"),
+                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    BecalmButton(
+                        text = stringResource(R.string.today_schedule_conflict_adjust_needed),
+                        onClick = {
+                            onResolveScheduleConflict(
+                                item.linkId,
+                                ScheduleEventLinkResolutionChoice.SCHEDULE_ADJUSTMENT_NEEDED,
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("schedule-conflict-adjust-needed"),
+                        variant = BecalmButtonVariant.Secondary,
+                    )
+                    BecalmButton(
+                        text = stringResource(R.string.today_schedule_conflict_keep_both),
+                        onClick = {
+                            onResolveScheduleConflict(
+                                item.linkId,
+                                ScheduleEventLinkResolutionChoice.KEEP_BOTH,
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("schedule-conflict-keep-both"),
+                        variant = BecalmButtonVariant.Text,
+                    )
                 }
             }
         }
@@ -506,7 +643,7 @@ private fun ScheduleConflictValueColumn(
             text = title.ifBlank { stringResource(R.string.today_schedule_conflict_missing_title) },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         val meta = listOfNotNull(
@@ -564,7 +701,7 @@ private fun TimelineSkeletonRow(modifier: Modifier = Modifier) {
         }
         SkeletonBlock(
             modifier = Modifier
-                .width(54.dp)
+                .width(72.dp)
                 .padding(top = 12.dp, start = 8.dp)
                 .height(12.dp),
         )
@@ -574,69 +711,38 @@ private fun TimelineSkeletonRow(modifier: Modifier = Modifier) {
 @Composable
 private fun TimelineList(
     items: List<TimelineItem>,
-    personFocus: List<TodayPersonFocus>,
+    today: LocalDate?,
+    rangeFilter: ScheduleRangeFilter,
     onOpenCommitmentDetail: (String) -> Unit,
     onAddDueTime: (String) -> Unit,
-    onReviewRequiredClick: () -> Unit,
     contentPadding: PaddingValues,
 ) {
-    val (timedItems, untimedItems) = remember(items) { items.partition { it.isTimed } }
+    val todayDate = today ?: remember { kotlinx.datetime.Clock.System.now().toLocalDateTime(KST_ZONE).date }
+    val sections = remember(items, todayDate, rangeFilter) {
+        buildScheduleTimelineSections(
+            items = items,
+            today = todayDate,
+            rangeFilter = rangeFilter,
+        )
+    }
     LazyColumn(
         contentPadding = contentPadding,
         modifier = Modifier.fillMaxSize(),
     ) {
-        if (personFocus.isNotEmpty()) {
-            item(key = "today-person-focus") {
-                TodayPersonFocusPanel(
-                    people = personFocus,
-                    onReviewRequiredClick = onReviewRequiredClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                )
-            }
-        }
-        if (timedItems.isNotEmpty()) {
-            item(key = "today-timed-header") {
+        sections.forEach { section ->
+            item(key = "schedule-section-${section.key}") {
                 TimelineSectionHeader(
-                    text = stringResource(R.string.today_timed_section),
+                    text = stringResource(section.titleRes),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
-        }
-        items(
-            items = timedItems,
-            key = { item ->
-                when (item) {
-                    is TimelineItem.Commitment -> "commitment-${item.id}"
-                    is TimelineItem.CalendarEvent -> "event-${item.id}"
-                    is TimelineItem.Meeting -> "meeting-${item.id}"
-                }
-            },
-        ) { item ->
-            TimelineItemRow(
-                item = item,
-                onOpenCommitmentDetail = onOpenCommitmentDetail,
-                onAddDueTime = onAddDueTime,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
-        if (untimedItems.isNotEmpty()) {
-            item(key = "today-untimed-header") {
-                TimelineSectionHeader(
-                    text = stringResource(R.string.today_untimed_section),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                )
-            }
             items(
-                items = untimedItems,
+                items = section.items,
                 key = { item ->
                     when (item) {
-                        is TimelineItem.Commitment -> "untimed-commitment-${item.id}"
-                        is TimelineItem.CalendarEvent -> "untimed-event-${item.id}"
-                        is TimelineItem.Meeting -> "untimed-meeting-${item.id}"
+                        is TimelineItem.Commitment -> "${section.key}-commitment-${item.id}"
+                        is TimelineItem.CalendarEvent -> "${section.key}-event-${item.id}"
+                        is TimelineItem.Meeting -> "${section.key}-meeting-${item.id}"
                     }
                 },
             ) { item ->
@@ -650,6 +756,55 @@ private fun TimelineList(
                 )
             }
         }
+    }
+}
+
+private data class ScheduleTimelineSection(
+    val key: String,
+    @StringRes val titleRes: Int,
+    val items: List<TimelineItem>,
+)
+
+private fun buildScheduleTimelineSections(
+    items: List<TimelineItem>,
+    today: LocalDate,
+    rangeFilter: ScheduleRangeFilter,
+): List<ScheduleTimelineSection> {
+    val grouped = linkedMapOf(
+        "past" to mutableListOf<TimelineItem>(),
+        "today" to mutableListOf<TimelineItem>(),
+        "week" to mutableListOf<TimelineItem>(),
+        "upcoming" to mutableListOf<TimelineItem>(),
+    )
+    items.forEach { item ->
+        val date = (item.timelineAt ?: item.sortKey).toLocalDateTime(KST_ZONE).date
+        val days = today.daysUntil(date)
+        val key = when {
+            days < 0 -> "past"
+            days == 0 -> "today"
+            days in 1..6 -> "week"
+            else -> "upcoming"
+        }
+        grouped.getValue(key).add(item)
+    }
+    val order = when (rangeFilter) {
+        ScheduleRangeFilter.UPCOMING -> listOf("today", "week", "upcoming")
+        ScheduleRangeFilter.PAST -> listOf("past")
+        ScheduleRangeFilter.ALL -> listOf("today", "week", "upcoming", "past")
+    }
+    return order.mapNotNull { key ->
+        val sectionItems = grouped.getValue(key)
+        if (sectionItems.isEmpty()) return@mapNotNull null
+        ScheduleTimelineSection(
+            key = key,
+            titleRes = when (key) {
+                "today" -> R.string.schedule_section_today
+                "week" -> R.string.schedule_section_this_week
+                "upcoming" -> R.string.schedule_section_upcoming
+                else -> R.string.schedule_section_past
+            },
+            items = sectionItems,
+        )
     }
 }
 
@@ -785,7 +940,7 @@ private fun TimelineTimeColumn(
             else -> item.timelineAt?.let(::formatKstTime) ?: stringResource(R.string.today_no_due_time)
         },
         modifier = modifier
-            .width(54.dp)
+            .width(72.dp)
             .padding(top = 12.dp, start = 8.dp),
         style = MaterialTheme.typography.labelMedium,
         color = if (item.isTimed || item.isCalendarAllDay()) {
@@ -793,6 +948,8 @@ private fun TimelineTimeColumn(
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -1034,6 +1191,7 @@ private fun todayProcessingPhaseLabelRes(phase: ProcessingPhase): Int = when (ph
     ProcessingPhase.IDLE -> R.string.processing_phase_idle
     ProcessingPhase.SCANNING -> R.string.processing_phase_scanning
     ProcessingPhase.NEW_ITEMS -> R.string.processing_phase_new_items
+    ProcessingPhase.AWAITING_CONFIRMATION -> R.string.processing_phase_audio_confirmation
     ProcessingPhase.GEMINI -> R.string.processing_phase_memory
     ProcessingPhase.UPLOADING -> R.string.processing_phase_uploading
     ProcessingPhase.NO_NEW_ITEMS -> R.string.processing_phase_no_new_items

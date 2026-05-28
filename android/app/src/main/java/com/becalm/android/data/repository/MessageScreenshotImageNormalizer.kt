@@ -28,38 +28,43 @@ internal object MessageScreenshotImageNormalizer {
     private const val COPY_BUFFER_BYTES = 8 * 1024
 
     fun normalize(input: InputStream, target: File): MessageScreenshotNormalizeResult {
-        val sourceBytes = input.readBytesLimited(MAX_SOURCE_BYTES)
-        val sourceSize = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-            BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size, this)
-        }
-        if (sourceSize.outWidth <= 0 || sourceSize.outHeight <= 0) {
-            throw MessageScreenshotImportValidationException("file", "unsupported message screenshot format")
-        }
-
-        val bitmap = BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size)
-            ?: throw MessageScreenshotImportValidationException("file", "unsupported message screenshot format")
-        val normalized = bitmap.scaleForOcr()
+        val sourceFile = target.createSiblingTempFile()
         try {
-            ByteArrayOutputStream().use { encoded ->
-                if (!normalized.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, encoded)) {
-                    throw IOException("Unable to encode normalized screenshot")
-                }
-                if (encoded.size() > MAX_OUTPUT_BYTES) {
-                    throw MessageScreenshotImportValidationException("file", "message screenshot exceeds 10 MiB")
-                }
-                target.outputStream().use { output ->
-                    encoded.writeTo(output)
-                }
+            input.copyToTempFileLimited(sourceFile, MAX_SOURCE_BYTES)
+            val sourceSize = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+                BitmapFactory.decodeFile(sourceFile.absolutePath, this)
             }
-            return MessageScreenshotNormalizeResult(
-                width = normalized.width,
-                height = normalized.height,
-                byteSize = target.length(),
-            )
+            if (sourceSize.outWidth <= 0 || sourceSize.outHeight <= 0) {
+                throw MessageScreenshotImportValidationException("file", "unsupported message screenshot format")
+            }
+
+            val bitmap = BitmapFactory.decodeFile(sourceFile.absolutePath)
+                ?: throw MessageScreenshotImportValidationException("file", "unsupported message screenshot format")
+            val normalized = bitmap.scaleForOcr()
+            try {
+                ByteArrayOutputStream().use { encoded ->
+                    if (!normalized.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, encoded)) {
+                        throw IOException("Unable to encode normalized screenshot")
+                    }
+                    if (encoded.size() > MAX_OUTPUT_BYTES) {
+                        throw MessageScreenshotImportValidationException("file", "message screenshot exceeds 10 MiB")
+                    }
+                    target.outputStream().use { output ->
+                        encoded.writeTo(output)
+                    }
+                }
+                return MessageScreenshotNormalizeResult(
+                    width = normalized.width,
+                    height = normalized.height,
+                    byteSize = target.length(),
+                )
+            } finally {
+                if (normalized !== bitmap) normalized.recycle()
+                bitmap.recycle()
+            }
         } finally {
-            if (normalized !== bitmap) normalized.recycle()
-            bitmap.recycle()
+            sourceFile.delete()
         }
     }
 
@@ -73,18 +78,33 @@ internal object MessageScreenshotImageNormalizer {
         return Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
     }
 
-    private fun InputStream.readBytesLimited(maxBytes: Long): ByteArray {
-        val output = ByteArrayOutputStream()
+    private fun InputStream.copyToTempFileLimited(target: File, maxBytes: Long) {
         val buffer = ByteArray(COPY_BUFFER_BYTES)
         var total = 0L
-        while (true) {
-            val read = read(buffer)
-            if (read == -1) return output.toByteArray()
-            total += read
-            if (total > maxBytes) {
-                throw MessageScreenshotImportValidationException("file", "message screenshot exceeds 25 MiB")
+        target.outputStream().use { output ->
+            while (true) {
+                val read = read(buffer)
+                if (read == -1) return
+                total += read
+                if (total > maxBytes) {
+                    throw MessageScreenshotImportValidationException("file", "message screenshot exceeds 25 MiB")
+                }
+                output.write(buffer, 0, read)
             }
-            output.write(buffer, 0, read)
+        }
+    }
+
+    private fun File.createSiblingTempFile(): File {
+        val prefix = nameWithoutExtension
+            .filter { it.isLetterOrDigit() }
+            .ifBlank { "screenshot" }
+            .take(16)
+            .padEnd(3, '_')
+        val dir = parentFile ?: absoluteFile.parentFile
+        return if (dir != null) {
+            File.createTempFile(prefix, ".source", dir)
+        } else {
+            File.createTempFile(prefix, ".source")
         }
     }
 }

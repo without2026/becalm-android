@@ -10,17 +10,38 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.PhoneNumberUtils
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.supabase.SupabaseAuthProvider
+import com.becalm.android.data.remote.supabase.SupabaseSessionStore
+import com.becalm.android.data.repository.CalendarEventRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
+import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.FirstMemoryRepository
 import com.becalm.android.data.repository.SelfIdentityRepository
+import com.becalm.android.data.repository.OnboardingActivationPreview
+import com.becalm.android.data.repository.OnboardingActivationProgress
+import com.becalm.android.data.repository.OnboardingActivationPreviewRepository
+import com.becalm.android.data.repository.OnboardingActivationPreviewResult
+import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.UserProfileRepository
+import com.becalm.android.domain.onboarding.FirstMemoryDraft
+import com.becalm.android.domain.onboarding.FirstMemoryInput
+import com.becalm.android.domain.onboarding.FirstMemoryKind
+import com.becalm.android.domain.onboarding.FirstMemoryOrigin
+import com.becalm.android.domain.onboarding.FirstMemoryValidator
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.sources.sourceConnectionTitle
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
+import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -32,10 +53,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
@@ -68,7 +95,7 @@ public enum class OnboardingStep {
     LOGIN,
     /** Voice-processing PIPA consent milestone. */
     PIPA_CONSENT,
-    /** Recording-folder SAF/audio permission milestone. */
+    /** Recording audio permission and app-owned path selection milestone. */
     RECORDING_FOLDER,
     /** Optional step — local CallLog matching consent for call-recording person refs. */
     CALL_LOG_MATCHING,
@@ -135,6 +162,12 @@ public sealed class EmailConnectEvent {
      */
     public data class Connected(override val provider: EmailPipaProvider) : EmailConnectEvent()
 
+    /** Authorization completed and BeCalm is now waiting for backend sync + local mirror. */
+    public data class Syncing(override val provider: EmailPipaProvider) : EmailConnectEvent()
+
+    /** Browser/OAuth returned without a persisted connection. */
+    public data class NotConnected(override val provider: EmailPipaProvider) : EmailConnectEvent()
+
     /**
      * First-time consent: launch the carried intent via an Activity-result launcher and
      * re-trigger [OnboardingViewModel.onConnectEmailProvider] once the user completes
@@ -164,6 +197,14 @@ public sealed class CalendarConnectEvent {
         override val provider: CalendarOAuthProvider,
     ) : CalendarConnectEvent()
 
+    public data class Syncing(
+        override val provider: CalendarOAuthProvider,
+    ) : CalendarConnectEvent()
+
+    public data class NotConnected(
+        override val provider: CalendarOAuthProvider,
+    ) : CalendarConnectEvent()
+
     public data class Failed(
         override val provider: CalendarOAuthProvider,
         val errorCode: String,
@@ -178,8 +219,86 @@ public sealed interface ContactsPermissionEffect {
 
 /** One-shot effects for compact first-run setup completion. */
 public sealed interface OnboardingSetupEffect {
-    public data object NavigateToToday : OnboardingSetupEffect
+    public data object NavigateToPeople : OnboardingSetupEffect
+    public data class NavigateToSetupRoute(
+        val route: String,
+    ) : OnboardingSetupEffect
+
+    public data class NavigateToCompletion(
+        val personId: String = ONBOARDING_COMPLETE_GENERIC_PERSON_ID,
+    ) : OnboardingSetupEffect
 }
+
+public enum class OnboardingSetupStage {
+    INTRO,
+    GMAIL_PREVIEW,
+    FIRST_MEMORY,
+}
+
+public data class OnboardingContactsPreviewUi(
+    val totalCount: Int = 0,
+    val names: List<String> = emptyList(),
+)
+
+public data class OnboardingCalendarPreviewItemUi(
+    val dayLabel: String,
+    val timeLabel: String,
+    val title: String,
+)
+
+public data class OnboardingCalendarPreviewUi(
+    val loading: Boolean = false,
+    val events: List<OnboardingCalendarPreviewItemUi> = emptyList(),
+    val failed: Boolean = false,
+)
+
+public data class GmailActivationPreviewUi(
+    val commitmentId: String,
+    val personId: String?,
+    val personName: String?,
+    val participantId: String?,
+    val participantName: String?,
+    val participantEmail: String?,
+    val participantPhone: String?,
+    val contactMatched: Boolean,
+    val title: String,
+    val itemType: String,
+    val direction: String?,
+    val scheduleStatus: String?,
+    val decisionStatus: String?,
+    val dueHint: String?,
+    val sourceType: String,
+    val sourceTitle: String?,
+)
+
+public enum class GmailActivationPreviewStatus {
+    Idle,
+    Loading,
+    Ready,
+    StillProcessing,
+    Empty,
+    FailedRetryable,
+    FailedTerminal,
+}
+
+public data class GmailActivationPreviewUiState(
+    val loading: Boolean = false,
+    val preview: GmailActivationPreviewUi? = null,
+    val previews: List<GmailActivationPreviewUi> = preview?.let { listOf(it) }.orEmpty(),
+    val status: GmailActivationPreviewStatus = GmailActivationPreviewStatus.Idle,
+    val progress: Float? = null,
+    val progressMessage: String? = null,
+    val progressStage: String? = null,
+)
+
+internal fun GmailActivationPreviewUiState.canReturnToActivationPreview(): Boolean =
+    loading || preview != null || previews.isNotEmpty() || status != GmailActivationPreviewStatus.Idle
+
+internal fun GmailActivationPreviewUiState.hasReadyPreview(): Boolean =
+    preview != null || previews.isNotEmpty()
+
+internal fun GmailActivationPreviewUiState.primaryPreview(): GmailActivationPreviewUi? =
+    preview ?: previews.firstOrNull()
 
 // ─── UI State ─────────────────────────────────────────────────────────────────
 
@@ -194,23 +313,76 @@ public sealed interface OnboardingSetupEffect {
 public data class OnboardingUiState(
     val currentStepIndex: Int = 0,
     val stepStates: Map<OnboardingStep, StepStatus> = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED },
+    val setupStage: OnboardingSetupStage = OnboardingSetupStage.INTRO,
+    val introPageIndex: Int = 0,
     val selfDisplayName: String = "",
     val selfEmail: String = "",
     val selfPhone: String = "",
     val selfAlias: String = "",
+    val selfAuthProvider: SupabaseAuthProvider = SupabaseAuthProvider.EMAIL,
+    val selfDisplayNameReadOnly: Boolean = false,
+    val selfEmailReadOnly: Boolean = false,
+    val selfPhoneReadOnly: Boolean = false,
+    val selfPhoneVerified: Boolean = false,
     val selfIdentityConfirmed: Boolean = false,
     val isSavingSelfIdentity: Boolean = false,
     val sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
     val sourceOwnershipsLoaded: Boolean = false,
     val sourceOwnershipLoadFailed: Boolean = false,
     val updatingSourceOwnershipId: String? = null,
+    val callRecordingConnectionState: SourceConnectionState = SourceConnectionState.Idle,
+    val contactsPreview: OnboardingContactsPreviewUi = OnboardingContactsPreviewUi(),
+    val calendarPreview: OnboardingCalendarPreviewUi = OnboardingCalendarPreviewUi(),
+    val gmailActivationPreview: GmailActivationPreviewUiState = GmailActivationPreviewUiState(),
+    val firstMemory: FirstMemoryActivationUiState = FirstMemoryActivationUiState(),
+    val firstMemoryExitPromptVisible: Boolean = false,
     val isCompleting: Boolean = false,
+    val notice: UiMessage? = null,
     val error: UiMessage? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "OnboardingViewModel"
+internal const val ONBOARDING_COMPLETE_GENERIC_PERSON_ID = "ready"
+internal const val ONBOARDING_INTRO_PAGE_COUNT = 5
+
+private fun FirstMemoryActivationUiState.toDraft(): FirstMemoryDraft =
+    FirstMemoryDraft(
+        clientMemoryId = clientMemoryId,
+        origin = origin,
+        personName = personName,
+        promiseText = promiseText,
+        kind = kind,
+        dueHint = dueHint,
+    )
+
+private fun FirstMemoryActivationUiState.hasRecoverableDraft(): Boolean =
+    origin != null ||
+        personName.isNotBlank() ||
+        promiseText.isNotBlank() ||
+        kind != null ||
+        dueHint.isNotBlank()
+
+private fun OnboardingActivationPreview.toUi(): GmailActivationPreviewUi =
+    GmailActivationPreviewUi(
+        commitmentId = commitmentId,
+        personId = personId,
+        personName = personName,
+        participantId = participantId,
+        participantName = participantName,
+        participantEmail = participantEmail,
+        participantPhone = participantPhone,
+        contactMatched = contactMatched,
+        title = title,
+        itemType = itemType,
+        direction = direction,
+        scheduleStatus = scheduleStatus,
+        decisionStatus = decisionStatus,
+        dueHint = dueHint,
+        sourceType = sourceType,
+        sourceTitle = sourceTitle,
+    )
 
 /**
  * ViewModel for the onboarding flow.
@@ -222,6 +394,7 @@ private const val TAG = "OnboardingViewModel"
 @HiltViewModel
 public class OnboardingViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
+    private val sessionStore: SupabaseSessionStore,
     private val logger: Logger,
     private val observability: ObservabilityClient,
     private val imapCredentialStore: ImapCredentialStore,
@@ -231,7 +404,17 @@ public class OnboardingViewModel @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val sourceConnectionRepository: SourceConnectionRepository,
     private val selfIdentityRepository: SelfIdentityRepository,
-    private val userProfileRepository: UserProfileRepository,
+	    private val userProfileRepository: UserProfileRepository,
+	    private val calendarEventRepository: CalendarEventRepository,
+	    private val commitmentRepository: CommitmentRepository,
+	    private val sourceEventParticipantRepository: SourceEventParticipantRepository,
+	    private val commitmentParticipantRepository: CommitmentParticipantRepository,
+	    private val scheduleEventLinkRepository: ScheduleEventLinkRepository,
+	    private val personEnrichmentRepository: PersonEnrichmentRepository,
+    private val firstMemoryRepository: FirstMemoryRepository,
+    private val onboardingActivationPreviewRepository: OnboardingActivationPreviewRepository,
+    private val rawIngestionRepository: RawIngestionRepository,
+    private val workScheduler: WorkScheduler,
 ) : ViewModel() {
 
     private val emailActionHandler: OnboardingEmailActionHandler = OnboardingEmailActionHandler(
@@ -240,6 +423,7 @@ public class OnboardingViewModel @Inject constructor(
         observability = observability,
         logger = logger,
     )
+    private val gmailActivationSyncMutex: Mutex = Mutex()
 
     /** Canonical ordered list of onboarding steps (12 entries, see [OnboardingStep]). */
     public val steps: List<OnboardingStep> = OnboardingStep.entries
@@ -306,6 +490,9 @@ public class OnboardingViewModel @Inject constructor(
     init {
         hydrateDurableProgress()
         hydrateSelfIdentity()
+        hydrateCallRecordingConnection()
+        hydrateContactsPreview()
+        hydrateCalendarPreview()
         hydrateSourceOwnerships()
     }
 
@@ -380,145 +567,492 @@ public class OnboardingViewModel @Inject constructor(
     }
 
     public fun onSelfDisplayNameChange(value: String) {
-        _uiState.update { it.copy(selfDisplayName = value, selfIdentityConfirmed = false) }
+        if (_uiState.value.selfDisplayNameReadOnly) return
+        _uiState.update { it.copy(selfDisplayName = value, selfIdentityConfirmed = false, notice = null) }
     }
 
     public fun onSelfEmailChange(value: String) {
-        _uiState.update { it.copy(selfEmail = value, selfIdentityConfirmed = false) }
+        if (_uiState.value.selfEmailReadOnly) return
+        _uiState.update { it.copy(selfEmail = value, selfIdentityConfirmed = false, notice = null) }
     }
 
     public fun onSelfPhoneChange(value: String) {
-        _uiState.update { it.copy(selfPhone = value, selfIdentityConfirmed = false) }
+        if (_uiState.value.selfPhoneReadOnly) return
+        _uiState.update { it.copy(selfPhone = value, selfIdentityConfirmed = false, notice = null) }
     }
 
     public fun onSelfAliasChange(value: String) {
-        _uiState.update { it.copy(selfAlias = value, selfIdentityConfirmed = false) }
+        _uiState.update { it.copy(selfAlias = value, selfIdentityConfirmed = false, notice = null) }
+    }
+
+    public fun onNoticeDismissed() {
+        _uiState.update { it.copy(notice = null) }
+    }
+
+    public fun onSetupRouteVisible(route: String?) {
+        val destination = OnboardingSetupDestination.fromRoutePath(route) ?: return
+        _uiState.update { state ->
+            when (destination.setupStage) {
+                OnboardingSetupStage.INTRO -> state.copy(
+                    setupStage = OnboardingSetupStage.INTRO,
+                    introPageIndex = destination.introPageIndex ?: state.introPageIndex,
+                    firstMemoryExitPromptVisible = false,
+                    notice = null,
+                    error = null,
+                )
+                OnboardingSetupStage.GMAIL_PREVIEW -> state.copy(
+                    setupStage = OnboardingSetupStage.GMAIL_PREVIEW,
+                    introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                    firstMemoryExitPromptVisible = false,
+                    notice = null,
+                    error = null,
+                )
+                OnboardingSetupStage.FIRST_MEMORY -> state.copy(
+                    setupStage = OnboardingSetupStage.FIRST_MEMORY,
+                    introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                    firstMemoryExitPromptVisible = false,
+                    notice = null,
+                    error = null,
+                )
+            }
+        }
+        persistSetupDestination(destination)
+    }
+
+    public fun onIntroNext() {
+        var resolvePostIntroDestination = false
+        var nextDestination: OnboardingSetupDestination? = null
+        _uiState.update { state ->
+            if (state.setupStage != OnboardingSetupStage.INTRO) return@update state
+            val nextPage = state.introPageIndex + 1
+            if (nextPage >= ONBOARDING_INTRO_PAGE_COUNT) {
+                resolvePostIntroDestination = true
+                state.copy(
+                    introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                    notice = null,
+                    error = null,
+                )
+            } else {
+                nextDestination = OnboardingSetupDestination.fromIntroPageIndex(nextPage)
+                state.copy(introPageIndex = nextPage, notice = null, error = null)
+            }
+        }
+        when {
+            resolvePostIntroDestination -> {
+                routeAfterOptionalOnboardingSources()
+            }
+            nextDestination != null -> {
+                emitSetupDestination(requireNotNull(nextDestination))
+            }
+        }
+    }
+
+    public fun onIdentityNext() {
+        viewModelScope.launch {
+            if (_uiState.value.isSavingSelfIdentity || _uiState.value.isCompleting) return@launch
+            val saved = saveSelfIdentityNow()
+            if (saved) {
+                onIntroNext()
+            }
+        }
+    }
+
+    private fun persistSetupDestination(destination: OnboardingSetupDestination) {
+        viewModelScope.launch {
+            userPrefsStore.setOnboardingSetupRoute(destination.routePath)
+        }
+    }
+
+    private fun emitSetupDestination(destination: OnboardingSetupDestination) {
+        viewModelScope.launch {
+            userPrefsStore.setOnboardingSetupRoute(destination.routePath)
+            _setupEffects.emit(OnboardingSetupEffect.NavigateToSetupRoute(destination.routePath))
+        }
+    }
+
+    private fun emitCurrentSetupDestination() {
+        emitSetupDestination(OnboardingSetupDestination.fromState(_uiState.value))
+    }
+
+    private fun routeAfterOptionalOnboardingSources() {
+        routeAfterOptionalOnboardingSources(markGmailPreviewLoading = false)
+    }
+
+    private fun routeAfterOptionalOnboardingSources(markGmailPreviewLoading: Boolean) {
+        val state = _uiState.value
+        if (!state.hasConnectedOnboardingSource()) {
+            _uiState.update {
+                it.copy(
+                    setupStage = OnboardingSetupStage.FIRST_MEMORY,
+                    introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                    gmailActivationPreview = if (markGmailPreviewLoading) {
+                        it.gmailActivationPreview.copy(loading = false)
+                    } else {
+                        it.gmailActivationPreview
+                    },
+                    firstMemoryExitPromptVisible = false,
+                    notice = null,
+                    error = null,
+                )
+            }
+            emitSetupDestination(OnboardingSetupDestination.FirstMemory)
+            return
+        }
+        if (state.isCompleting) return
+        _uiState.update {
+            it.copy(
+                isCompleting = true,
+                gmailActivationPreview = if (markGmailPreviewLoading) {
+                    it.gmailActivationPreview.copy(loading = true)
+                } else {
+                    it.gmailActivationPreview
+                },
+                error = null,
+                notice = null,
+            )
+        }
+        viewModelScope.launch {
+            completeFirstMemorySetup {
+                _setupEffects.emit(OnboardingSetupEffect.NavigateToCompletion())
+            }
+        }
+    }
+
+    public fun onIntroBack() {
+        var previousDestination: OnboardingSetupDestination? = null
+        _uiState.update { state ->
+            if (state.setupStage != OnboardingSetupStage.INTRO) return@update state
+            val previousPage = (state.introPageIndex - 1).coerceAtLeast(0)
+            previousDestination = OnboardingSetupDestination.fromIntroPageIndex(previousPage)
+            state.copy(introPageIndex = previousPage, notice = null, error = null)
+        }
+        previousDestination?.let(::emitSetupDestination)
+    }
+
+    public fun onSetupBackRequested() {
+        var destination: OnboardingSetupDestination? = null
+        _uiState.update { state ->
+            when (state.setupStage) {
+                OnboardingSetupStage.INTRO -> {
+                    val previousPage = (state.introPageIndex - 1).coerceAtLeast(0)
+                    destination = OnboardingSetupDestination.fromIntroPageIndex(previousPage)
+                    state.copy(
+                        introPageIndex = previousPage,
+                        firstMemoryExitPromptVisible = false,
+                        notice = null,
+                        error = null,
+                    )
+                }
+                OnboardingSetupStage.GMAIL_PREVIEW -> {
+                    destination = OnboardingSetupDestination.Email
+                    state.copy(
+                        setupStage = OnboardingSetupStage.INTRO,
+                        introPageIndex = (ONBOARDING_INTRO_PAGE_COUNT - 1).coerceAtLeast(0),
+                        firstMemoryExitPromptVisible = false,
+                        notice = null,
+                        error = null,
+                    )
+                }
+                OnboardingSetupStage.FIRST_MEMORY -> {
+                    if (state.firstMemory.saving || state.isCompleting) {
+                        state
+                    } else if (state.firstMemory.hasRecoverableDraft()) {
+                        state.copy(firstMemoryExitPromptVisible = true, notice = null, error = null)
+                    } else {
+                        destination = OnboardingSetupDestination.Email
+                        state.copy(
+                            setupStage = OnboardingSetupStage.INTRO,
+                            introPageIndex = (ONBOARDING_INTRO_PAGE_COUNT - 1).coerceAtLeast(0),
+                            firstMemoryExitPromptVisible = false,
+                            notice = null,
+                            error = null,
+                        )
+                    }
+                }
+            }
+        }
+        destination?.let(::emitSetupDestination)
+    }
+
+    public fun onKeepFirstMemoryDraft() {
+        _uiState.update { state ->
+            state.copy(firstMemoryExitPromptVisible = false, notice = null, error = null)
+        }
+    }
+
+    public fun onDiscardFirstMemoryDraft() {
+        _uiState.update { state ->
+            state.copy(
+                setupStage = OnboardingSetupStage.INTRO,
+                introPageIndex = (ONBOARDING_INTRO_PAGE_COUNT - 1).coerceAtLeast(0),
+                firstMemory = FirstMemoryActivationUiState(),
+                firstMemoryExitPromptVisible = false,
+                notice = null,
+                error = null,
+            )
+        }
+        emitSetupDestination(OnboardingSetupDestination.Email)
+    }
+
+    public fun onUseManualFirstMemory() {
+        _uiState.update {
+            it.copy(
+                setupStage = OnboardingSetupStage.FIRST_MEMORY,
+                introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                gmailActivationPreview = GmailActivationPreviewUiState(),
+                firstMemoryExitPromptVisible = false,
+                notice = null,
+                error = null,
+            )
+        }
+        emitSetupDestination(OnboardingSetupDestination.FirstMemory)
+    }
+
+    public fun onReturnToGmailActivationPreview() {
+        _uiState.update { state ->
+            if (!state.gmailActivationPreview.canReturnToActivationPreview()) return@update state
+            state.copy(
+                setupStage = OnboardingSetupStage.GMAIL_PREVIEW,
+                introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                firstMemoryExitPromptVisible = false,
+                notice = null,
+                error = null,
+            )
+        }
+        emitCurrentSetupDestination()
+    }
+
+    public fun onGmailConnectedForActivation() {
+        viewModelScope.launch {
+            if (_uiState.value.gmailActivationPreview.loading) {
+                return@launch
+            }
+            if (!gmailActivationSyncMutex.tryLock()) {
+                return@launch
+            }
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            try {
+                if (userId.isNullOrBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            gmailActivationPreview = GmailActivationPreviewUiState(
+                                status = GmailActivationPreviewStatus.FailedTerminal,
+                            ),
+                            notice = null,
+                            error = null,
+                        )
+                    }
+                    return@launch
+                }
+                _uiState.update {
+                    it.copy(
+                        gmailActivationPreview = GmailActivationPreviewUiState(
+                            loading = true,
+                            status = GmailActivationPreviewStatus.Loading,
+                            progress = 0.08f,
+                            progressMessage = "Gmail 연결을 확인하고 있습니다",
+                            progressStage = "queued",
+                        ),
+                        notice = null,
+                        error = null,
+                    )
+                }
+                val result = try {
+                    onboardingActivationPreviewRepository.syncGmailAndLoadPreview(
+                        userId,
+                        onProgress = { progress -> updateGmailActivationProgress(progress) },
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.w(TAG, "gmail activation preview failed", e)
+                    OnboardingActivationPreviewResult.Failed(retryable = true)
+                }
+                when (result) {
+                    is OnboardingActivationPreviewResult.Ready -> _uiState.update {
+                        it.copy(
+                            gmailActivationPreview = GmailActivationPreviewUiState(
+                                loading = false,
+                                previews = result.previews.map { preview -> preview.toUi() },
+                                status = GmailActivationPreviewStatus.Ready,
+                                progress = 1f,
+                                progressMessage = "Gmail 확인을 마쳤습니다",
+                                progressStage = "complete",
+                            ),
+                            notice = null,
+                            error = null,
+                        )
+                    }
+                    OnboardingActivationPreviewResult.Empty -> showGmailActivationFallback(
+                        GmailActivationPreviewStatus.Empty,
+                    )
+                    is OnboardingActivationPreviewResult.Pending -> showGmailActivationFallback(
+                        GmailActivationPreviewStatus.StillProcessing,
+                        result.progress,
+                    )
+                    is OnboardingActivationPreviewResult.Failed -> showGmailActivationFallback(
+                        if (result.retryable) {
+                            GmailActivationPreviewStatus.FailedRetryable
+                        } else {
+                            GmailActivationPreviewStatus.FailedTerminal
+                        },
+                    )
+                }
+            } finally {
+                gmailActivationSyncMutex.unlock()
+            }
+        }
+    }
+
+    public fun onRetryGmailActivationPreview() {
+        onGmailConnectedForActivation()
+    }
+
+    public fun onStartWithoutGmailActivationPreview() {
+        if (_uiState.value.isCompleting || _uiState.value.gmailActivationPreview.loading) return
+        routeAfterOptionalOnboardingSources(markGmailPreviewLoading = true)
+    }
+
+    private fun OnboardingUiState.hasConnectedOnboardingSource(): Boolean =
+        stepStates[OnboardingStep.LINK_GOOGLE_CALENDAR] == StepStatus.COMPLETE ||
+            gmailActivationPreview.hasReadyPreview() ||
+            callRecordingConnectionState == SourceConnectionState.Connected
+
+    private fun updateGmailActivationProgress(progress: OnboardingActivationProgress) {
+        _uiState.update { state ->
+            state.copy(
+                gmailActivationPreview = state.gmailActivationPreview.copy(
+                    loading = true,
+                    status = GmailActivationPreviewStatus.Loading,
+                    progress = progress.progress?.toFloat()?.coerceIn(0f, 1f)
+                        ?: state.gmailActivationPreview.progress,
+                    progressMessage = progress.message,
+                    progressStage = progress.stage,
+                ),
+                notice = null,
+                error = null,
+            )
+        }
+    }
+
+    private fun showGmailActivationFallback(
+        status: GmailActivationPreviewStatus,
+        progress: OnboardingActivationProgress? = null,
+    ) {
+        _uiState.update {
+            it.copy(
+                gmailActivationPreview = GmailActivationPreviewUiState(
+                    loading = false,
+                    status = status,
+                    progress = progress?.progress?.toFloat()?.coerceIn(0f, 1f),
+                    progressMessage = progress?.message,
+                    progressStage = progress?.stage,
+                ),
+                notice = null,
+                error = null,
+            )
+        }
+    }
+
+    public fun onUseGmailActivationPreview() {
+        if (_uiState.value.gmailActivationPreview.primaryPreview() == null) return
+        viewModelScope.launch {
+            val personId = _uiState.value.gmailActivationPreview.primaryPreview()?.personId
+                ?: ONBOARDING_COMPLETE_GENERIC_PERSON_ID
+            _uiState.update {
+                it.copy(
+                    isCompleting = true,
+                    gmailActivationPreview = it.gmailActivationPreview.copy(loading = true),
+                    error = null,
+                    notice = null,
+                )
+            }
+            completeFirstMemorySetup {
+                _setupEffects.emit(OnboardingSetupEffect.NavigateToCompletion(personId))
+            }
+        }
     }
 
     public fun onSaveSelfIdentity() {
         viewModelScope.launch {
-            try {
-                val userId = userPrefsStore.observeCurrentUserId().first()
-                if (userId.isNullOrBlank()) {
-                    _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_no_user)) }
-                    return@launch
-                }
-                _uiState.update { it.copy(error = null) }
-                val state = _uiState.value
-                if (!isSelfIdentityReady(state)) {
-                    _uiState.update { it.copy(error = UiMessage.resource(R.string.onb_error_self_identity_required)) }
-                    return@launch
-                }
-                val displayName = state.selfDisplayName.trim()
-                val phone = normalizeSelfPhone(state.selfPhone)
-                val email = state.selfEmail.trim()
-                val alias = state.selfAlias.trim()
-                _uiState.update { it.copy(isSavingSelfIdentity = true, error = null) }
-                val localProfile = userProfileRepository.upsertLocal(
-                    userId = userId,
-                    displayName = displayName,
-                    phoneE164Self = phone,
-                )
-                upsertOptionalLocalSelfAnchor(userId, anchorType = "email", value = email)
-                upsertOptionalLocalSelfAnchor(userId, anchorType = "phone", value = phone)
-                upsertOptionalLocalSelfAnchor(userId, anchorType = "alias", value = alias)
-                _uiState.update {
-                    it.copy(
-                        selfDisplayName = localProfile.displayNameOverride.orEmpty(),
-                        selfEmail = email,
-                        selfPhone = localProfile.phoneE164Self.orEmpty(),
-                        selfAlias = alias,
-                        selfIdentityConfirmed = true,
-                        isSavingSelfIdentity = false,
-                        error = null,
-                    )
-                }
-                mirrorSelfIdentityRemote(userId, displayName, phone, email, alias)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.e(TAG, "failed to save onboarding self identity", e)
-                _uiState.update {
-                    it.copy(
-                        isSavingSelfIdentity = false,
-                        error = UiMessage.resource(R.string.settings_identity_error_save_profile),
-                    )
-                }
-            }
+            saveSelfIdentityNow()
         }
     }
 
-    private suspend fun upsertOptionalLocalSelfAnchor(
-        userId: String,
-        anchorType: String,
-        value: String,
-    ) {
-        val trimmed = normalizeSelfAnchorValue(anchorType, value)
-        if (trimmed.isEmpty()) return
-        selfIdentityRepository.upsertLocalAnchor(
-            userId = userId,
-            anchorType = anchorType,
-            value = trimmed,
-            displayValue = trimmed,
-            source = "user_profile",
-        )
-    }
-
-    private suspend fun mirrorSelfIdentityRemote(
-        userId: String,
-        displayName: String,
-        phone: String,
-        email: String,
-        alias: String,
-    ) {
+    private suspend fun saveSelfIdentityNow(): Boolean {
         try {
-            when (
-                userProfileRepository.updateRemote(
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_no_user)) }
+                return false
+            }
+            _uiState.update { it.copy(notice = null, error = null) }
+            val state = _uiState.value
+            if (!isSelfIdentityReady(state)) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.onb_error_self_identity_required)) }
+                return false
+            }
+            val displayName = state.selfDisplayName.trim()
+            val phone = normalizeSelfPhone(state.selfPhone)
+            val email = state.selfEmail.trim()
+            val alias = state.selfAlias.trim()
+            _uiState.update { it.copy(isSavingSelfIdentity = true, error = null) }
+            return when (
+                val result = selfIdentityRepository.commitOnboardingSelfIdentity(
                     userId = userId,
                     displayName = displayName,
-                    phoneE164Self = phone,
+                    displayNameSource = authAwareDisplayNameSource(state),
+                    displayNameReadOnly = state.selfDisplayNameReadOnly,
+                    email = email.takeIf { it.isNotBlank() },
+                    emailReadOnly = state.selfEmailReadOnly,
+                    phoneE164 = phone.takeIf { it.isNotBlank() },
+                    phoneReadOnly = state.selfPhoneReadOnly,
+                    phoneVerified = state.selfPhoneVerified,
+                    alias = alias.takeIf { it.isNotBlank() },
+                    authProvider = state.selfAuthProvider.wireValue,
                 )
             ) {
                 is BecalmResult.Success -> {
-                    createOptionalSelfAnchor(userId, anchorType = "email", value = email)
-                    createOptionalSelfAnchor(userId, anchorType = "phone", value = phone)
-                    createOptionalSelfAnchor(userId, anchorType = "alias", value = alias)
-                    selfIdentityRepository.refresh(userId)
+                    val profile = result.value.profile
+                    val anchors = result.value.anchors
+                    _uiState.update {
+                        it.copy(
+                            selfDisplayName = profile.displayNameOverride.orEmpty().ifBlank { displayName },
+                            selfEmail = anchors.firstActiveValue("email").ifBlank { email },
+                            selfPhone = profile.phoneE164Self.orEmpty().ifBlank { anchors.firstActiveValue("phone").ifBlank { phone } },
+                            selfAlias = anchors.firstActiveValue("alias").ifBlank { alias },
+                            selfIdentityConfirmed = true,
+                            isSavingSelfIdentity = false,
+                            notice = UiMessage.resource(R.string.onb_setup_identity_saved),
+                            error = null,
+                        )
+                    }
+                    true
                 }
-                is BecalmResult.Failure -> logger.w(TAG, "self identity remote mirror failed")
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "self identity commit failed")
+                    _uiState.update {
+                        it.copy(
+                            selfIdentityConfirmed = false,
+                            isSavingSelfIdentity = false,
+                            error = UiMessage.resource(R.string.settings_identity_error_save_profile),
+                        )
+                    }
+                    false
+                }
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (t: Throwable) {
-            logger.w(TAG, "self identity remote mirror failed", t)
+        } catch (e: Exception) {
+            logger.e(TAG, "failed to save onboarding self identity", e)
+            _uiState.update {
+                it.copy(
+                    isSavingSelfIdentity = false,
+                    error = UiMessage.resource(R.string.settings_identity_error_save_profile),
+                )
+            }
+            return false
         }
-    }
-
-    private suspend fun createOptionalSelfAnchor(
-        userId: String,
-        anchorType: String,
-        value: String,
-    ): Boolean {
-        val trimmed = normalizeSelfAnchorValue(anchorType, value)
-        if (trimmed.isEmpty()) return true
-        return when (
-            selfIdentityRepository.createAnchor(
-                userId = userId,
-                anchorType = anchorType,
-                value = trimmed,
-                displayValue = trimmed,
-                source = "user_profile",
-            )
-        ) {
-            is BecalmResult.Success -> true
-            is BecalmResult.Failure -> false
-        }
-    }
-
-    private fun normalizeSelfAnchorValue(anchorType: String, value: String): String {
-        val trimmed = value.trim()
-        if (trimmed.isEmpty()) return ""
-        return if (anchorType == "phone") normalizeSelfPhone(trimmed) else trimmed
     }
 
     private fun normalizeSelfPhone(value: String): String {
@@ -526,6 +1060,12 @@ public class OnboardingViewModel @Inject constructor(
         if (trimmed.isEmpty()) return ""
         return PhoneNumberUtils.toE164OrNull(trimmed) ?: trimmed
     }
+
+    private fun authAwareDisplayNameSource(state: OnboardingUiState): String =
+        when {
+            state.selfAuthProvider == SupabaseAuthProvider.GOOGLE && state.selfDisplayNameReadOnly -> DISPLAY_NAME_SOURCE_GOOGLE_AUTH
+            else -> DISPLAY_NAME_SOURCE_MANUAL
+        }
 
     public fun onSetSourceConnectionOwnership(connectionId: String, ownership: String) {
         if (ownership !in SOURCE_OWNERSHIP_VALUES) return
@@ -579,65 +1119,122 @@ public class OnboardingViewModel @Inject constructor(
         if (granted) return
         viewModelScope.launch {
             setRecordingSourcesEnabled(targetSourceType, enabled = false)
+            clearRecordingPathSelections(targetSourceType)
             if (targetSourceType == null) {
-                userPrefsStore.setRecordingFolderTreeUri(null)
-                setRecordingSourceTreeUris(uri = null, targetSourceType = null)
                 onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.DENIED)
-            } else {
-                userPrefsStore.setRecordingFolderTreeUri(targetSourceType, null)
+            } else if (targetSourceType == SourceType.CALL_RECORDING) {
+                _uiState.update { it.copy(callRecordingConnectionState = SourceConnectionState.Skipped) }
             }
             appRuntimeSyncCoordinator.refresh()
         }
     }
 
-    /** Persists the shared Recordings SAF tree grant and enables voice/meeting capture. */
-    public fun onRecordingFolderTreeGranted(
-        uri: String,
-        targetSourceType: String? = null,
-    ) {
+    /** Persists the app-owned MediaStore path preset and enables recording capture. */
+    public fun onRecordingPathSelected(targetSourceType: String? = null) {
         viewModelScope.launch {
-            if (targetSourceType == null) {
-                userPrefsStore.setRecordingFolderTreeUri(uri)
-                setRecordingSourceTreeUris(uri = uri, targetSourceType = null)
-            } else {
-                userPrefsStore.setRecordingFolderTreeUri(targetSourceType, uri)
+            try {
+                grantRecordingProcessingConsentAndReleaseAwaitingRows()
+                if (targetSourceType == null) {
+                    userPrefsStore.setRecordingFolderTreeUri(RecordingPathSelection.COMMON)
+                    recordingSourceTypesFor(null).forEach { sourceType ->
+                        userPrefsStore.setRecordingFolderTreeUri(
+                            sourceType,
+                            RecordingPathSelection.forSourceType(sourceType),
+                        )
+                    }
+                } else {
+                    userPrefsStore.setRecordingFolderTreeUri(
+                        targetSourceType,
+                        RecordingPathSelection.forSourceType(targetSourceType),
+                    )
+                }
+                setRecordingSourcesEnabled(targetSourceType, enabled = true)
+                _uiState.update { state ->
+                    val updates = buildMap {
+                        put(OnboardingStep.PIPA_CONSENT, StepStatus.GRANTED)
+                        if (targetSourceType == null) {
+                            put(OnboardingStep.RECORDING_FOLDER, StepStatus.GRANTED)
+                        }
+                    }
+                    state.copy(
+                        stepStates = state.stepStates + updates,
+                        callRecordingConnectionState = if (targetSourceType == SourceType.CALL_RECORDING) {
+                            SourceConnectionState.Connected
+                        } else {
+                            state.callRecordingConnectionState
+                        },
+                    )
+                }
+                persistStepStatuses(
+                    buildMap {
+                        put(OnboardingStep.PIPA_CONSENT, StepStatus.GRANTED)
+                        if (targetSourceType == null) {
+                            put(OnboardingStep.RECORDING_FOLDER, StepStatus.GRANTED)
+                        }
+                    },
+                )
+                appRuntimeSyncCoordinator.refresh()
+                workScheduler.enqueueMediaStoreOneShotNow(RECORDING_GRANT_LOOKBACK_DAYS)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.e(TAG, "recording path selection failed", e)
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.onb_error_consent_write_failed)) }
             }
-            setRecordingSourcesEnabled(targetSourceType, enabled = true)
-            if (targetSourceType == null) {
-                onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.GRANTED)
-            }
-            appRuntimeSyncCoordinator.refresh()
         }
     }
 
-    /** Keeps the recording-folder step retryable when the selected tree is not useful. */
-    public fun onRecordingFolderTreeRejected(targetSourceType: String? = null) {
-        viewModelScope.launch {
-            setRecordingSourcesEnabled(targetSourceType, enabled = false)
-            if (targetSourceType == null) {
-                userPrefsStore.setRecordingFolderTreeUri(null)
-                setRecordingSourceTreeUris(uri = null, targetSourceType = null)
-                onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.NOT_STARTED)
-            } else {
-                userPrefsStore.setRecordingFolderTreeUri(targetSourceType, null)
-            }
-            _uiState.update {
-                it.copy(error = UiMessage.resource(R.string.onb_recording_folder_invalid_selection))
-            }
-            appRuntimeSyncCoordinator.refresh()
+    private suspend fun grantRecordingProcessingConsentAndReleaseAwaitingRows() {
+        userPrefsStore.setThirdPartyProvisionConsent(true)
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId.isNullOrBlank()) {
+            logger.w(TAG, "recording consent grant skipped awaiting release without current user")
+            return
         }
+        when (val result = rawIngestionRepository.releaseAwaitingConsentVoiceAndReturnIds(userId)) {
+            is BecalmResult.Failure -> {
+                logger.e(TAG, "releaseAwaitingConsentVoiceAndReturnIds failed: ${result.error}")
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_error_voice_release_failed)) }
+            }
+            is BecalmResult.Success -> {
+                val enqueuedCount = reenqueueReleasedRecordingRows(userId, result.value)
+                logger.d(TAG, "re-enqueued $enqueuedCount recording jobs after onboarding consent grant")
+            }
+        }
+    }
+
+    private suspend fun reenqueueReleasedRecordingRows(userId: String, releasedIds: List<String>): Int {
+        var enqueuedCount = 0
+        for (id in releasedIds) {
+            val entity = rawIngestionRepository.findById(id = id, userId = userId) ?: continue
+            val sourceRef = entity.sourceRef.takeUnless { it.isNullOrBlank() } ?: continue
+            when (entity.sourceType) {
+                SourceType.MESSAGE_SCREENSHOT -> {
+                    workScheduler.enqueueMessageScreenshotUpload(rawEventId = id)
+                }
+                SourceType.CALL_RECORDING,
+                SourceType.MEETING,
+                -> {
+                    workScheduler.enqueueMeetingSpeakerPreview(rawEventId = id, audioUri = sourceRef)
+                }
+                else -> {
+                    workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = sourceRef)
+                }
+            }
+            enqueuedCount++
+        }
+        return enqueuedCount
     }
 
     /** Explicit graceful-skip branch for the recording-folder step. */
     public fun onSkipRecordingFolder(targetSourceType: String? = null) {
         viewModelScope.launch {
             setRecordingSourcesEnabled(targetSourceType, enabled = false)
+            clearRecordingPathSelections(targetSourceType)
             if (targetSourceType == null) {
-                userPrefsStore.setRecordingFolderTreeUri(null)
-                setRecordingSourceTreeUris(uri = null, targetSourceType = null)
                 onSkipStep(OnboardingStep.RECORDING_FOLDER)
-            } else {
-                userPrefsStore.setRecordingFolderTreeUri(targetSourceType, null)
+            } else if (targetSourceType == SourceType.CALL_RECORDING) {
+                _uiState.update { it.copy(callRecordingConnectionState = SourceConnectionState.Skipped) }
             }
             appRuntimeSyncCoordinator.refresh()
         }
@@ -649,9 +1246,12 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
-    private suspend fun setRecordingSourceTreeUris(uri: String?, targetSourceType: String?) {
+    private suspend fun clearRecordingPathSelections(targetSourceType: String?) {
+        if (targetSourceType == null) {
+            userPrefsStore.setRecordingFolderTreeUri(null)
+        }
         recordingSourceTypesFor(targetSourceType).forEach { sourceType ->
-            userPrefsStore.setRecordingFolderTreeUri(sourceType, uri)
+            userPrefsStore.setRecordingFolderTreeUri(sourceType, null)
         }
     }
 
@@ -768,7 +1368,9 @@ public class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = calendarOAuthConnector.startSignIn(provider, activity)) {
                 CalendarOAuthResult.Connected -> markCalendarProviderConnected(provider)
-                CalendarOAuthResult.NotConnected -> Unit
+                CalendarOAuthResult.NotConnected -> {
+                    _calendarConnectEvents.emit(CalendarConnectEvent.NotConnected(provider))
+                }
                 is CalendarOAuthResult.Failed -> {
                     reportOnboardingStepFailed(provider.step, result.errorCode)
                     _calendarConnectEvents.emit(
@@ -784,20 +1386,27 @@ public class OnboardingViewModel @Inject constructor(
 
     /**
      * Recovers backend-managed calendar OAuth completion after returning from the external
-     * browser callback. "Not connected" is ignored because screens call this on every resume.
+     * browser callback. "Not connected" clears the UI's pending external-auth state so an
+     * OAuth cancel returns to the same onboarding step instead of staying in a spinner.
      */
     public fun refreshCalendarProviderConnection(provider: CalendarOAuthProvider) {
         viewModelScope.launch {
             logger.i(TAG, "calendar OAuth resume refresh start provider=${provider.sourceType}")
             when (val result = calendarOAuthConnector.refreshConnectionStatus(provider)) {
-                CalendarOAuthResult.Connected -> {
-                    logger.i(TAG, "calendar OAuth resume refresh connected provider=${provider.sourceType}")
-                    markCalendarProviderConnected(provider)
+	                CalendarOAuthResult.Connected -> {
+	                    logger.i(TAG, "calendar OAuth resume refresh connected provider=${provider.sourceType}")
+	                    markCalendarProviderConnected(provider)
+	                }
+                CalendarOAuthResult.NotConnected -> {
+                    if (_uiState.value.stepStates[provider.step] == StepStatus.IN_PROGRESS) {
+                        onMarkStepStatus(provider.step, StepStatus.NOT_STARTED)
+                    }
+                    logger.i(
+                        TAG,
+                        "calendar OAuth resume refresh not connected provider=${provider.sourceType}",
+                    )
+                    _calendarConnectEvents.emit(CalendarConnectEvent.NotConnected(provider))
                 }
-                CalendarOAuthResult.NotConnected -> logger.i(
-                    TAG,
-                    "calendar OAuth resume refresh not connected provider=${provider.sourceType}",
-                )
                 is CalendarOAuthResult.Failed -> {
                     logger.w(
                         TAG,
@@ -817,11 +1426,30 @@ public class OnboardingViewModel @Inject constructor(
 
     private suspend fun markCalendarProviderConnected(provider: CalendarOAuthProvider) {
         userPrefsStore.setSourceEnabled(provider.sourceType, true)
-        onMarkStepStatus(provider.step, StepStatus.COMPLETE)
+        onMarkStepStatus(provider.step, StepStatus.IN_PROGRESS)
+        _calendarConnectEvents.emit(CalendarConnectEvent.Syncing(provider))
         appRuntimeSyncCoordinator.refresh()
-        refreshSourceStatusAfterBackendSync(provider.sourceType)
-        refreshIdentityMirrorsAfterBackendSync(provider.sourceType)
-        _calendarConnectEvents.emit(CalendarConnectEvent.Connected(provider))
+        when (refreshCalendarSourceDataFromServer(provider.sourceType)) {
+            CalendarSourceRefreshResult.Ready -> {
+                onMarkStepStatus(provider.step, StepStatus.COMPLETE)
+                refreshSourceStatusAfterBackendSync(provider.sourceType)
+                refreshIdentityMirrorsAfterBackendSync(provider.sourceType)
+                _calendarConnectEvents.emit(CalendarConnectEvent.Connected(provider))
+            }
+            CalendarSourceRefreshResult.Pending -> {
+                logger.i(TAG, "calendar source sync still pending provider=${provider.sourceType}")
+            }
+            CalendarSourceRefreshResult.Failed -> {
+                onMarkStepStatus(provider.step, StepStatus.NOT_STARTED)
+                reportOnboardingStepFailed(provider.step, "calendar_sync_failed")
+                _calendarConnectEvents.emit(
+                    CalendarConnectEvent.Failed(
+                        provider = provider,
+                        errorCode = "calendar_sync_failed",
+                    ),
+                )
+            }
+        }
     }
 
     // spec: ONB-003, ENR-001, ENR-002
@@ -834,6 +1462,9 @@ public class OnboardingViewModel @Inject constructor(
     public fun onContactsPermissionResult(granted: Boolean) {
         val status = if (granted) StepStatus.GRANTED else StepStatus.DENIED
         onMarkStepStatus(OnboardingStep.CONTACTS_PERM, status)
+        if (granted) {
+            workScheduler.enqueueEnrichment()
+        }
         appRuntimeSyncCoordinator.refresh()
         _contactsPermissionEffects.tryEmit(ContactsPermissionEffect.NavigateToSources)
     }
@@ -933,7 +1564,9 @@ public class OnboardingViewModel @Inject constructor(
             }
             when (val result = emailOAuthConnector.startSignIn(oauthProvider, activity)) {
                 EmailOAuthResult.Connected -> markEmailProviderConnected(provider, oauthProvider)
-                EmailOAuthResult.NotConnected -> Unit
+                EmailOAuthResult.NotConnected -> {
+                    _emailConnectEvents.emit(EmailConnectEvent.NotConnected(provider))
+                }
                 is EmailOAuthResult.Failed -> {
                     reportOnboardingStepFailed(oauthProvider.step, result.errorCode)
                     _uiState.update {
@@ -972,10 +1605,16 @@ public class OnboardingViewModel @Inject constructor(
                     logger.i(TAG, "email OAuth resume refresh connected provider=${provider.storageKey}")
                     markEmailProviderConnected(provider, oauthProvider)
                 }
-                EmailOAuthResult.NotConnected -> logger.i(
-                    TAG,
-                    "email OAuth resume refresh not connected provider=${provider.storageKey}",
-                )
+                EmailOAuthResult.NotConnected -> {
+                    logger.i(
+                        TAG,
+                        "email OAuth resume refresh not connected provider=${provider.storageKey}",
+                    )
+                    if (_uiState.value.stepStates[oauthProvider.step] == StepStatus.IN_PROGRESS) {
+                        onMarkStepStatus(oauthProvider.step, StepStatus.NOT_STARTED)
+                    }
+                    _emailConnectEvents.emit(EmailConnectEvent.NotConnected(provider))
+                }
                 is EmailOAuthResult.Failed -> {
                     logger.w(
                         TAG,
@@ -992,17 +1631,134 @@ public class OnboardingViewModel @Inject constructor(
         provider: EmailPipaProvider,
         oauthProvider: EmailOAuthProvider,
     ) {
-        userPrefsStore.setEmailSourceConnected(provider, true)
-        userPrefsStore.setEmailSourceManagedByBackend(provider, true)
-        onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
-        appRuntimeSyncCoordinator.refresh()
-        refreshSourceStatusAfterBackendSync(oauthProvider.sourceType)
-        refreshIdentityMirrorsAfterBackendSync(oauthProvider.sourceType)
-        observability.captureMessage(
-            message = "onboarding_email_connected",
-            tags = mapOf("provider" to provider.storageKey, "owner" to "backend"),
-        )
-        _emailConnectEvents.emit(EmailConnectEvent.Connected(provider))
+        val ownsGmailLock = provider == EmailPipaProvider.GMAIL
+        if (ownsGmailLock && !gmailActivationSyncMutex.tryLock()) {
+            _emailConnectEvents.emit(EmailConnectEvent.Syncing(provider))
+            return
+        }
+        try {
+            userPrefsStore.setEmailSourceConnected(provider, true)
+            userPrefsStore.setEmailSourceManagedByBackend(provider, true)
+            onMarkStepStatus(oauthProvider.step, StepStatus.IN_PROGRESS)
+            _emailConnectEvents.emit(EmailConnectEvent.Syncing(provider))
+            if (provider == EmailPipaProvider.GMAIL) {
+                _uiState.update {
+                    it.copy(
+                        gmailActivationPreview = GmailActivationPreviewUiState(
+                            loading = true,
+                            status = GmailActivationPreviewStatus.Loading,
+                            progress = 0.08f,
+                            progressMessage = "Gmail 연결을 확인하고 있습니다",
+                            progressStage = "queued",
+                        ),
+                        notice = null,
+                        error = null,
+                    )
+                }
+            }
+            val activationResult = if (provider == EmailPipaProvider.GMAIL) {
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                if (userId.isNullOrBlank()) {
+                    OnboardingActivationPreviewResult.Failed(retryable = false)
+                } else {
+                    runCatching {
+                        onboardingActivationPreviewRepository.syncGmailAndLoadPreview(
+                            userId,
+                            onProgress = { progress -> updateGmailActivationProgress(progress) },
+                        )
+                    }.getOrElse { error ->
+                        if (error is CancellationException) throw error
+                        logger.w(TAG, "gmail inline activation preview failed", error)
+                        OnboardingActivationPreviewResult.Failed(retryable = true)
+                    }
+                }
+            } else {
+                OnboardingActivationPreviewResult.Empty
+            }
+            when (activationResult) {
+                is OnboardingActivationPreviewResult.Ready -> {
+                    _uiState.update {
+                        it.copy(
+                            gmailActivationPreview = GmailActivationPreviewUiState(
+                                loading = false,
+                                previews = activationResult.previews.map { preview -> preview.toUi() },
+                                status = GmailActivationPreviewStatus.Ready,
+                                progress = 1f,
+                                progressMessage = "Gmail 확인을 마쳤습니다",
+                                progressStage = "complete",
+                            ),
+                            notice = null,
+                            error = null,
+                        )
+                    }
+                    onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
+                }
+                OnboardingActivationPreviewResult.Empty -> {
+                    _uiState.update {
+                        it.copy(
+                            gmailActivationPreview = GmailActivationPreviewUiState(
+                                loading = false,
+                                status = GmailActivationPreviewStatus.Empty,
+                                progress = 1f,
+                                progressMessage = "Gmail 확인을 마쳤습니다",
+                                progressStage = "complete",
+                            ),
+                            notice = null,
+                            error = null,
+                        )
+                    }
+                    onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
+                }
+                is OnboardingActivationPreviewResult.Pending -> {
+                    _uiState.update {
+                        it.copy(
+                            gmailActivationPreview = GmailActivationPreviewUiState(
+                                loading = false,
+                                status = GmailActivationPreviewStatus.StillProcessing,
+                                progress = activationResult.progress?.progress?.toFloat()?.coerceIn(0f, 1f),
+                                progressMessage = activationResult.progress?.message,
+                                progressStage = activationResult.progress?.stage,
+                            ),
+                            notice = null,
+                            error = null,
+                        )
+                    }
+                    onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
+                }
+                is OnboardingActivationPreviewResult.Failed -> {
+                    _uiState.update {
+                        it.copy(
+                            gmailActivationPreview = GmailActivationPreviewUiState(
+                                loading = false,
+                                status = if (activationResult.retryable) {
+                                    GmailActivationPreviewStatus.FailedRetryable
+                                } else {
+                                    GmailActivationPreviewStatus.FailedTerminal
+                                },
+                            ),
+                            notice = null,
+                            error = null,
+                        )
+                    }
+                    onMarkStepStatus(oauthProvider.step, StepStatus.NOT_STARTED)
+                    reportOnboardingStepFailed(oauthProvider.step, "gmail_sync_failed")
+                    _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, "gmail_sync_failed"))
+                    return
+                }
+            }
+            appRuntimeSyncCoordinator.refresh()
+            refreshSourceStatusAfterBackendSync(oauthProvider.sourceType)
+            refreshIdentityMirrorsAfterBackendSync(oauthProvider.sourceType)
+            observability.captureMessage(
+                message = "onboarding_email_connected",
+                tags = mapOf("provider" to provider.storageKey, "owner" to "backend"),
+            )
+            _emailConnectEvents.emit(EmailConnectEvent.Connected(provider))
+        } finally {
+            if (ownsGmailLock) {
+                gmailActivationSyncMutex.unlock()
+            }
+        }
     }
 
     private suspend fun refreshSourceStatusAfterBackendSync(sourceType: String) {
@@ -1181,7 +1937,12 @@ public class OnboardingViewModel @Inject constructor(
                     )
                 }
                 persistStepStatusesNow(mapOf(OnboardingStep.COLD_SYNC to StepStatus.COMPLETE))
-                userPrefsStore.setOnboardingCompleted(true)
+                if (!markOnboardingCompletedNow()) {
+                    _uiState.update {
+                        it.copy(isCompleting = false, error = UiMessage.resource(R.string.onb_error_completion_failed))
+                    }
+                    return@launch
+                }
                 logger.i(TAG, "onboarding marked complete")
             } catch (e: Exception) {
                 logger.e(TAG, "failed to persist onboarding completion", e)
@@ -1211,24 +1972,6 @@ public class OnboardingViewModel @Inject constructor(
                 }
                 return@launch
             }
-            if (!_uiState.value.sourceOwnershipsLoaded || _uiState.value.sourceOwnershipLoadFailed) {
-                _uiState.update {
-                    it.copy(
-                        isCompleting = false,
-                        error = UiMessage.resource(R.string.onb_error_source_ownership_required),
-                    )
-                }
-                return@launch
-            }
-            if (_uiState.value.sourceOwnerships.any { it.ownership == "unknown" }) {
-                _uiState.update {
-                    it.copy(
-                        isCompleting = false,
-                        error = UiMessage.resource(R.string.onb_error_source_ownership_required),
-                    )
-                }
-                return@launch
-            }
             val current = _uiState.value.stepStates
             val terminal = setOf(
                 StepStatus.GRANTED,
@@ -1251,14 +1994,188 @@ public class OnboardingViewModel @Inject constructor(
                     state.copy(stepStates = nextStates)
                 }
                 persistStepStatusesNow(updates)
-                userPrefsStore.setOnboardingCompleted(true)
+                if (!markOnboardingCompletedNow()) {
+                    _uiState.update {
+                        it.copy(isCompleting = false, error = UiMessage.resource(R.string.onb_error_completion_failed))
+                    }
+                    return@launch
+                }
                 appRuntimeSyncCoordinator.refresh()
                 logger.i(TAG, "compact onboarding setup marked complete")
                 _uiState.update { it.copy(isCompleting = false, error = null) }
-                _setupEffects.emit(OnboardingSetupEffect.NavigateToToday)
+                _setupEffects.emit(OnboardingSetupEffect.NavigateToCompletion())
             } catch (e: Exception) {
                 logger.e(TAG, "failed to complete compact onboarding setup", e)
                 _uiState.update { it.copy(isCompleting = false, error = UiMessage.resource(R.string.onb_error_completion_failed)) }
+            }
+        }
+    }
+
+    public fun onFirstMemoryOriginChange(origin: FirstMemoryOrigin) {
+        _uiState.update { state ->
+            state.copy(
+                firstMemory = state.firstMemory.copy(origin = origin, errorMessageRes = null),
+                firstMemoryExitPromptVisible = false,
+            )
+        }
+    }
+
+    public fun onFirstMemoryPersonNameChange(value: String) {
+        _uiState.update { state ->
+            state.copy(
+                firstMemory = state.firstMemory.copy(personName = value, errorMessageRes = null),
+                firstMemoryExitPromptVisible = false,
+            )
+        }
+    }
+
+    public fun onFirstMemoryPromiseTextChange(value: String) {
+        _uiState.update { state ->
+            state.copy(
+                firstMemory = state.firstMemory.copy(promiseText = value, errorMessageRes = null),
+                firstMemoryExitPromptVisible = false,
+            )
+        }
+    }
+
+    public fun onFirstMemoryKindChange(kind: FirstMemoryKind) {
+        _uiState.update { state ->
+            val dueHint = if (kind == FirstMemoryKind.SHARED_SCHEDULE) state.firstMemory.dueHint else ""
+            state.copy(
+                firstMemory = state.firstMemory.copy(kind = kind, dueHint = dueHint, errorMessageRes = null),
+                firstMemoryExitPromptVisible = false,
+            )
+        }
+    }
+
+    public fun onFirstMemoryDueHintChange(value: String) {
+        _uiState.update { state ->
+            state.copy(
+                firstMemory = state.firstMemory.copy(dueHint = value, errorMessageRes = null),
+                firstMemoryExitPromptVisible = false,
+            )
+        }
+    }
+
+    public fun onSaveFirstMemory() {
+        if (_uiState.value.firstMemory.saving || _uiState.value.isCompleting) return
+        val draft = _uiState.value.firstMemory.toDraft()
+        when (val validation = FirstMemoryValidator.validate(draft)) {
+            is FirstMemoryValidator.ValidationResult.Err -> {
+                _uiState.update { state ->
+                    state.copy(
+                        firstMemory = state.firstMemory.copy(errorMessageRes = R.string.first_memory_error_required),
+                    )
+                }
+            }
+            is FirstMemoryValidator.ValidationResult.Ok -> saveFirstMemory(validation.input)
+        }
+    }
+
+    public fun onSkipFirstMemory() {
+        if (_uiState.value.firstMemory.saving || _uiState.value.isCompleting) return
+        _uiState.update {
+            it.copy(
+                isCompleting = true,
+                firstMemory = it.firstMemory.copy(saving = true, errorMessageRes = null),
+                firstMemoryExitPromptVisible = false,
+                error = null,
+            )
+        }
+        viewModelScope.launch {
+            completeFirstMemorySetup {
+                _setupEffects.emit(OnboardingSetupEffect.NavigateToCompletion())
+            }
+        }
+    }
+
+    private fun saveFirstMemory(input: FirstMemoryInput) {
+        _uiState.update {
+            it.copy(
+                isCompleting = true,
+                firstMemory = it.firstMemory.copy(saving = true, errorMessageRes = null),
+                firstMemoryExitPromptVisible = false,
+                error = null,
+            )
+        }
+        viewModelScope.launch {
+            when (val result = firstMemoryRepository.save(input)) {
+                is BecalmResult.Success -> {
+                    completeFirstMemorySetup {
+                        _setupEffects.emit(OnboardingSetupEffect.NavigateToCompletion(result.value.personId))
+                    }
+                }
+                is BecalmResult.Failure -> {
+                    val errorRes = when (result.error) {
+                        is com.becalm.android.core.result.BecalmError.Unauthorized ->
+                            R.string.first_memory_error_signed_out
+                        else -> R.string.first_memory_error_save_failed
+                    }
+                    _uiState.update {
+                        it.copy(
+                            isCompleting = false,
+                            firstMemory = it.firstMemory.copy(saving = false, errorMessageRes = errorRes),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun completeFirstMemorySetup(afterComplete: suspend () -> Unit) {
+        val current = _uiState.value.stepStates
+        val updates = OnboardingStep.entries
+            .filterNot { it == OnboardingStep.TERMS || it == OnboardingStep.LOGIN }
+            .associateWith { step ->
+                when (step) {
+                    OnboardingStep.COLD_SYNC -> StepStatus.COMPLETE
+                    else -> current[step]?.takeIf { status ->
+                        status in setOf(
+                            StepStatus.GRANTED,
+                            StepStatus.COMPLETE,
+                            StepStatus.SKIPPED,
+                            StepStatus.DENIED,
+                        )
+                    } ?: StepStatus.SKIPPED
+                }
+            }
+        val nextStates = current + updates
+        try {
+            _uiState.update { state -> state.copy(stepStates = nextStates) }
+            persistStepStatusesNow(updates)
+            if (!markOnboardingCompletedNow()) {
+                _uiState.update {
+                    it.copy(
+                        isCompleting = false,
+                        firstMemory = it.firstMemory.copy(
+                            saving = false,
+                            errorMessageRes = R.string.first_memory_error_save_failed,
+                        ),
+                        error = UiMessage.resource(R.string.onb_error_completion_failed),
+                    )
+                }
+                return
+            }
+            appRuntimeSyncCoordinator.refresh()
+            logger.i(TAG, "first memory onboarding setup marked complete")
+            _uiState.update {
+                it.copy(
+                    isCompleting = false,
+                    firstMemory = it.firstMemory.copy(saving = false, errorMessageRes = null),
+                    error = null,
+                )
+            }
+            afterComplete()
+        } catch (e: Exception) {
+            logger.e(TAG, "failed to complete first memory onboarding setup", e)
+            _uiState.update {
+                it.copy(
+                    isCompleting = false,
+                    firstMemory = it.firstMemory.copy(
+                        saving = false,
+                        errorMessageRes = R.string.first_memory_error_save_failed,
+                    ),
+                )
             }
         }
     }
@@ -1279,7 +2196,25 @@ public class OnboardingViewModel @Inject constructor(
 
     private fun isSelfIdentityReady(state: OnboardingUiState): Boolean =
         state.selfDisplayName.isNotBlank() &&
-            listOf(state.selfEmail, state.selfPhone, state.selfAlias).any { it.isNotBlank() }
+            listOf(state.selfEmail, state.selfPhone).any { it.isNotBlank() }
+
+    private suspend fun markOnboardingCompletedNow(): Boolean {
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId.isNullOrBlank()) {
+            logger.w(TAG, "onboarding completion skipped without current user")
+            return false
+        }
+        return when (userProfileRepository.markOnboardingCompleted(userId)) {
+            is BecalmResult.Success -> {
+                userPrefsStore.setOnboardingCompleted(true)
+                true
+            }
+            is BecalmResult.Failure -> {
+                logger.w(TAG, "server onboarding completion patch failed")
+                false
+            }
+        }
+    }
 
     private fun hydrateDurableProgress() {
         viewModelScope.launch {
@@ -1310,20 +2245,71 @@ public class OnboardingViewModel @Inject constructor(
             try {
                 val userId = userPrefsStore.observeCurrentUserId().first()
                 if (userId.isNullOrBlank()) return@launch
-                val profile = userProfileRepository.find(userId) ?: return@launch
+                val session = sessionStore.load()
+                val profile = userProfileRepository.find(userId)
                 val anchors = selfIdentityRepository.observeAll(userId).first()
-                val displayName = profile.displayNameOverride.orEmpty()
-                val phone = profile.phoneE164Self.orEmpty()
-                val email = anchors.firstActiveValue("email")
+                val authProvider = session?.authProvider ?: SupabaseAuthProvider.EMAIL
+                val authEmail = session?.email?.trim().orEmpty()
+                val authPhone = session?.phone?.trim().orEmpty()
+                val authName = session?.profileName?.trim().orEmpty()
+                val email = when {
+                    authProvider in setOf(SupabaseAuthProvider.EMAIL, SupabaseAuthProvider.GOOGLE) &&
+                        authEmail.isNotBlank() -> authEmail
+                    else -> anchors.firstActiveValue("email")
+                }
+                val phone = when {
+                    authProvider == SupabaseAuthProvider.PHONE && authPhone.isNotBlank() -> authPhone
+                    else -> profile?.phoneE164Self?.takeIf { it.isNotBlank() } ?: anchors.firstActiveValue("phone")
+                }
+                val profileDisplayName = profile?.displayNameOverride?.takeIf { it.isNotBlank() }
+                val displayNameReadOnly = authProvider == SupabaseAuthProvider.GOOGLE &&
+                    authName.isNotBlank() &&
+                    (profileDisplayName == null || profile?.displayNameSource == DISPLAY_NAME_SOURCE_GOOGLE_AUTH)
+                val displayName = if (displayNameReadOnly) {
+                    authName
+                } else {
+                    profileDisplayName ?: authName
+                }
                 val alias = anchors.firstActiveValue("alias")
-                _uiState.update {
-                    it.copy(
-                        selfDisplayName = displayName,
-                        selfEmail = email,
-                        selfPhone = phone,
-                        selfAlias = alias,
-                        selfIdentityConfirmed = displayName.isNotBlank() &&
-                            listOf(email, phone, alias).any(String::isNotBlank),
+                val emailReadOnly = authProvider in setOf(SupabaseAuthProvider.EMAIL, SupabaseAuthProvider.GOOGLE) &&
+                    authEmail.isNotBlank()
+                val phoneReadOnly = authProvider == SupabaseAuthProvider.PHONE && authPhone.isNotBlank()
+                _uiState.update { current ->
+                    val resolvedDisplayName = current.selfDisplayName.ifBlank { displayName }
+                    val resolvedEmail = if (emailReadOnly) {
+                        email
+                    } else {
+                        current.selfEmail.ifBlank { email }
+                    }
+                    val resolvedPhone = if (phoneReadOnly) {
+                        phone
+                    } else {
+                        current.selfPhone.ifBlank { phone }
+                    }
+                    val resolvedAlias = current.selfAlias.ifBlank { alias }
+                    val next = current.copy(
+                        selfDisplayName = resolvedDisplayName,
+                        selfEmail = resolvedEmail,
+                        selfPhone = resolvedPhone,
+                        selfAlias = resolvedAlias,
+                        selfAuthProvider = authProvider,
+                        selfDisplayNameReadOnly = displayNameReadOnly,
+                        selfEmailReadOnly = emailReadOnly,
+                        selfPhoneReadOnly = phoneReadOnly,
+                        selfPhoneVerified = phoneReadOnly,
+                    )
+                    current.copy(
+                        selfDisplayName = next.selfDisplayName,
+                        selfEmail = next.selfEmail,
+                        selfPhone = next.selfPhone,
+                        selfAlias = resolvedAlias,
+                        selfAuthProvider = next.selfAuthProvider,
+                        selfDisplayNameReadOnly = next.selfDisplayNameReadOnly,
+                        selfEmailReadOnly = next.selfEmailReadOnly,
+                        selfPhoneReadOnly = next.selfPhoneReadOnly,
+                        selfPhoneVerified = next.selfPhoneVerified,
+                        selfIdentityConfirmed = profile?.displayNameSource in CONFIRMED_DISPLAY_NAME_SOURCES &&
+                            isSelfIdentityReady(next),
                     )
                 }
             } catch (e: CancellationException) {
@@ -1337,6 +2323,146 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
+    private fun hydrateContactsPreview() {
+        viewModelScope.launch {
+            try {
+                personEnrichmentRepository.observeAll().collect { rows ->
+                    val groups = rows.groupBy { row ->
+                        row.sourceContactId?.takeIf { it.isNotBlank() }
+                            ?: row.displayName?.takeIf { it.isNotBlank() }
+                            ?: row.personRef
+                    }
+                    val names = groups.values
+                        .map { group ->
+                            group.firstNotNullOfOrNull { row -> row.displayName?.trim()?.takeIf { it.isNotEmpty() } }
+                                ?: group.first().personRef
+                        }
+                        .distinct()
+                        .sorted()
+                    _uiState.update {
+                        it.copy(
+                            contactsPreview = OnboardingContactsPreviewUi(
+                                totalCount = names.size,
+                                names = names.take(3),
+                            ),
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(TAG, "failed to hydrate contacts preview", e)
+            }
+        }
+    }
+
+    private fun hydrateCalendarPreview() {
+        viewModelScope.launch {
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                if (userId.isNullOrBlank()) return@launch
+                val now = Clock.System.now()
+                val rangeEnd = Instant.fromEpochMilliseconds(now.toEpochMilliseconds() + CALENDAR_PREVIEW_RANGE_MILLIS)
+                calendarEventRepository.observeForUser(userId, now, rangeEnd).collect { events ->
+                    _uiState.update {
+                        it.copy(
+                            calendarPreview = it.calendarPreview.copy(
+                                loading = false,
+                                events = events.take(3).map { event -> event.toOnboardingCalendarPreviewItem(now) },
+                            ),
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(TAG, "failed to hydrate calendar preview", e)
+                _uiState.update {
+                    it.copy(calendarPreview = it.calendarPreview.copy(loading = false, failed = true))
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshCalendarSourceDataFromServer(sourceType: String): CalendarSourceRefreshResult {
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId.isNullOrBlank()) return CalendarSourceRefreshResult.Failed
+        _uiState.update { it.copy(calendarPreview = it.calendarPreview.copy(loading = true, failed = false)) }
+        val syncResult = calendarEventRepository.triggerServerSync()
+        if (syncResult is BecalmResult.Failure) {
+            logger.w(TAG, "calendar source sync trigger failed after OAuth connect sourceType=$sourceType")
+            _uiState.update { it.copy(calendarPreview = it.calendarPreview.copy(loading = false, failed = true)) }
+            return CalendarSourceRefreshResult.Failed
+        }
+        val syncResponse = (syncResult as BecalmResult.Success).value
+        val syncStatus = syncResponse.status?.lowercase()
+        if (syncResponse.accepted || syncStatus in setOf("pending", "running", "retry")) {
+            workScheduler.enqueueSourceRelationRefresh(
+                sourceType,
+                initialDelaySeconds = (syncResponse.retryAfterSeconds ?: PENDING_BACKEND_REFRESH_DELAY_SECONDS)
+                    .coerceAtLeast(PENDING_BACKEND_REFRESH_DELAY_SECONDS),
+            )
+            return CalendarSourceRefreshResult.Pending
+        }
+        val refreshResult = calendarEventRepository.refreshSince(
+            userId = userId,
+            since = null,
+            rangeStart = null,
+            rangeEnd = null,
+        )
+        val commitmentResult = commitmentRepository.refreshSince(userId = userId, since = null)
+        val sourceParticipantResult = sourceEventParticipantRepository.refreshSince(
+            userId = userId,
+            sourceType = sourceType,
+            since = null,
+        )
+        val commitmentParticipantResult = commitmentParticipantRepository.refreshSince(
+            userId = userId,
+            since = null,
+        )
+        val scheduleLinkResult = scheduleEventLinkRepository.refreshSince(userId = userId, since = null)
+        if (
+            refreshResult is BecalmResult.Failure ||
+            commitmentResult is BecalmResult.Failure ||
+            sourceParticipantResult is BecalmResult.Failure ||
+            commitmentParticipantResult is BecalmResult.Failure ||
+            scheduleLinkResult is BecalmResult.Failure
+        ) {
+            logger.w(TAG, "calendar source mirror refresh failed after OAuth connect sourceType=$sourceType")
+            _uiState.update { it.copy(calendarPreview = it.calendarPreview.copy(loading = false, failed = true)) }
+            return CalendarSourceRefreshResult.Failed
+        }
+        _uiState.update { it.copy(calendarPreview = it.calendarPreview.copy(loading = false, failed = false)) }
+        return CalendarSourceRefreshResult.Ready
+    }
+
+    private fun hydrateCallRecordingConnection() {
+        viewModelScope.launch {
+            combine(
+                userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING),
+                userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING),
+            ) { enabled, folderUri ->
+                if (enabled && !folderUri.isNullOrBlank()) {
+                    SourceConnectionState.Connected
+                } else {
+                    SourceConnectionState.Idle
+                }
+            }
+                .distinctUntilChanged()
+                .collect { connectionState ->
+                    _uiState.update { state ->
+                        if (state.callRecordingConnectionState == SourceConnectionState.Skipped &&
+                            connectionState == SourceConnectionState.Idle
+                        ) {
+                            state
+                        } else {
+                            state.copy(callRecordingConnectionState = connectionState)
+                        }
+                    }
+                }
+        }
+    }
+
     private fun hydrateSourceOwnerships() {
         viewModelScope.launch {
             try {
@@ -1347,12 +2473,21 @@ public class OnboardingViewModel @Inject constructor(
                     return@launch
                 }
                 sourceConnectionRepository.observeAll(userId).collect { connections ->
+                    val connectedStepUpdates = connections.connectedOnboardingStepUpdates()
+                    var changedStepUpdates = emptyMap<OnboardingStep, StepStatus>()
                     _uiState.update { state ->
+                        changedStepUpdates = connectedStepUpdates.filter { (step, status) ->
+                            state.stepStates[step] != status
+                        }
                         state.copy(
                             sourceOwnerships = connections.map(SourceConnectionEntity::toOnboardingOwnershipUi),
                             sourceOwnershipsLoaded = true,
                             sourceOwnershipLoadFailed = false,
+                            stepStates = state.stepStates + connectedStepUpdates,
                         )
+                    }
+                    if (changedStepUpdates.isNotEmpty()) {
+                        persistStepStatusesNow(changedStepUpdates)
                     }
                 }
             } catch (e: CancellationException) {
@@ -1394,7 +2529,30 @@ private fun SourceConnectionEntity.toOnboardingOwnershipUi(): OnboardingSourceOw
         accountLabel = accountDisplayName ?: accountIdentifier ?: provider,
         ownership = ownership,
         status = status,
+        provider = provider,
+        capability = capability,
     )
+
+private fun List<SourceConnectionEntity>.connectedOnboardingStepUpdates(): Map<OnboardingStep, StepStatus> =
+    asSequence()
+        .filter { it.status == SOURCE_CONNECTION_STATUS_CONNECTED }
+        .mapNotNull(SourceConnectionEntity::connectedOnboardingStep)
+        .associateWith { StepStatus.COMPLETE }
+
+private fun SourceConnectionEntity.connectedOnboardingStep(): OnboardingStep? =
+    when {
+        provider == "google" && capability == "mail" -> OnboardingStep.LINK_GMAIL
+        provider == "google" && capability == "calendar" -> OnboardingStep.LINK_GOOGLE_CALENDAR
+        provider == "outlook" && capability == "mail" -> OnboardingStep.LINK_OUTLOOK_MAIL
+        provider == "outlook" && capability == "calendar" -> OnboardingStep.LINK_OUTLOOK_CALENDAR
+        provider == SourceType.GMAIL -> OnboardingStep.LINK_GMAIL
+        provider == SourceType.GOOGLE_CALENDAR -> OnboardingStep.LINK_GOOGLE_CALENDAR
+        provider == SourceType.OUTLOOK_MAIL -> OnboardingStep.LINK_OUTLOOK_MAIL
+        provider == SourceType.OUTLOOK_CALENDAR -> OnboardingStep.LINK_OUTLOOK_CALENDAR
+        else -> null
+    }
+
+private const val SOURCE_CONNECTION_STATUS_CONNECTED = "connected"
 
 private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")
 
@@ -1404,5 +2562,46 @@ private val RECORDING_SOURCE_TYPES = setOf(
     SourceType.MEETING,
 )
 
+private const val RECORDING_GRANT_LOOKBACK_DAYS = 30
+private const val CALENDAR_PREVIEW_RANGE_MILLIS = 183L * 24L * 60L * 60L * 1000L
+private const val PENDING_BACKEND_REFRESH_DELAY_SECONDS = 45L
+
+private enum class CalendarSourceRefreshResult {
+    Ready,
+    Pending,
+    Failed,
+}
+
+private const val DISPLAY_NAME_SOURCE_MANUAL = "manual"
+private const val DISPLAY_NAME_SOURCE_GOOGLE_AUTH = "google_auth"
+private val CONFIRMED_DISPLAY_NAME_SOURCES = setOf(
+    DISPLAY_NAME_SOURCE_MANUAL,
+    DISPLAY_NAME_SOURCE_GOOGLE_AUTH,
+)
+
 private fun List<com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity>.firstActiveValue(type: String): String =
     firstOrNull { it.anchorType == type && it.status == "active" }?.let { it.displayValue ?: it.normalizedValue }.orEmpty()
+
+private fun CalendarEventEntity.toOnboardingCalendarPreviewItem(now: Instant): OnboardingCalendarPreviewItemUi {
+    val timeZone = TimeZone.currentSystemDefault()
+    val local = startAt.toLocalDateTime(timeZone)
+    val today = now.toLocalDateTime(timeZone).date
+    val tomorrow = Instant.fromEpochMilliseconds(now.toEpochMilliseconds() + 24L * 60L * 60L * 1000L)
+        .toLocalDateTime(timeZone)
+        .date
+    val dayLabel = when (local.date) {
+        today -> "오늘"
+        tomorrow -> "내일"
+        else -> "${local.monthNumber}/${local.dayOfMonth}"
+    }
+    val timeLabel = if (isAllDay) {
+        "종일"
+    } else {
+        "%02d:%02d".format(local.hour, local.minute)
+    }
+    return OnboardingCalendarPreviewItemUi(
+        dayLabel = dayLabel,
+        timeLabel = timeLabel,
+        title = title.ifBlank { "제목 없는 일정" },
+    )
+}

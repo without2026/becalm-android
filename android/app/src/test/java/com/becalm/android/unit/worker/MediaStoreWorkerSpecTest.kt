@@ -1,6 +1,8 @@
 package com.becalm.android.unit.worker
 
 import android.content.Context
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.work.ForegroundUpdater
 import androidx.work.ListenableWorker
@@ -13,13 +15,16 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.onboarding.RecordingPathSelection
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.WorkScheduler
 import com.becalm.android.worker.ingestion.MediaStoreWorker
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -31,8 +36,13 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.util.UUID
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30])
 class MediaStoreWorkerSpecTest {
 
     private val appContext: Context = mockk(relaxed = true)
@@ -71,6 +81,7 @@ class MediaStoreWorkerSpecTest {
         every { userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING) } returns flowOf(false)
         every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri(any()) } returns flowOf(null)
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf(null)
     }
 
     @After
@@ -79,16 +90,19 @@ class MediaStoreWorkerSpecTest {
     }
 
     @Test
-    fun `ING-001 blocks without retry when SAF recordings tree grant is missing`() = runTest {
+    fun `ING-001 runs with app recording path selection instead of SAF tree grant`() = runTest {
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
-        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf(null)
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf(RecordingPathSelection.VOICE)
         every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING) } returns flowOf(null)
         every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING) } returns flowOf(null)
 
         val result = buildWorker().doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        coVerify(exactly = 0) {
+            processingStatusRepository.recordBlocked(SourceType.VOICE, "Recording path selection missing")
+        }
     }
 
     @Test
@@ -98,6 +112,41 @@ class MediaStoreWorkerSpecTest {
         val result = buildWorker().doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+    }
+
+    @Test
+    fun `detected audio waiting for confirmation keeps action status on later empty scan`() = runTest {
+        val contentResolver: ContentResolver = mockk(relaxed = true)
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        every { appContext.contentResolver } returns contentResolver
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf(RecordingPathSelection.VOICE)
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING) } returns flowOf(null)
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING) } returns flowOf(null)
+        every { syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE) } returns flowOf(null)
+        every {
+            contentResolver.query(
+                any<Uri>(),
+                any<Array<String>>(),
+                any<String>(),
+                any<Array<String>>(),
+                any<String>(),
+            )
+        } returns null
+        coEvery {
+            rawIngestionEventDao.countDetectedAudioConfirmationsForSource("user-1", SourceType.VOICE)
+        } returns 2
+
+        val result = buildWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        coVerify {
+            processingStatusRepository.recordScanResult(
+                SourceType.VOICE,
+                2,
+                ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
+            )
+        }
     }
 
     private fun buildWorker(runAttemptCount: Int = 0): MediaStoreWorker = MediaStoreWorker(

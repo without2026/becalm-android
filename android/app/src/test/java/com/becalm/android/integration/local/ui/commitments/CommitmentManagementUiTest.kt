@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -117,11 +118,12 @@ class CommitmentManagementUiTest {
         composeRule.onNodeWithText("활성 약속").performClick()
         composeRule.onNodeWithTag("evidence-import-fab").performClick()
         composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
-        composeRule.onNodeWithTag("commitment-filter-schedule").performClick()
+        composeRule.onAllNodesWithTag("commitment-filter-schedule").assertCountEquals(0)
+        composeRule.onNodeWithTag("commitment-filter-give").performClick()
 
         composeRule.runOnIdle {
             assertEquals("active-1", openedDetailId)
-            assertEquals(CommitmentFilter.SCHEDULE, selectedFilter)
+            assertEquals(CommitmentFilter.GIVE, selectedFilter)
         }
     }
 

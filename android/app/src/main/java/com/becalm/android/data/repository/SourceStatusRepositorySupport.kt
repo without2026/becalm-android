@@ -15,7 +15,20 @@ internal object SourceStatusPrefsKeys {
 
     fun inProgress(source: String): Preferences.Key<Boolean> =
         booleanPreferencesKey("source_status.$source.in_progress")
+
+    fun connectionState(source: String): Preferences.Key<String> =
+        stringPreferencesKey("source_status.$source.connection_state")
 }
+
+internal const val SERVER_CONNECTION_STATE_CONNECTED = "connected"
+internal const val SERVER_CONNECTION_STATE_NEVER_CONNECTED = "never_connected"
+internal const val SERVER_CONNECTION_STATE_NEEDS_REAUTH = "needs_reauth"
+internal const val SERVER_CONNECTION_STATE_CLIENT_MANAGED = "client_managed"
+
+internal fun isAuthoritativeServerConnectionState(state: String?): Boolean =
+    state == SERVER_CONNECTION_STATE_CONNECTED ||
+        state == SERVER_CONNECTION_STATE_NEVER_CONNECTED ||
+        state == SERVER_CONNECTION_STATE_NEEDS_REAUTH
 
 internal object SourceStatusDeriver {
     fun derive(
@@ -23,19 +36,23 @@ internal object SourceStatusDeriver {
         lastSyncedAtMs: Long?,
         lastError: String?,
         isInProgress: Boolean,
+        serverConnectionState: String? = null,
     ): SourceStatus {
         val lastSyncedAt = lastSyncedAtMs?.let(Instant::fromEpochMilliseconds)
         val status = when {
+            serverConnectionState == SERVER_CONNECTION_STATE_NEEDS_REAUTH -> SourceConnectionStatus.ERROR
             isInProgress -> SourceConnectionStatus.SYNCING
-            lastSyncedAt == null && lastError.isNullOrBlank() -> SourceConnectionStatus.NEVER_CONNECTED
             !lastError.isNullOrBlank() -> SourceConnectionStatus.ERROR
+            serverConnectionState == SERVER_CONNECTION_STATE_CONNECTED -> SourceConnectionStatus.CONNECTED
+            lastSyncedAt == null -> SourceConnectionStatus.NEVER_CONNECTED
             else -> SourceConnectionStatus.CONNECTED
         }
         return SourceStatus(
             sourceType = sourceType,
             status = status,
             lastSyncedAt = lastSyncedAt,
-            errorMessage = lastError?.takeIf { it.isNotBlank() },
+            errorMessage = lastError?.takeIf { it.isNotBlank() }
+                ?: "needs_reauth".takeIf { serverConnectionState == SERVER_CONNECTION_STATE_NEEDS_REAUTH },
         )
     }
 }

@@ -1510,6 +1510,54 @@ private val MIGRATION_28_29 = object : Migration(28, 29) {
     }
 }
 
+// ─── Migration 29 → 30 (server onboarding profile mirror) ───────────────────
+//
+// Adds the server-owned onboarding completion timestamp to the local user profile mirror.
+// The local DataStore flag remains a cache/fallback only; auth routing now prefers this
+// Room mirror after a successful `/v1/user_profile` refresh.
+private val MIGRATION_29_30 = object : Migration(29, 30) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(
+            db = db,
+            tableName = "user_profile",
+            columnName = "display_name_source",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "user_profile",
+            columnName = "onboarding_completed_at",
+            definition = "INTEGER",
+        )
+    }
+}
+
+// ─── Migration 30 → 31 (local audio processing confirmation gate) ────────────
+//
+// Automatic MediaStore discovery is allowed to persist local file metadata, but billable
+// audio upload/STT/diarization must wait for a per-file user confirmation.
+private val MIGRATION_30_31 = object : Migration(30, 31) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(
+            db = db,
+            tableName = "raw_ingestion_events",
+            columnName = "processing_confirmed_at",
+            definition = "INTEGER",
+        )
+        db.execSQL(
+            """
+            UPDATE raw_ingestion_events
+            SET sync_status = 'detected_pending_confirmation',
+                last_error = NULL
+            WHERE source_type IN ('voice', 'call_recording', 'meeting')
+              AND processing_confirmed_at IS NULL
+              AND commitments_extracted_count = 0
+              AND sync_status IN ('pending', 'queued', 'failed_retryable', 'meeting_preview_pending')
+            """.trimIndent(),
+        )
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1552,4 +1600,6 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_26_27,
     MIGRATION_27_28,
     MIGRATION_28_29,
+    MIGRATION_29_30,
+    MIGRATION_30_31,
 )

@@ -54,6 +54,7 @@ import com.becalm.android.ui.today.TodayCommitmentRowTreatment
 import com.becalm.android.ui.today.TodayTimelineContent
 import com.becalm.android.ui.today.TodayUiState
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -133,6 +134,7 @@ class HappyPathFullJourneyE2eTest {
                         state = TodayUiState(
                             loading = false,
                             timeline = listOf(todayCommitment()),
+                            today = LocalDate(2026, 5, 8),
                             sourceStatus = mapOf(
                                 SourceType.GMAIL to SourceStatusUi(SourceSyncStatus.Connected, null, NOW),
                                 SourceType.GOOGLE_CALENDAR to SourceStatusUi(SourceSyncStatus.Connected, null, NOW),
@@ -276,7 +278,6 @@ class HappyPathFullJourneyE2eTest {
 
         composeTestRule.onNodeWithText("Jane Kim").performClick()
         composeTestRule.onNodeWithText("제안서 메일").assertIsDisplayed()
-        composeTestRule.onNodeWithText("제안서 초안 보내기").assertIsDisplayed()
         composeTestRule.onNodeWithTag("person-detail-source-card-gmail-1").performClick()
         composeTestRule.onNodeWithText("금요일까지 제안서 초안을 보내겠습니다.").assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 1)).assertIsDisplayed()

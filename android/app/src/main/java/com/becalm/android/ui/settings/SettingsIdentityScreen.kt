@@ -20,9 +20,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -61,11 +63,18 @@ public fun SettingsIdentityScreen(
         collected
     }
     val snackbarHostState = remember { SnackbarHostState() }
-    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    val snackbarMessage = (state.error ?: state.notice)?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(
-        errorMessage,
+        snackbarMessage,
         snackbarHostState,
-        { resolvedViewModel?.onErrorDismissed(); Unit },
+        {
+            if (state.error != null) {
+                resolvedViewModel?.onErrorDismissed()
+            } else {
+                resolvedViewModel?.onNoticeDismissed()
+            }
+            Unit
+        },
     )
 
     BecalmScaffold(
@@ -103,6 +112,10 @@ public fun SettingsIdentityScreen(
                 onSetConnectionOwnership = { id, ownership ->
                     resolvedViewModel?.onSetConnectionOwnership(id, ownership)
                 },
+                onDisconnectConnection = { id -> resolvedViewModel?.onDisconnectConnection(id) },
+                onRequestDeleteConnection = { id -> resolvedViewModel?.onRequestDeleteConnection(id) },
+                onConfirmDeleteConnection = { resolvedViewModel?.onConfirmDeleteConnection() },
+                onDismissDeleteConnection = { resolvedViewModel?.onDismissDeleteConnection() },
                 modifier = Modifier.padding(padding),
             )
         }
@@ -120,8 +133,21 @@ internal fun SettingsIdentityContent(
     onAddAnchor: () -> Unit,
     onArchiveAnchor: (String) -> Unit,
     onSetConnectionOwnership: (String, String) -> Unit,
+    onDisconnectConnection: (String) -> Unit = {},
+    onRequestDeleteConnection: (String) -> Unit = {},
+    onConfirmDeleteConnection: () -> Unit = {},
+    onDismissDeleteConnection: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val deletingConnection = state.connections.firstOrNull { it.id == state.confirmingDeleteConnectionId }
+    if (deletingConnection != null) {
+        SettingsConnectionDeleteDialog(
+            connection = deletingConnection,
+            onConfirm = onConfirmDeleteConnection,
+            onDismiss = onDismissDeleteConnection,
+        )
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -170,7 +196,11 @@ internal fun SettingsIdentityContent(
                 SettingsSourceOwnershipRow(
                     connection = connection,
                     updating = state.updatingConnectionId == connection.id,
+                    disconnecting = connection.id in state.disconnectingConnectionIds,
+                    deleting = connection.id in state.deletingConnectionIds,
                     onOwnership = { ownership -> onSetConnectionOwnership(connection.id, ownership) },
+                    onDisconnect = { onDisconnectConnection(connection.id) },
+                    onDelete = { onRequestDeleteConnection(connection.id) },
                 )
             }
         }
@@ -338,8 +368,14 @@ private fun SettingsIdentityAnchorRow(
 private fun SettingsSourceOwnershipRow(
     connection: SourceConnectionOwnershipUi,
     updating: Boolean,
+    disconnecting: Boolean,
+    deleting: Boolean,
     onOwnership: (String) -> Unit,
+    onDisconnect: () -> Unit,
+    onDelete: () -> Unit,
 ) {
+    val busy = updating || disconnecting || deleting
+    val disconnected = connection.status == "disconnected"
     QuietPanel(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = connection.title,
@@ -352,6 +388,19 @@ private fun SettingsSourceOwnershipRow(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Text(
+            text = stringResource(connectionStatusLabelRes(connection.status)),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (connection.ownership == "unknown") {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.settings_identity_connection_ownership_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
         Spacer(modifier = Modifier.height(12.dp))
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             listOf(
@@ -363,7 +412,7 @@ private fun SettingsSourceOwnershipRow(
                 .forEachIndexed { index, option ->
                     SegmentedButton(
                         selected = connection.ownership == option.first,
-                        enabled = !updating,
+                        enabled = !busy && !disconnected,
                         onClick = { onOwnership(option.first) },
                         shape = SegmentedButtonDefaults.itemShape(index = index, count = 4),
                     ) {
@@ -371,5 +420,76 @@ private fun SettingsSourceOwnershipRow(
                     }
                 }
         }
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            BecalmButton(
+                text = stringResource(R.string.settings_identity_connection_disconnect),
+                onClick = onDisconnect,
+                variant = BecalmButtonVariant.Secondary,
+                enabled = !busy && !disconnected,
+                loading = disconnecting,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("settings-identity-connection-disconnect-${connection.id}"),
+            )
+            BecalmButton(
+                text = stringResource(R.string.settings_identity_connection_delete),
+                onClick = onDelete,
+                variant = BecalmButtonVariant.Text,
+                enabled = !busy,
+                loading = deleting,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("settings-identity-connection-delete-${connection.id}"),
+            )
+        }
     }
 }
+
+@Composable
+private fun SettingsConnectionDeleteDialog(
+    connection: SourceConnectionOwnershipUi,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_identity_connection_delete_title)) },
+        text = {
+            Text(
+                stringResource(
+                    R.string.settings_identity_connection_delete_body_fmt,
+                    connection.accountLabel,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier.testTag("settings-identity-connection-delete-confirm"),
+            ) {
+                Text(stringResource(R.string.settings_identity_connection_delete_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("settings-identity-connection-delete-cancel"),
+            ) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+private fun connectionStatusLabelRes(status: String): Int =
+    when (status) {
+        "connected" -> R.string.settings_identity_connection_status_connected
+        "syncing" -> R.string.settings_identity_connection_status_syncing
+        "failed" -> R.string.settings_identity_connection_status_failed
+        "disconnected" -> R.string.settings_identity_connection_status_disconnected
+        else -> R.string.settings_identity_connection_status_unknown
+    }

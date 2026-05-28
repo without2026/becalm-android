@@ -2,6 +2,7 @@ package com.becalm.android.ui.onboarding
 
 import android.content.res.Resources
 import androidx.activity.result.IntentSenderRequest
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -10,6 +11,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
@@ -22,7 +24,7 @@ internal fun SourceConnectionLifecycleRefreshEffect(
 ) {
     DisposableEffect(lifecycleOwner, transientStates) {
         val waitingProviders = transientStates
-            .filterValues { it == SourceConnectionState.PendingExternalAuth || it == SourceConnectionState.Connecting }
+            .filterValues { it.isBusy }
             .keys
         if (waitingProviders.isEmpty()) {
             onDispose { }
@@ -30,6 +32,30 @@ internal fun SourceConnectionLifecycleRefreshEffect(
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
                     waitingProviders.forEach(onRefreshSource)
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+    }
+}
+
+@Composable
+internal fun SourceConnectionVisibleProviderRefreshEffect(
+    lifecycleOwner: LifecycleOwner,
+    provider: OnboardingSourceProvider?,
+    onRefreshSource: (OnboardingSourceProvider) -> Unit,
+) {
+    LaunchedEffect(provider) {
+        provider?.let(onRefreshSource)
+    }
+    DisposableEffect(lifecycleOwner, provider) {
+        if (provider == null) {
+            onDispose { }
+        } else {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    onRefreshSource(provider)
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
@@ -50,11 +76,24 @@ internal fun SourceConnectionEmailEventEffect(
     onConnected: (OnboardingSourceProvider) -> Unit = {},
 ) {
     LaunchedEffect(events, entryPoint, resources) {
+        val syncingSnackbarShown = mutableSetOf<OnboardingSourceProvider>()
         events
             .filter { it.provider == EmailPipaProvider.GMAIL || it.provider == EmailPipaProvider.OUTLOOK_MAIL }
             .collect { event ->
                 val provider = event.provider.onboardingSourceProvider() ?: return@collect
                 when (event) {
+                    is EmailConnectEvent.Syncing -> {
+                        transientStates.value = transientStates.value + (provider to SourceConnectionState.Syncing)
+                        if (
+                            entryPoint != SourceConnectionsEntryPoint.Settings &&
+                            syncingSnackbarShown.add(provider)
+                        ) {
+                            snackbarHostState.showSnackbar(
+                                message = resources.getString(R.string.source_connection_completed_message),
+                                duration = SnackbarDuration.Short,
+                            )
+                        }
+                    }
                     is EmailConnectEvent.Connected -> {
                         transientStates.value = connectedTransientState(
                             current = transientStates.value,
@@ -63,6 +102,10 @@ internal fun SourceConnectionEmailEventEffect(
                         )
                         onConnected(provider)
                     }
+                    is EmailConnectEvent.NotConnected -> {
+                        syncingSnackbarShown.remove(provider)
+                        transientStates.value = transientStates.value - provider
+                    }
                     is EmailConnectEvent.PendingIntentRequired -> {
                         pendingIntentProvider.value = provider
                         transientStates.value = transientStates.value +
@@ -70,6 +113,7 @@ internal fun SourceConnectionEmailEventEffect(
                         onLaunchPendingIntent(IntentSenderRequest.Builder(event.pendingIntent).build())
                     }
                     is EmailConnectEvent.Failed -> {
+                        syncingSnackbarShown.remove(provider)
                         transientStates.value = if (event.errorCode == "user_cancelled") {
                             transientStates.value - provider
                         } else {
@@ -101,9 +145,22 @@ internal fun SourceConnectionCalendarEventEffect(
     onConnected: (OnboardingSourceProvider) -> Unit = {},
 ) {
     LaunchedEffect(events, entryPoint, resources) {
+        val syncingSnackbarShown = mutableSetOf<OnboardingSourceProvider>()
         events.collect { event ->
             val provider = event.provider.onboardingSourceProvider()
             when (event) {
+                is CalendarConnectEvent.Syncing -> {
+                    transientStates.value = transientStates.value + (provider to SourceConnectionState.Syncing)
+                    if (
+                        entryPoint != SourceConnectionsEntryPoint.Settings &&
+                        syncingSnackbarShown.add(provider)
+                    ) {
+                        snackbarHostState.showSnackbar(
+                            message = resources.getString(R.string.source_connection_completed_message),
+                            duration = SnackbarDuration.Short,
+                        )
+                    }
+                }
                 is CalendarConnectEvent.Connected -> {
                     transientStates.value = connectedTransientState(
                         current = transientStates.value,
@@ -112,7 +169,12 @@ internal fun SourceConnectionCalendarEventEffect(
                     )
                     onConnected(provider)
                 }
+                is CalendarConnectEvent.NotConnected -> {
+                    syncingSnackbarShown.remove(provider)
+                    transientStates.value = transientStates.value - provider
+                }
                 is CalendarConnectEvent.Failed -> {
+                    syncingSnackbarShown.remove(provider)
                     transientStates.value = transientStates.value + (provider to SourceConnectionState.Failed)
                     snackbarHostState.showSnackbar(
                         resources.getString(

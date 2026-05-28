@@ -110,7 +110,7 @@ internal val BecalmTypography = Typography(
     ),
     titleSmall = TextStyle(
         fontFamily = PretendardFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.sp,
@@ -142,14 +142,14 @@ internal val BecalmTypography = Typography(
     // ── Label ─────────────────────────────────────────────────────────────────
     labelLarge = TextStyle(
         fontFamily = PretendardFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.sp,
     ),
     labelMedium = TextStyle(
         fontFamily = PretendardFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.sp,

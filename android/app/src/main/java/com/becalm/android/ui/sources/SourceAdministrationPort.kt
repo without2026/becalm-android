@@ -12,6 +12,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.SourceMirrorCursorReset
 import com.becalm.android.worker.ingestion.ImapDaumWorker
 import com.becalm.android.worker.ingestion.ImapNaverWorker
 import com.becalm.android.worker.ingestion.MediaStoreWorker
@@ -88,33 +89,46 @@ public class DefaultSourceAdministrationPort @Inject constructor(
         when (sourceType) {
             SourceType.GMAIL -> {
                 syncCursorStore.setGmailHistoryId(null)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
                 true
             }
             SourceType.OUTLOOK_MAIL -> {
                 syncCursorStore.clearCursor(OUTLOOK_MAIL_INBOX_CURSOR_KEY)
                 syncCursorStore.clearCursor(OUTLOOK_MAIL_SENT_CURSOR_KEY)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
                 true
             }
             SourceType.NAVER_IMAP -> {
                 syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER_INBOX, null)
                 syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER_SENT, null)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
                 true
             }
             SourceType.DAUM_IMAP -> {
                 syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM_INBOX, null)
                 syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM_SENT, null)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
                 true
             }
             SourceType.VOICE -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE, null)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
                 true
             }
             SourceType.CALL_RECORDING -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_CALL_RECORDING, null)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
                 true
             }
             SourceType.MEETING -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, null)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                true
+            }
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+            -> {
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
                 true
             }
             else -> false

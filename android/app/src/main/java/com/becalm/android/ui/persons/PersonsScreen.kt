@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +28,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -40,14 +42,14 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.domain.onboarding.FirstMemoryKind
+import com.becalm.android.domain.onboarding.FirstMemoryOrigin
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.ContactRow
-import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
-import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.components.sourcePresentationFor
@@ -59,8 +61,8 @@ import com.becalm.android.ui.evidence.EvidenceImportViewModel
 import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
 import com.becalm.android.ui.evidence.rememberEvidenceImportActions
 import com.becalm.android.ui.main.MainTabHeaderState
-import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.onboarding.FirstMemoryActivationContent
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -80,16 +82,30 @@ public fun PersonsScreen(
     navController: NavHostController,
     viewModel: PersonsViewModel = hiltViewModel(),
     evidenceImportViewModel: EvidenceImportViewModel = hiltViewModel(),
-    headerViewModel: MainTabHeaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
-    val headerState by headerViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val errorMessage = state.error?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
     val importMessage = evidenceImportState.message?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(importMessage, snackbarHostState, evidenceImportViewModel::onMessageShown)
+    LaunchedEffect(viewModel.effects) {
+        viewModel.effects.collect { effect ->
+            when (effect) {
+                is PersonsEffect.NavigateToPersonDetail ->
+                    navController.navigate(BecalmRoute.PersonDetail(effect.personId).path)
+            }
+        }
+    }
+    LaunchedEffect(evidenceImportState.foregroundReviewRequestKey, state.unassignedEvents.isNotEmpty()) {
+        val requestKey = evidenceImportState.foregroundReviewRequestKey ?: return@LaunchedEffect
+        if (state.unassignedEvents.isEmpty()) return@LaunchedEffect
+        navController.navigate(BecalmRoute.PersonsUnassigned.path) {
+            launchSingleTop = true
+        }
+        evidenceImportViewModel.onForegroundReviewOpened(requestKey)
+    }
 
     val evidenceImportActions = rememberEvidenceImportActions(evidenceImportViewModel)
 
@@ -104,20 +120,27 @@ public fun PersonsScreen(
         onOpenUnassigned = {
             navController.navigate(BecalmRoute.PersonsUnassigned.path)
         },
-        headerState = headerState,
         onOpenSettings = { navController.navigate(BecalmRoute.Settings.path) },
-        onOpenSources = {
-            navController.navigate(BecalmRoute.SettingsSources.path) {
-                launchSingleTop = true
-            }
+        onOpenProcessingStatus = {
+            navController.navigate(BecalmRoute.ProcessingStatus.path)
         },
         onMessageScreenshotImport = evidenceImportActions.openMessageScreenshotPicker,
         onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
         evidenceImportState = evidenceImportState,
+        onConsentRequiredClick = { navController.navigate(BecalmRoute.Settings.path) },
         onMeetingSelfSpeakerSelected = evidenceImportViewModel::onMeetingSelfSpeakerSelected,
+        onMeetingCounterpartySpeakerSelected = evidenceImportViewModel::onMeetingCounterpartySpeakerSelected,
         onMeetingSpeakerReviewConfirmed = evidenceImportViewModel::onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = evidenceImportViewModel::onMeetingSpeakerReviewCancelled,
+        onMeetingSpeakerReviewAction = evidenceImportViewModel::onMeetingSpeakerReviewAction,
         onMeetingPreviewLoadingCancelled = evidenceImportViewModel::onMeetingPreviewLoadingCancelled,
+        onRetryFailedImports = evidenceImportViewModel::onRetryFailedImports,
+        onFirstMemoryOriginChange = viewModel::onFirstMemoryOriginChange,
+        onFirstMemoryPersonNameChange = viewModel::onFirstMemoryPersonNameChange,
+        onFirstMemoryPromiseTextChange = viewModel::onFirstMemoryPromiseTextChange,
+        onFirstMemoryKindChange = viewModel::onFirstMemoryKindChange,
+        onFirstMemoryDueHintChange = viewModel::onFirstMemoryDueHintChange,
+        onSaveFirstMemory = viewModel::onSaveFirstMemory,
     )
 }
 
@@ -132,16 +155,31 @@ public fun PersonsScreenContent(
     headerState: MainTabHeaderState = MainTabHeaderState(),
     onOpenSettings: () -> Unit = {},
     onOpenSources: () -> Unit = onOpenSettings,
+    onOpenProcessingStatus: () -> Unit = {},
     onMessageScreenshotImport: () -> Unit = {},
     onMeetingAudioImport: () -> Unit = {},
     evidenceImportState: EvidenceImportUiState = EvidenceImportUiState(),
+    onConsentRequiredClick: () -> Unit = onOpenSettings,
     onMeetingSelfSpeakerSelected: (String) -> Unit = {},
+    onMeetingCounterpartySpeakerSelected: (String) -> Unit = {},
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
+    onMeetingSpeakerReviewAction: () -> Unit = {},
     onMeetingPreviewLoadingCancelled: () -> Unit = {},
+    onRetryFailedImports: () -> Unit = {},
+    onFirstMemoryOriginChange: (FirstMemoryOrigin) -> Unit = {},
+    onFirstMemoryPersonNameChange: (String) -> Unit = {},
+    onFirstMemoryPromiseTextChange: (String) -> Unit = {},
+    onFirstMemoryKindChange: (FirstMemoryKind) -> Unit = {},
+    onFirstMemoryDueHintChange: (String) -> Unit = {},
+    onSaveFirstMemory: () -> Unit = {},
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
     val hasUnassignedEvents = state.unassignedEvents.isNotEmpty()
+    val showSearch = state.loading ||
+        state.people.isNotEmpty() ||
+        hasUnassignedEvents ||
+        state.query.isNotBlank()
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.persons_title),
@@ -160,11 +198,6 @@ public fun PersonsScreenContent(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            MainTabStatusHeader(
-                state = headerState,
-                onOpenSettings = onOpenSettings,
-                onOpenSources = onOpenSources,
-            )
             if (state.showOfflineBadge) {
                 OfflineBadge(lastSyncAt = state.offlineLastSyncAt)
             }
@@ -174,15 +207,19 @@ public fun PersonsScreenContent(
                     onClick = onOpenUnassigned,
                 )
             }
-            BecalmTextField(
-                value = state.query,
-                onValueChange = onQueryChange,
-                placeholder = stringResource(R.string.persons_search_placeholder),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("persons-search-input")
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+            if (showSearch) {
+                BecalmTextField(
+                    value = state.query,
+                    onValueChange = onQueryChange,
+                    placeholder = stringResource(R.string.persons_search_placeholder),
+                    leadingIcon = Icons.Filled.Search,
+                    compact = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("persons-search-input")
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
             when {
                 state.loading -> {
                     PersonListSkeleton()
@@ -194,11 +231,26 @@ public fun PersonsScreenContent(
                             onPersonClick = onPersonClick,
                         )
                     } else {
-                        EmptyState(
-                            title = stringResource(R.string.persons_empty_title),
-                            message = stringResource(R.string.persons_empty_message),
-                            icon = Icons.Filled.Person,
-                        )
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("persons-empty-first-memory"),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        ) {
+                            item(key = "first-memory-empty") {
+                                FirstMemoryActivationContent(
+                                    state = state.firstMemory,
+                                    onOriginChange = onFirstMemoryOriginChange,
+                                    onPersonNameChange = onFirstMemoryPersonNameChange,
+                                    onPromiseTextChange = onFirstMemoryPromiseTextChange,
+                                    onKindChange = onFirstMemoryKindChange,
+                                    onDueHintChange = onFirstMemoryDueHintChange,
+                                    onSave = onSaveFirstMemory,
+                                    onSkip = {},
+                                    showSkip = false,
+                                )
+                            }
+                        }
                     }
                 }
                 else -> {
@@ -217,10 +269,15 @@ public fun PersonsScreenContent(
         onMeetingAudioImport = onMeetingAudioImport,
         state = evidenceImportState,
         onMeetingSelfSpeakerSelected = onMeetingSelfSpeakerSelected,
+        onMeetingCounterpartySpeakerSelected = onMeetingCounterpartySpeakerSelected,
         onMeetingSpeakerReviewConfirmed = onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = onMeetingSpeakerReviewCancelled,
+        onMeetingSpeakerReviewAction = onMeetingSpeakerReviewAction,
         onMeetingPreviewLoadingCancelled = onMeetingPreviewLoadingCancelled,
+        onRetryFailedImports = onRetryFailedImports,
         onReviewRequiredClick = onOpenUnassigned,
+        onStatusDetailsClick = onOpenProcessingStatus,
+        onConsentRequiredClick = onConsentRequiredClick,
     )
 }
 
@@ -395,6 +452,7 @@ private fun PersonRowItem(
         metadata = person.interactionCount
             .takeIf { it > 0 }
             ?.let { stringResource(R.string.persons_interactions_count, it) },
+        supportingText = person.lastInteractionSnippet?.takeIf { it.isNotBlank() },
         attentionLabel = person.pendingCommitmentCount
             .takeIf { it > 0 }
             ?.let { stringResource(R.string.persons_pending_commitments_fmt, it) },
@@ -409,9 +467,9 @@ private fun PersonRowItem(
 private fun PersonAvatar(person: PersonRow) {
     val seed = person.displayLabel.ifBlank { person.personId }
     val colors = listOf(
-        MaterialTheme.colorScheme.primaryContainer,
-        MaterialTheme.colorScheme.secondaryContainer,
-        MaterialTheme.colorScheme.tertiaryContainer,
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.64f),
+        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.58f),
     )
     val index = (seed.hashCode() and Int.MAX_VALUE) % colors.size
     Box(
@@ -515,12 +573,13 @@ private fun PreviewPersonsScreenPopulated() {
                 ) {
                     items(
                         listOf(
-                            PersonRow(
-                                personId = "ref1",
-                                displayName = "Alice Kim",
-                                lastInteractionAt = null,
-                                interactionCount = 12,
-                            ),
+            PersonRow(
+                personId = "ref1",
+                displayName = "Alice Kim",
+                lastInteractionAt = null,
+                interactionCount = 12,
+                lastInteractionSnippet = "금요일까지 제안서 초안을 보내기로 했어요",
+            ),
                             PersonRow(
                                 personId = "ref2",
                                 displayName = "Bob Lee",

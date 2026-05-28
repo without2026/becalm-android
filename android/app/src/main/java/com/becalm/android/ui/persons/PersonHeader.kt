@@ -103,10 +103,10 @@ internal fun PersonHeader(
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
                 StatTile(
                     label = stringResource(R.string.person_detail_stat_email),
                     count = emailInteractionCount,
@@ -152,19 +152,13 @@ private fun HeaderAvatar(seed: String) {
 
 @Composable
 private fun StatTile(label: String, count: Int, modifier: Modifier = Modifier) {
-    Column(
+    Box(
         modifier = modifier
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .padding(vertical = 2.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = count.toString(),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = label,
+            text = "$label $count",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,

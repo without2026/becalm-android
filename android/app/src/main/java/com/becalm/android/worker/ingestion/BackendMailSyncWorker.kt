@@ -17,7 +17,10 @@ import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.SourceSyncJobPollResult
+import com.becalm.android.data.repository.SourceSyncJobPoller
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.toSourceSyncJobSnapshot
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.WorkScheduler
@@ -139,9 +142,27 @@ public class BackendMailSyncWorker @AssistedInject constructor(
                     retryable = response.code() == 429 || response.code() in 500..599,
                 )
             } else {
-                val synced = response.body()?.synced ?: 0
-                logger.d(TAG, "backend mail sync success source=${provider.sourceType} synced=$synced")
-                ServerBackedTriggerResult.Success(syncedCount = synced)
+                val body = response.body()
+                    ?: return ServerBackedTriggerResult.Failure("Empty response", retryable = true)
+                when (
+                    val pollResult = SourceSyncJobPoller(
+                        api = apiProvider.get(),
+                        logger = logger,
+                    ).awaitTerminal(provider.sourceType, body.toSourceSyncJobSnapshot())
+                ) {
+                    is SourceSyncJobPollResult.Completed -> {
+                        logger.d(TAG, "backend mail sync success source=${provider.sourceType} synced=${pollResult.synced}")
+                        ServerBackedTriggerResult.Success(syncedCount = pollResult.synced)
+                    }
+                    is SourceSyncJobPollResult.Pending -> ServerBackedTriggerResult.Pending(
+                        message = pollResult.message,
+                        retryAfterSeconds = pollResult.retryAfterSeconds,
+                    )
+                    is SourceSyncJobPollResult.Failed -> ServerBackedTriggerResult.Failure(
+                        message = pollResult.message,
+                        retryable = pollResult.retryable,
+                    )
+                }
             }
         } catch (error: Exception) {
             when (error) {

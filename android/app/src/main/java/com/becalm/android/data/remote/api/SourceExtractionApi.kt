@@ -94,6 +94,7 @@ public interface SourceExtractionApi {
         @Part("self_speaker_id") selfSpeakerId: RequestBody?,
         @Part("speaker_mappings") speakerMappings: RequestBody?,
         @Part("speaker_preview_id") speakerPreviewId: RequestBody?,
+        @Part("processing_confirmed") processingConfirmed: RequestBody? = null,
     ): Response<SourceExtractionResponse>
 
     @GET("v1/extractions/commitments/jobs/{job_id}")
@@ -108,5 +109,6 @@ public interface SourceExtractionApi {
         @Part("raw_event_id") rawEventId: RequestBody,
         @Part("duration_seconds") durationSeconds: RequestBody,
         @Part("source_type") sourceType: RequestBody,
+        @Part("processing_confirmed") processingConfirmed: RequestBody? = null,
     ): Response<MeetingSpeakerPreviewResponse>
 }

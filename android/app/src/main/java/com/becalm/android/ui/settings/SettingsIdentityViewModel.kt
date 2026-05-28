@@ -37,6 +37,10 @@ public data class SettingsIdentityUiState(
     val addingAnchor: Boolean = false,
     val archivingAnchorIds: Set<String> = emptySet(),
     val updatingConnectionId: String? = null,
+    val disconnectingConnectionIds: Set<String> = emptySet(),
+    val deletingConnectionIds: Set<String> = emptySet(),
+    val confirmingDeleteConnectionId: String? = null,
+    val notice: UiMessage? = null,
     val error: UiMessage? = null,
 )
 
@@ -145,7 +149,7 @@ public class SettingsIdentityViewModel @Inject constructor(
         val userId = state.userId ?: return
         val phone = normalizeSelfPhone(state.phone)
         viewModelScope.launch {
-            _uiState.update { it.copy(savingProfile = true, error = null) }
+            _uiState.update { it.copy(savingProfile = true, notice = null, error = null) }
             try {
                 val localProfile = userProfileRepository.upsertLocal(
                     userId = userId,
@@ -153,17 +157,31 @@ public class SettingsIdentityViewModel @Inject constructor(
                     phoneE164Self = phone,
                 )
                 upsertOptionalLocalSelfAnchor(userId, anchorType = "phone", value = phone)
-                val anchors = selfIdentityRepository.observeAll(userId).first()
                 _uiState.update {
                     it.copy(
                         displayName = localProfile.displayNameOverride.orEmpty(),
                         phone = localProfile.phoneE164Self.orEmpty(),
-                        anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
-                        savingProfile = false,
                         error = null,
                     )
                 }
-                mirrorProfileRemote(userId, localProfile.displayNameOverride.orEmpty(), localProfile.phoneE164Self.orEmpty())
+                if (mirrorProfileRemote(userId, localProfile.displayNameOverride.orEmpty(), localProfile.phoneE164Self.orEmpty())) {
+                    val anchors = selfIdentityRepository.observeAll(userId).first()
+                    _uiState.update {
+                        it.copy(
+                            anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
+                            savingProfile = false,
+                            notice = UiMessage.resource(R.string.settings_identity_profile_saved),
+                            error = null,
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            savingProfile = false,
+                            error = UiMessage.resource(R.string.settings_identity_error_save_profile),
+                        )
+                    }
+                }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 _uiState.update {
@@ -196,18 +214,23 @@ public class SettingsIdentityViewModel @Inject constructor(
         userId: String,
         displayName: String,
         phone: String,
-    ) {
+    ): Boolean {
         try {
-            when (userProfileRepository.updateRemote(userId = userId, displayName = displayName, phoneE164Self = phone)) {
+            return when (userProfileRepository.updateRemote(userId = userId, displayName = displayName, phoneE164Self = phone)) {
                 is BecalmResult.Success -> {
-                    createOptionalSelfAnchor(userId, anchorType = "phone", value = phone)
+                    val anchorCreated = createOptionalSelfAnchor(userId, anchorType = "phone", value = phone)
                     selfIdentityRepository.refresh(userId)
+                    anchorCreated
                 }
-                is BecalmResult.Failure -> logger.w(TAG, "settings identity remote profile mirror failed")
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "settings identity remote profile mirror failed")
+                    false
+                }
             }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             logger.w(TAG, "settings identity remote profile mirror failed", t)
+            return false
         }
     }
 
@@ -241,24 +264,8 @@ public class SettingsIdentityViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            _uiState.update { it.copy(addingAnchor = true, error = null) }
+            _uiState.update { it.copy(addingAnchor = true, notice = null, error = null) }
             try {
-                selfIdentityRepository.upsertLocalAnchor(
-                    userId = userId,
-                    anchorType = state.newAnchorType,
-                    value = value,
-                    displayValue = value,
-                    source = "user_profile",
-                )
-                val anchors = selfIdentityRepository.observeAll(userId).first()
-                _uiState.update {
-                    it.copy(
-                        newAnchorValue = "",
-                        anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
-                        addingAnchor = false,
-                        error = null,
-                    )
-                }
                 when (
                     selfIdentityRepository.createAnchor(
                         userId = userId,
@@ -268,8 +275,27 @@ public class SettingsIdentityViewModel @Inject constructor(
                         source = "user_profile",
                     )
                 ) {
-                    is BecalmResult.Success -> Unit
-                    is BecalmResult.Failure -> logger.w(TAG, "settings identity remote anchor mirror failed")
+                    is BecalmResult.Success -> {
+                        val anchors = selfIdentityRepository.observeAll(userId).first()
+                        _uiState.update {
+                            it.copy(
+                                newAnchorValue = "",
+                                anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
+                                addingAnchor = false,
+                                notice = UiMessage.resource(R.string.settings_identity_anchor_added),
+                                error = null,
+                            )
+                        }
+                    }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "settings identity remote anchor mirror failed")
+                        _uiState.update {
+                            it.copy(
+                                addingAnchor = false,
+                                error = UiMessage.resource(R.string.settings_identity_error_add_anchor),
+                            )
+                        }
+                    }
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
@@ -324,6 +350,7 @@ public class SettingsIdentityViewModel @Inject constructor(
     public fun onSetConnectionOwnership(connectionId: String, ownership: String) {
         val userId = _uiState.value.userId ?: return
         if (ownership !in SOURCE_OWNERSHIP_VALUES) return
+        if (connectionId in _uiState.value.disconnectingConnectionIds || connectionId in _uiState.value.deletingConnectionIds) return
         viewModelScope.launch {
             _uiState.update { it.copy(updatingConnectionId = connectionId, error = null) }
             when (sourceConnectionRepository.setOwnership(userId, connectionId, ownership)) {
@@ -350,8 +377,88 @@ public class SettingsIdentityViewModel @Inject constructor(
         }
     }
 
+    public fun onDisconnectConnection(connectionId: String) {
+        val userId = _uiState.value.userId ?: return
+        val state = _uiState.value
+        if (connectionId in state.disconnectingConnectionIds || connectionId in state.deletingConnectionIds) return
+        _uiState.update {
+            it.copy(
+                disconnectingConnectionIds = it.disconnectingConnectionIds + connectionId,
+                confirmingDeleteConnectionId = null,
+                error = null,
+            )
+        }
+        viewModelScope.launch {
+            when (sourceConnectionRepository.disconnectConnection(userId, connectionId)) {
+                is BecalmResult.Success -> {
+                    val connections = sourceConnectionRepository.observeAll(userId).first()
+                    _uiState.update {
+                        it.copy(
+                            connections = connections.map(SourceConnectionEntity::toUi),
+                            disconnectingConnectionIds = it.disconnectingConnectionIds - connectionId,
+                            error = null,
+                        )
+                    }
+                }
+                is BecalmResult.Failure -> _uiState.update {
+                    it.copy(
+                        disconnectingConnectionIds = it.disconnectingConnectionIds - connectionId,
+                        error = UiMessage.resource(R.string.settings_identity_error_disconnect_connection),
+                    )
+                }
+            }
+        }
+    }
+
+    public fun onRequestDeleteConnection(connectionId: String) {
+        val state = _uiState.value
+        if (connectionId in state.disconnectingConnectionIds || connectionId in state.deletingConnectionIds) return
+        _uiState.update { it.copy(confirmingDeleteConnectionId = connectionId, error = null) }
+    }
+
+    public fun onDismissDeleteConnection() {
+        _uiState.update { it.copy(confirmingDeleteConnectionId = null) }
+    }
+
+    public fun onConfirmDeleteConnection() {
+        val userId = _uiState.value.userId ?: return
+        val connectionId = _uiState.value.confirmingDeleteConnectionId ?: return
+        if (connectionId in _uiState.value.deletingConnectionIds) return
+        _uiState.update {
+            it.copy(
+                deletingConnectionIds = it.deletingConnectionIds + connectionId,
+                confirmingDeleteConnectionId = null,
+                error = null,
+            )
+        }
+        viewModelScope.launch {
+            when (sourceConnectionRepository.deleteConnection(userId, connectionId)) {
+                is BecalmResult.Success -> {
+                    val connections = sourceConnectionRepository.observeAll(userId).first()
+                    _uiState.update {
+                        it.copy(
+                            connections = connections.map(SourceConnectionEntity::toUi),
+                            deletingConnectionIds = it.deletingConnectionIds - connectionId,
+                            error = null,
+                        )
+                    }
+                }
+                is BecalmResult.Failure -> _uiState.update {
+                    it.copy(
+                        deletingConnectionIds = it.deletingConnectionIds - connectionId,
+                        error = UiMessage.resource(R.string.settings_identity_error_delete_connection),
+                    )
+                }
+            }
+        }
+    }
+
     public fun onErrorDismissed() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    public fun onNoticeDismissed() {
+        _uiState.update { it.copy(notice = null) }
     }
 }
 

@@ -60,6 +60,7 @@ class CommitmentSheetsUiTest {
     @Test
     fun `commitment detail content shows source history and action chips`() {
         var remindClicks = 0
+        var completeClicks = 0
         var editClicks = 0
 
         composeRule.setContent {
@@ -90,7 +91,7 @@ class CommitmentSheetsUiTest {
                     counterpartyDisplayName = "김철수",
                     onRemind = { remindClicks += 1 },
                     onFollowUp = {},
-                    onComplete = {},
+                    onComplete = { completeClicks += 1 },
                     onCancel = {},
                     onEdit = { editClicks += 1 },
                 )
@@ -106,12 +107,62 @@ class CommitmentSheetsUiTest {
         composeRule.onAllNodesWithText(string(R.string.commitment_detail_last_edited_fmt, "4/24 10:30"))
             .assertCountEquals(1)
         composeRule.onAllNodesWithText(string(R.string.commitment_detail_superseded_link)).assertCountEquals(1)
+        composeRule.onNodeWithTag("commitment-detail-primary-action")
+            .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("commitment-detail-remind").performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onAllNodesWithText(string(R.string.commitment_action_edit)).assertCountEquals(0)
+        composeRule.onNodeWithTag("commitment-detail-actions-more").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("commitment-detail-edit").performSemanticsAction(SemanticsActions.OnClick)
 
         composeRule.runOnIdle {
             assertEquals(1, remindClicks)
+            assertEquals(1, completeClicks)
             assertEquals(1, editClicks)
+        }
+    }
+
+    @Test
+    fun `commitment detail action hierarchy keeps cancel in overflow`() {
+        var cancelClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                DetailSheetContent(
+                    entity = commitmentEntity(),
+                    quote = "금요일까지 보내겠습니다",
+                    actionState = CommitmentState.PENDING,
+                    source = CommitmentSourcePresentation(),
+                    history = CommitmentHistoryPresentation(),
+                    actionButtons = CommitmentDetailActionState(
+                        availableActions = setOf(
+                            CommitmentSheetAction.REMIND,
+                            CommitmentSheetAction.FOLLOW_UP,
+                            CommitmentSheetAction.COMPLETE,
+                            CommitmentSheetAction.CANCEL,
+                        ),
+                        editEnabled = true,
+                    ),
+                    counterpartyDisplayName = "김철수",
+                    onRemind = {},
+                    onFollowUp = {},
+                    onComplete = {},
+                    onCancel = { cancelClicks += 1 },
+                    onEdit = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("commitment-detail-primary-action").assertIsDisplayed()
+        composeRule.onNodeWithTag("commitment-detail-content")
+            .performScrollToNode(hasTestTag("commitment-detail-remind"))
+        composeRule.onNodeWithTag("commitment-detail-remind").assertIsDisplayed()
+        composeRule.onNodeWithTag("commitment-detail-follow-up").assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.commitment_action_cancel)).assertCountEquals(0)
+        composeRule.onNodeWithTag("commitment-detail-actions-more").performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag("commitment-detail-cancel").performSemanticsAction(SemanticsActions.OnClick)
+
+        composeRule.runOnIdle {
+            assertEquals(1, cancelClicks)
         }
     }
 

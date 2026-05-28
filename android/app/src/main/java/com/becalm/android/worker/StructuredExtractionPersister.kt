@@ -4,11 +4,14 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
+import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonIndexDirtySources
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -29,6 +32,7 @@ internal class StructuredExtractionPersister(
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
     private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
+    private val meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao? = null,
 ) {
     suspend fun persist(
         userId: String,
@@ -148,9 +152,18 @@ internal class StructuredExtractionPersister(
                 syncStatus = STATUS_PENDING,
             ),
         )
+        if (entity.sourceType == SourceType.MEETING || entity.sourceType == SourceType.CALL_RECORDING) {
+            meetingSpeakerPreviewDao?.markStatus(
+                rawEventId = entity.id,
+                status = MeetingSpeakerPreviewStatus.DONE,
+                lastError = null,
+                updatedAt = now,
+            )
+        }
 
         sourceStatusRepository.recordSyncSuccess(entity.sourceType, now)
         processingStatusRepository.recordSynced(entity.sourceType, relevantItems.size)
+        workScheduler.enqueueUpload()
         SourceGraphChangedNotifier(workScheduler).notifyChanged()
         if (completionProgressEvents.isNotEmpty()) {
             workScheduler.enqueueProcessDone()

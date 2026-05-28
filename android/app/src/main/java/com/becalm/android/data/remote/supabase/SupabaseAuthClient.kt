@@ -4,11 +4,13 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.SignOutScope
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.providers.builtin.IDToken
+import io.github.jan.supabase.auth.providers.builtin.OTP
 import io.github.jan.supabase.auth.user.UserSession
 import io.github.jan.supabase.exceptions.RestException
 import java.io.IOException
@@ -57,6 +59,16 @@ public interface SupabaseAuthClient {
      * for the confirmation-required branch so the UI can show a stable product string.
      */
     public suspend fun signUpWithEmail(email: String, password: String): BecalmResult<SupabaseSession>
+
+    /** Sends an SMS one-time code to [phoneE164] using Supabase phone OTP auth. */
+    public suspend fun requestPhoneOtp(phoneE164: String): BecalmResult<Unit>
+
+    /**
+     * Verifies an SMS one-time code and returns the authenticated session.
+     *
+     * [phoneE164] is preserved as the verified phone value even if the SDK user payload omits it.
+     */
+    public suspend fun verifyPhoneOtp(phoneE164: String, token: String): BecalmResult<SupabaseSession>
 
     /**
      * Authenticates using a Google ID token obtained from the Google Sign-In SDK (AUTH-002 / AUTH-003).
@@ -154,7 +166,7 @@ public class SupabaseAuthClientImpl @Inject constructor(
             this.email = email
             this.password = password
         }
-        requireCurrentSession()
+        requireCurrentSession(authProvider = SupabaseAuthProvider.EMAIL)
     }
 
     override suspend fun signUpWithEmail(
@@ -170,7 +182,7 @@ public class SupabaseAuthClientImpl @Inject constructor(
         }
         val rawSession = client.auth.currentSessionOrNull()
             ?: throw EmailConfirmationRequiredException()
-        rawSession.toSupabaseSession()
+        rawSession.toSupabaseSession(authProvider = SupabaseAuthProvider.EMAIL)
     }
 
     override suspend fun signInWithGoogleIdToken(
@@ -183,7 +195,35 @@ public class SupabaseAuthClientImpl @Inject constructor(
             provider = Google
             this.idToken = idToken
         }
-        requireCurrentSession()
+        requireCurrentSession(authProvider = SupabaseAuthProvider.GOOGLE)
+    }
+
+    override suspend fun requestPhoneOtp(phoneE164: String): BecalmResult<Unit> = runCatchingAuth(
+        tag = "requestPhoneOtp",
+        restExceptionMapper = ::mapPhoneOtpRestException,
+    ) {
+        client.auth.signInWith(OTP) {
+            phone = phoneE164
+        }
+        Unit
+    }
+
+    override suspend fun verifyPhoneOtp(
+        phoneE164: String,
+        token: String,
+    ): BecalmResult<SupabaseSession> = runCatchingAuth(
+        tag = "verifyPhoneOtp",
+        restExceptionMapper = ::mapPhoneOtpRestException,
+    ) {
+        client.auth.verifyPhoneOtp(
+            type = OtpType.Phone.SMS,
+            phone = phoneE164,
+            token = token,
+        )
+        requireCurrentSession(
+            fallbackPhone = phoneE164,
+            authProvider = SupabaseAuthProvider.PHONE,
+        )
     }
 
     override suspend fun refresh(
@@ -211,6 +251,9 @@ public class SupabaseAuthClientImpl @Inject constructor(
         val session = requireCurrentSession(
             fallbackUserId = currentSession.userId,
             fallbackEmail = currentSession.email,
+            fallbackPhone = currentSession.phone,
+            authProvider = currentSession.authProvider,
+            fallbackProfileName = currentSession.profileName,
         )
         if (session.userId != currentSession.userId) {
             error("Supabase refresh returned a different user id")
@@ -257,6 +300,9 @@ public class SupabaseAuthClientImpl @Inject constructor(
     private fun requireCurrentSession(
         fallbackUserId: String? = null,
         fallbackEmail: String? = null,
+        fallbackPhone: String? = null,
+        authProvider: SupabaseAuthProvider = SupabaseAuthProvider.EMAIL,
+        fallbackProfileName: String? = null,
     ): SupabaseSession {
         val raw = checkNotNull(client.auth.currentSessionOrNull()) {
             "Supabase SDK returned no session after a successful auth operation — " +
@@ -265,6 +311,9 @@ public class SupabaseAuthClientImpl @Inject constructor(
         return raw.toSupabaseSession(
             fallbackUserId = fallbackUserId,
             fallbackEmail = fallbackEmail,
+            fallbackPhone = fallbackPhone,
+            authProvider = authProvider,
+            fallbackProfileName = fallbackProfileName,
         )
     }
 
@@ -320,6 +369,12 @@ public class SupabaseAuthClientImpl @Inject constructor(
         } else {
             mapDefaultRestException(e)
         }
+    }
+
+    private fun mapPhoneOtpRestException(e: RestException): BecalmError = when (e.statusCode) {
+        400, 401, 422 -> BecalmError.Validation(field = "phone", message = "phone_otp_failed")
+        429 -> BecalmError.RateLimited(retryAfterSeconds = null)
+        else -> mapDefaultRestException(e)
     }
 
     private fun mapDefaultRestException(e: RestException): BecalmError = when (e.statusCode) {
@@ -389,6 +444,9 @@ private fun isEmailNotConfirmed(message: String): Boolean {
 private fun UserSession.toSupabaseSession(
     fallbackUserId: String? = null,
     fallbackEmail: String? = null,
+    fallbackPhone: String? = null,
+    authProvider: SupabaseAuthProvider = SupabaseAuthProvider.EMAIL,
+    fallbackProfileName: String? = null,
 ): SupabaseSession {
     val expiresAt = Instant.fromEpochMilliseconds(
         System.currentTimeMillis() + (expiresIn * 1_000L)
@@ -397,11 +455,24 @@ private fun UserSession.toSupabaseSession(
     check(resolvedUserId.isNotBlank()) {
         "Supabase session is missing user id"
     }
+    val resolvedPhone = user?.phone?.takeIf { it.isNotBlank() } ?: fallbackPhone
+    val resolvedProfileName = user?.userMetadata?.stringValue("full_name")
+        ?: user?.userMetadata?.stringValue("name")
+        ?: user?.userMetadata?.stringValue("display_name")
+        ?: fallbackProfileName
     return SupabaseSession(
         accessToken = accessToken,
         refreshToken = refreshToken ?: "",
         userId = resolvedUserId,
         email = user?.email?.takeIf { it.isNotBlank() } ?: fallbackEmail.orEmpty(),
         expiresAt = expiresAt,
+        phone = resolvedPhone?.takeIf { it.isNotBlank() },
+        authProvider = authProvider,
+        profileName = resolvedProfileName?.takeIf { it.isNotBlank() },
     )
 }
+
+private fun kotlinx.serialization.json.JsonObject.stringValue(key: String): String? =
+    this[key]?.let { element ->
+        element as? kotlinx.serialization.json.JsonPrimitive
+    }?.content?.trim()?.takeIf { it.isNotBlank() }

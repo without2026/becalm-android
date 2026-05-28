@@ -299,6 +299,54 @@ class PersonDetailViewModelSpecTest {
         assertEquals(150, state.sourceEventCards.size)
         assertEquals("고객 메일 149", state.sourceEventCards.first().title)
         assertEquals("고객 메일 0", state.sourceEventCards.last().title)
+        assertTrue(state.canLoadMoreTimeline)
+    }
+
+    @Test
+    fun `load more timeline increases person interaction query limit`() = runTest {
+        val personId = "person-1"
+        val firstPage = (0 until 150).map { index ->
+            interaction(
+                id = "mail-$index",
+                personId = personId,
+                sourceType = SourceType.GMAIL,
+                sourceRef = "raw:mail-$index",
+                interactionKind = "email",
+                title = "고객 메일 $index",
+                snippet = "다음 액션과 일정이 포함된 최근 상호작용 $index",
+                occurredAt = Instant.fromEpochMilliseconds(index * 1_000L),
+            )
+        }
+        val expandedPage = (0 until 220).map { index ->
+            interaction(
+                id = "mail-$index",
+                personId = personId,
+                sourceType = SourceType.GMAIL,
+                sourceRef = "raw:mail-$index",
+                interactionKind = "email",
+                title = "고객 메일 $index",
+                snippet = "다음 액션과 일정이 포함된 최근 상호작용 $index",
+                occurredAt = Instant.fromEpochMilliseconds(index * 1_000L),
+            )
+        }
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns flowOf(firstPage)
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 300) } returns flowOf(expandedPage)
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        assertEquals(150, viewModel.uiState.value.sourceEventCards.size)
+        assertTrue(viewModel.uiState.value.canLoadMoreTimeline)
+
+        viewModel.onLoadMoreTimeline()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(220, state.eventCount)
+        assertEquals(220, state.sourceEventCards.size)
+        assertEquals("고객 메일 219", state.sourceEventCards.first().title)
+        assertEquals("고객 메일 0", state.sourceEventCards.last().title)
+        assertFalse(state.canLoadMoreTimeline)
     }
 
     @Test
@@ -327,6 +375,57 @@ class PersonDetailViewModelSpecTest {
         assertEquals(R.string.person_detail_error_load_failed, viewModel.uiState.value.error?.resId)
         viewModel.onErrorDismissed()
         assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `retry after observe failure restarts detail projection`() = runTest {
+        val personId = "person-1"
+        var observeAttempts = 0
+        every { personIndexDao.observeIdentitiesForPerson("user-1", personId) } returns flowOf(
+            listOf(
+                identity(
+                    personId = personId,
+                    rawValue = "alice@example.com",
+                    displayNameHint = "Alice",
+                ),
+            ),
+        )
+        every { personEnrichmentRepository.observeAll() } answers {
+            observeAttempts += 1
+            if (observeAttempts == 1) {
+                flow { throw IllegalStateException("observe failed") }
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "mail",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-1",
+                        interactionKind = "email",
+                        title = "메일",
+                        occurredAt = Instant.fromEpochMilliseconds(3_000),
+                    ),
+                ),
+            )
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        assertEquals(R.string.person_detail_error_load_failed, viewModel.uiState.value.error?.resId)
+
+        viewModel.onRetryLoad()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertNull(state.error)
+        assertFalse(state.loading)
+        assertEquals("Alice", state.displayName)
+        assertEquals(1, state.sourceEventCards.size)
     }
 
     private fun buildViewModel(personId: String): PersonDetailViewModel =

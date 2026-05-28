@@ -25,6 +25,7 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.QuietPanel
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 
@@ -41,7 +42,7 @@ import com.becalm.android.ui.theme.BecalmTheme
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingBattery]
- * Navigation exit: [BecalmRoute.OnboardingColdSync]
+ * Navigation exit: authenticated home.
  */
 @Composable
 public fun BatteryOptimizationScreen(
@@ -62,7 +63,12 @@ public fun BatteryOptimizationScreen(
     } else {
         viewModel
     }
-    val advance = onAdvance ?: { navController.navigate(BecalmRoute.OnboardingColdSync.path) }
+    val advance = onAdvance ?: {
+        navController.navigate(BecalmNavigationDefaults.authenticatedHomeRoute) {
+            popUpTo(BecalmRoute.OnboardingBattery.path) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
 
     // Result callback: navigate regardless of whether the user granted or not
     val launcher = rememberLauncherForActivityResult(

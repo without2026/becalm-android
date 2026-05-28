@@ -182,7 +182,7 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
-    fun `CMT-002 filter tabs isolate give take and action schedule commitments`() = runTest {
+    fun `CMT-002 filter tabs isolate give take and closed commitments without schedules`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 entity(id = "give-1", direction = "give"),
@@ -216,7 +216,6 @@ class CommitmentManagementViewModelSpecTest {
                     "give-1",
                     "give-2",
                     "take-1",
-                    "schedule-1",
                     "completed-1",
                     "cancelled-1",
                 ),
@@ -235,12 +234,6 @@ class CommitmentManagementViewModelSpecTest {
             assertEquals(CommitmentFilter.TAKE, takeOnly.filter)
             assertEquals(listOf("take-1"), takeOnly.items.map { it.id })
             assertTrue(takeOnly.items.all { it.itemType == "action" && it.direction == "take" })
-
-            viewModel.onFilterChange(CommitmentFilter.SCHEDULE)
-            val scheduleOnly = awaitItem()
-            assertEquals(CommitmentFilter.SCHEDULE, scheduleOnly.filter)
-            assertEquals(listOf("schedule-1"), scheduleOnly.items.map { it.id })
-            assertTrue(scheduleOnly.items.all { it.itemType == "schedule" && it.scheduleStatus == "changed" })
 
             viewModel.onFilterChange(CommitmentFilter.CLOSED)
             val closedOnly = awaitItem()
@@ -261,7 +254,6 @@ class CommitmentManagementViewModelSpecTest {
                     "give-1",
                     "give-2",
                     "take-1",
-                    "schedule-1",
                     "completed-1",
                     "cancelled-1",
                 ),
@@ -274,7 +266,7 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
-    fun `schedule rows without person are grouped as schedules rather than unknown person`() = runTest {
+    fun `schedule rows are excluded from commitment person groups`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 entity(id = "action-no-person", itemType = "action", direction = "give"),
@@ -289,54 +281,29 @@ class CommitmentManagementViewModelSpecTest {
             val state = awaitItem()
 
             assertEquals(
-                listOf(CommitmentPersonGroupType.UNKNOWN_PERSON, CommitmentPersonGroupType.SCHEDULE),
+                listOf(CommitmentPersonGroupType.UNKNOWN_PERSON),
                 state.activePersonGroups.map { it.type },
             )
             assertEquals(listOf("action-no-person"), state.activePersonGroups[0].items.map { it.id })
-            assertEquals(listOf("schedule-no-person"), state.activePersonGroups[1].items.map { it.id })
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `schedule filter projects timeline D labels and keeps no-date rows last`() = runTest {
+    fun `legacy schedule filter normalizes to all and keeps schedule timeline empty`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 entity(
-                    id = "future",
+                    id = "action",
+                    itemType = "action",
+                    direction = "give",
+                    dueAt = Instant.parse("2026-05-04T01:30:00Z"),
+                ),
+                entity(
+                    id = "schedule",
                     itemType = "schedule",
                     direction = null,
                     dueAt = Instant.parse("2026-05-07T00:00:00Z"),
-                    sourceEventOccurredAt = Instant.parse("2026-05-01T00:00:00Z"),
-                ),
-                entity(
-                    id = "missing",
-                    itemType = "schedule",
-                    direction = null,
-                    dueAt = null,
-                    sourceEventOccurredAt = Instant.parse("2026-05-02T00:00:00Z"),
-                ),
-                entity(
-                    id = "today",
-                    itemType = "schedule",
-                    direction = null,
-                    dueAt = Instant.parse("2026-05-04T01:30:00Z"),
-                    sourceEventOccurredAt = Instant.parse("2026-05-01T01:00:00Z"),
-                ),
-                entity(
-                    id = "approx",
-                    itemType = "schedule",
-                    direction = null,
-                    dueAt = Instant.parse("2026-05-06T00:00:00Z"),
-                    dueIsApproximate = true,
-                    sourceEventOccurredAt = Instant.parse("2026-05-03T00:00:00Z"),
-                ),
-                entity(
-                    id = "overdue",
-                    itemType = "schedule",
-                    direction = null,
-                    dueAt = Instant.parse("2026-05-02T00:00:00Z"),
-                    sourceEventOccurredAt = Instant.parse("2026-05-01T02:00:00Z"),
                 ),
             ),
         )
@@ -348,45 +315,31 @@ class CommitmentManagementViewModelSpecTest {
             awaitItem()
 
             viewModel.onFilterChange(CommitmentFilter.SCHEDULE)
-            val schedule = awaitItem()
+            advanceUntilIdle()
+            val schedule = viewModel.uiState.value
 
-            assertEquals(
-                listOf("overdue", "today", "future", "approx", "missing"),
-                schedule.items.map { it.id },
-            )
-            assertEquals(
-                listOf("today", "future", "approx", "missing"),
-                schedule.scheduleUpcomingItems.map { it.id },
-            )
-            assertEquals(listOf("overdue"), schedule.schedulePastSection.items.map { it.id })
-            assertFalse(schedule.schedulePastSection.expanded)
-            assertEquals("D+2", schedule.items.single { it.id == "overdue" }.scheduleTimelineTiming?.dayLabel)
-            assertEquals("09:00", schedule.items.single { it.id == "overdue" }.scheduleTimelineTiming?.timeLabel)
-            assertEquals("D-0", schedule.items.single { it.id == "today" }.scheduleTimelineTiming?.dayLabel)
-            assertEquals("10:30", schedule.items.single { it.id == "today" }.scheduleTimelineTiming?.timeLabel)
-            assertEquals("D-3", schedule.items.single { it.id == "future" }.scheduleTimelineTiming?.dayLabel)
-            assertEquals("약 D-2", schedule.items.single { it.id == "approx" }.scheduleTimelineTiming?.dayLabel)
-            assertNull(schedule.items.single { it.id == "approx" }.scheduleTimelineTiming?.timeLabel)
-            assertNull(schedule.items.single { it.id == "missing" }.scheduleTimelineTiming?.dayLabel)
-            assertTrue(requireNotNull(schedule.items.single { it.id == "missing" }.scheduleTimelineTiming).isUntimed)
+            assertEquals(CommitmentFilter.ALL, schedule.filter)
+            assertEquals(listOf("action"), schedule.items.map { it.id })
+            assertTrue(schedule.scheduleUpcomingItems.isEmpty())
+            assertFalse(schedule.schedulePastSection.visible)
 
             viewModel.onTogglePastSection()
-            assertTrue(awaitItem().schedulePastSection.expanded)
+            assertTrue(awaitItem().pastSection.expanded)
 
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `CMT schedule link updates de-emphasize confirmed duplicate without commitment row requery`() = runTest {
+    fun `CMT schedule link updates de-emphasize confirmed duplicate action without row requery`() = runTest {
         val linkFlow = MutableStateFlow<List<ScheduleEventLinkEntity>>(emptyList())
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
-            managementRows(entity(id = "schedule-1", itemType = "schedule", direction = null)),
+            managementRows(entity(id = "action-1", itemType = "action", direction = "give")),
         )
         every {
             scheduleEventLinkRepository.observeForProjectionRefs(
                 userId = "user-1",
-                commitmentIds = listOf("schedule-1"),
+                commitmentIds = listOf("action-1"),
                 rawEventIds = emptyList(),
                 calendarEventIds = emptyList(),
             )
@@ -397,26 +350,26 @@ class CommitmentManagementViewModelSpecTest {
         viewModel.uiState.test {
             awaitItem()
             val initial = awaitItem()
-            assertFalse(initial.items.single { it.id == "schedule-1" }.deEmphasized)
+            assertFalse(initial.items.single { it.id == "action-1" }.deEmphasized)
 
-            linkFlow.value = listOf(scheduleLink(commitmentId = "schedule-1"))
+            linkFlow.value = listOf(scheduleLink(commitmentId = "action-1"))
 
             val updated = awaitItem()
-            assertTrue(updated.items.single { it.id == "schedule-1" }.deEmphasized)
+            assertTrue(updated.items.single { it.id == "action-1" }.deEmphasized)
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `CMT same schedule resolution de-emphasizes but adjustment resolution keeps schedule prominent`() = runTest {
+    fun `CMT same schedule resolution de-emphasizes action but adjustment resolution keeps action prominent`() = runTest {
         val linkFlow = MutableStateFlow<List<ScheduleEventLinkEntity>>(emptyList())
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
-            managementRows(entity(id = "schedule-1", itemType = "schedule", direction = null)),
+            managementRows(entity(id = "action-1", itemType = "action", direction = "give")),
         )
         every {
             scheduleEventLinkRepository.observeForProjectionRefs(
                 userId = "user-1",
-                commitmentIds = listOf("schedule-1"),
+                commitmentIds = listOf("action-1"),
                 rawEventIds = emptyList(),
                 calendarEventIds = emptyList(),
             )
@@ -430,25 +383,25 @@ class CommitmentManagementViewModelSpecTest {
 
             linkFlow.value = listOf(
                 scheduleLink(
-                    commitmentId = "schedule-1",
+                    commitmentId = "action-1",
                     relationType = "conflicts",
                     status = "approved",
                     resolutionChoice = ScheduleEventLinkResolutionChoice.SAME_SCHEDULE,
                 ),
             )
             val sameSchedule = awaitItem()
-            assertTrue(sameSchedule.items.single { it.id == "schedule-1" }.deEmphasized)
+            assertTrue(sameSchedule.items.single { it.id == "action-1" }.deEmphasized)
 
             linkFlow.value = listOf(
                 scheduleLink(
-                    commitmentId = "schedule-1",
+                    commitmentId = "action-1",
                     relationType = "conflicts",
                     status = "approved",
                     resolutionChoice = ScheduleEventLinkResolutionChoice.SCHEDULE_ADJUSTMENT_NEEDED,
                 ),
             )
             val adjustmentNeeded = awaitItem()
-            assertFalse(adjustmentNeeded.items.single { it.id == "schedule-1" }.deEmphasized)
+            assertFalse(adjustmentNeeded.items.single { it.id == "action-1" }.deEmphasized)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -689,10 +642,7 @@ class CommitmentManagementViewModelSpecTest {
         assertEquals("action", rows.getValue("action-1").itemType)
         assertEquals("give", rows.getValue("action-1").direction)
         assertEquals("이대리", rows.getValue("action-1").counterpartyDisplayName)
-        assertEquals("schedule", rows.getValue("schedule-1").itemType)
-        assertEquals("changed", rows.getValue("schedule-1").scheduleStatus)
-        assertEquals("박과장", rows.getValue("schedule-1").counterpartyDisplayName)
-        assertEquals(null, rows.getValue("schedule-1").derivedStatus)
+        assertFalse(rows.containsKey("schedule-1"))
         assertFalse(rows.containsKey("decision-1"))
     }
 

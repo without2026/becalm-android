@@ -116,7 +116,7 @@ public class PrivacyDataExporter @Inject constructor(
                 mapOf(
                     "action" to entry.action,
                     "timestamp_iso" to entry.timestampIso,
-                    "details" to entry.details,
+                    "details" to redactSensitiveDetails(entry.details),
                 )
             },
             "email_connected" to EmailPipaProvider.entries.associate { provider ->
@@ -184,5 +184,32 @@ public class PrivacyDataExporter @Inject constructor(
         val timestamp = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm", Locale.US)
             .format(JavaInstant.ofEpochMilli(nowEpochMs).atZone(ZoneId.of("Asia/Seoul")))
         return "becalm_export_${hash}_$timestamp.zip"
+    }
+
+    private fun redactSensitiveDetails(details: Map<String, String>): Map<String, String> =
+        details.mapValues { (key, value) ->
+            if (key.isSensitiveExportKey()) REDACTED_EXPORT_VALUE else value
+        }
+
+    private fun String.isSensitiveExportKey(): Boolean {
+        val normalized = lowercase(Locale.US)
+            .replace("-", "_")
+            .replace(" ", "_")
+        return SENSITIVE_EXPORT_KEY_MARKERS.any(normalized::contains)
+    }
+
+    private companion object {
+        private const val REDACTED_EXPORT_VALUE = "[redacted]"
+        private val SENSITIVE_EXPORT_KEY_MARKERS = listOf(
+            "access_token",
+            "refresh_token",
+            "token",
+            "secret",
+            "password",
+            "credential",
+            "authorization",
+            "api_key",
+            "apikey",
+        )
     }
 }

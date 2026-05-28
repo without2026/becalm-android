@@ -37,9 +37,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import javax.inject.Inject
 
 // ─── UI types ─────────────────────────────────────────────────────────────────
@@ -122,6 +125,12 @@ public enum class TodayCommitmentRowTreatment {
     SCHEDULE,
 }
 
+public enum class ScheduleRangeFilter {
+    UPCOMING,
+    PAST,
+    ALL,
+}
+
 public data class TodayPersonFocus(
     val displayName: String?,
     val commitmentCount: Int,
@@ -133,9 +142,14 @@ public data class TodayProcessingStatusUi(
     val activeItemCount: Int = 0,
     val latestPhase: ProcessingPhase? = null,
     val latestUpdatedAt: Instant? = null,
+    val dismissKey: String? = null,
+    val dismissed: Boolean = false,
 ) {
     val visible: Boolean
-        get() = activeCount > 0 || actionCount > 0 || latestPhase != null
+        get() = !dismissed && (activeCount > 0 || actionCount > 0)
+
+    val activeWorkCount: Int
+        get() = activeItemCount.takeIf { it > 0 } ?: activeCount
 }
 
 public data class ScheduleConflictReviewItem(
@@ -193,6 +207,8 @@ public data class TodayUiState(
     val loading: Boolean = true,
     val timeline: List<TimelineItem> = emptyList(),
     val personFocus: List<TodayPersonFocus> = buildTodayPersonFocus(timeline),
+    val scheduleRangeFilter: ScheduleRangeFilter = ScheduleRangeFilter.ALL,
+    val today: LocalDate? = null,
     val sourceStatus: Map<String, SourceStatusUi> = emptyMap(),
     val overallSyncing: Boolean = false,
     val overall: OverallSyncState = OverallSyncState.Idle,
@@ -273,6 +289,19 @@ public class TodayViewModel @Inject constructor(
     /** Drives the [PullRefreshIndicator] while [onPullRefresh] is in flight (TDY-006). */
     private val refreshingFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private val refreshMessageFlow: MutableStateFlow<UiMessage?> = MutableStateFlow(null)
+    private val scheduleRangeFilterFlow: MutableStateFlow<ScheduleRangeFilter> =
+        MutableStateFlow(ScheduleRangeFilter.ALL)
+    private val dismissedProcessingKeyFlow: MutableStateFlow<String?> = MutableStateFlow(null)
+
+    private val baseState: StateFlow<TodayUiState> = stateSource.observeUiState(
+        userIdFlow = userIdFlow,
+        refreshingFlow = refreshingFlow,
+        scheduleRangeFilterFlow = scheduleRangeFilterFlow,
+    ).stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = TodayUiState(loading = true),
+    )
 
     /**
      * Observable state consumed by the Today screen composable.
@@ -282,13 +311,22 @@ public class TodayViewModel @Inject constructor(
      * combined emission sets [TodayUiState.error].
      */
     public val state: StateFlow<TodayUiState> = combine(
-        stateSource.observeUiState(
-            userIdFlow = userIdFlow,
-            refreshingFlow = refreshingFlow,
-        ),
+        baseState,
         refreshMessageFlow,
-    ) { state, message ->
-        state.copy(message = message)
+        dismissedProcessingKeyFlow,
+    ) { state, message, dismissedKey ->
+        val processingStatus = state.processingStatus
+        state.copy(
+            processingStatus = if (
+                processingStatus.dismissKey != null &&
+                processingStatus.dismissKey == dismissedKey
+            ) {
+                processingStatus.copy(dismissed = true)
+            } else {
+                processingStatus
+            },
+            message = message,
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -299,8 +337,28 @@ public class TodayViewModel @Inject constructor(
         refreshMessageFlow.value = null
     }
 
+    public fun onScheduleRangeChange(filter: ScheduleRangeFilter) {
+        scheduleRangeFilterFlow.value = filter
+    }
+
+    public fun onDismissProcessingStatus() {
+        dismissedProcessingKeyFlow.value = baseState.value.processingStatus.dismissKey
+    }
+
     init {
         logger.d(TAG, "init")
+        viewModelScope.launch {
+            var hadActiveWork = false
+            baseState
+                .map { state -> state.processingStatus.activeWorkCount }
+                .distinctUntilChanged()
+                .collect { activeWorkCount ->
+                    if (hadActiveWork && activeWorkCount == 0) {
+                        refreshMessageFlow.value = UiMessage.resource(R.string.today_processing_completed_message)
+                    }
+                    hadActiveWork = activeWorkCount > 0
+                }
+        }
     }
 
     override fun onCleared() {

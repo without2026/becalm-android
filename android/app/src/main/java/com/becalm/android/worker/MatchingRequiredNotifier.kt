@@ -50,7 +50,7 @@ public object MatchingRequiredNotifier {
         ensureChannel(context)
         val spec = buildNotificationSpec(context, unmatchedCount)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_stat_becalm)
             .setContentTitle(spec.title)
             .setContentText(spec.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(spec.body))

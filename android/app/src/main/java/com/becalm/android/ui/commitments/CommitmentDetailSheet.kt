@@ -1,5 +1,6 @@
 package com.becalm.android.ui.commitments
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,10 +12,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,6 +28,9 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -35,6 +44,8 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.ui.components.ErrorState
@@ -49,8 +60,7 @@ import kotlinx.coroutines.flow.Flow
 /**
  * Bottom-sheet host for CMT-003 + EDIT-008 + MAN-004. Opened via
  * [BecalmRoute.CommitmentDetail]; renders the full quote, source context,
- * counterparty, due info, 5 action buttons, last-edited footer, and supersede
- * backlink.
+ * counterparty, due info, action controls, last-edited footer, and supersede backlink.
  *
  * VM wiring note: the sheet resolves two Hilt view-models via `hiltViewModel()`.
  * [detailViewModel] owns the reactive observe-by-id flow; [managementViewModel] is
@@ -209,7 +219,8 @@ internal fun DetailSheetContent(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 12.dp)
-            .verticalScroll(scrollState),
+            .verticalScroll(scrollState)
+            .testTag("commitment-detail-content"),
     ) {
         // 1. Title
         Text(
@@ -410,57 +421,159 @@ private fun ActionButtonRow(
     //   [완료]   — PENDING / REMINDED / FOLLOWED_UP / OVERDUE
     //   [취소]   — PENDING / REMINDED / FOLLOWED_UP / OVERDUE
     //   [편집]   — not CANCELLED, not soft-deleted (EDIT-001)
-    val remindEnabled = CommitmentSheetAction.REMIND in actionButtons.availableActions
-    val followUpEnabled = CommitmentSheetAction.FOLLOW_UP in actionButtons.availableActions
-    val completeEnabled = CommitmentSheetAction.COMPLETE in actionButtons.availableActions
-    val cancelEnabled = completeEnabled
+    val actions = buildList {
+        if (CommitmentSheetAction.REMIND in actionButtons.availableActions) {
+            add(
+                CommitmentDetailActionSpec(
+                    kind = CommitmentDetailActionKind.REMIND,
+                    labelRes = R.string.commitment_action_remind,
+                    testTag = "commitment-detail-remind",
+                    onClick = onRemind,
+                ),
+            )
+        }
+        if (CommitmentSheetAction.FOLLOW_UP in actionButtons.availableActions) {
+            add(
+                CommitmentDetailActionSpec(
+                    kind = CommitmentDetailActionKind.FOLLOW_UP,
+                    labelRes = R.string.commitment_action_follow_up,
+                    testTag = "commitment-detail-follow-up",
+                    onClick = onFollowUp,
+                ),
+            )
+        }
+        if (CommitmentSheetAction.COMPLETE in actionButtons.availableActions) {
+            add(
+                CommitmentDetailActionSpec(
+                    kind = CommitmentDetailActionKind.COMPLETE,
+                    labelRes = R.string.commitment_action_complete,
+                    testTag = "commitment-detail-complete",
+                    onClick = onComplete,
+                ),
+            )
+        }
+        if (CommitmentSheetAction.CANCEL in actionButtons.availableActions) {
+            add(
+                CommitmentDetailActionSpec(
+                    kind = CommitmentDetailActionKind.CANCEL,
+                    labelRes = R.string.commitment_action_cancel,
+                    testTag = "commitment-detail-cancel",
+                    onClick = onCancel,
+                ),
+            )
+        }
+    }
     val editEnabled = actionButtons.editEnabled && !isDeleted
+    val primary = actions.firstOrNull { it.kind == CommitmentDetailActionKind.COMPLETE }
+        ?: actions.firstOrNull { it.kind == CommitmentDetailActionKind.FOLLOW_UP }
+        ?: actions.firstOrNull { it.kind == CommitmentDetailActionKind.REMIND }
+        ?: if (editEnabled) {
+            CommitmentDetailActionSpec(
+                kind = CommitmentDetailActionKind.EDIT,
+                labelRes = R.string.commitment_action_edit,
+                testTag = "commitment-detail-edit",
+                onClick = onEdit,
+            )
+        } else {
+            null
+        }
+    val secondary = actions.filter { action ->
+        action != primary &&
+            action.kind in setOf(CommitmentDetailActionKind.REMIND, CommitmentDetailActionKind.FOLLOW_UP)
+    }
+    val overflow = buildList {
+        if (editEnabled && primary?.kind != CommitmentDetailActionKind.EDIT) {
+            add(
+                CommitmentDetailActionSpec(
+                    kind = CommitmentDetailActionKind.EDIT,
+                    labelRes = R.string.commitment_action_edit,
+                    testTag = "commitment-detail-edit",
+                    onClick = onEdit,
+                ),
+            )
+        }
+        actions
+            .filter { action -> action != primary && action !in secondary }
+            .forEach(::add)
+    }
+    var overflowExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedButton(
-                onClick = onRemind,
-                enabled = remindEnabled,
+        primary?.let { action ->
+            BecalmButton(
+                text = stringResource(action.labelRes),
+                onClick = action.onClick,
                 modifier = Modifier
-                    .weight(1f)
-                    .testTag("commitment-detail-remind"),
-            ) { Text(text = stringResource(R.string.commitment_action_remind)) }
-            OutlinedButton(
-                onClick = onFollowUp,
-                enabled = followUpEnabled,
-                modifier = Modifier.weight(1f),
-            ) { Text(text = stringResource(R.string.commitment_action_follow_up)) }
-            OutlinedButton(
-                onClick = onComplete,
-                enabled = completeEnabled,
-                modifier = Modifier.weight(1f),
-            ) { Text(text = stringResource(R.string.commitment_action_complete)) }
+                    .fillMaxWidth()
+                    .testTag("commitment-detail-primary-action"),
+            )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedButton(
-                onClick = onCancel,
-                enabled = cancelEnabled,
-                modifier = Modifier.weight(1f),
-            ) { Text(text = stringResource(R.string.commitment_action_cancel)) }
-            OutlinedButton(
-                onClick = onEdit,
-                enabled = editEnabled,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("commitment-detail-edit"),
-            ) { Text(text = stringResource(R.string.commitment_action_edit)) }
+        if (secondary.isNotEmpty() || overflow.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                secondary.forEach { action ->
+                    BecalmButton(
+                        text = stringResource(action.labelRes),
+                        onClick = action.onClick,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag(action.testTag),
+                        variant = BecalmButtonVariant.Secondary,
+                    )
+                }
+                if (overflow.isNotEmpty()) {
+                    Box {
+                        IconButton(
+                            onClick = { overflowExpanded = true },
+                            modifier = Modifier.testTag("commitment-detail-actions-more"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.MoreVert,
+                                contentDescription = stringResource(R.string.commitment_action_more),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = overflowExpanded,
+                            onDismissRequest = { overflowExpanded = false },
+                        ) {
+                            overflow.forEach { action ->
+                                DropdownMenuItem(
+                                    text = { Text(text = stringResource(action.labelRes)) },
+                                    onClick = {
+                                        overflowExpanded = false
+                                        action.onClick()
+                                    },
+                                    modifier = Modifier.testTag(action.testTag),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
+
+private enum class CommitmentDetailActionKind {
+    REMIND,
+    FOLLOW_UP,
+    COMPLETE,
+    CANCEL,
+    EDIT,
+}
+
+private data class CommitmentDetailActionSpec(
+    val kind: CommitmentDetailActionKind,
+    @StringRes val labelRes: Int,
+    val testTag: String,
+    val onClick: () -> Unit,
+)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

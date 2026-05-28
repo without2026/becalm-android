@@ -45,7 +45,7 @@ routes:
     # Canonical first-run onboarding after Login. Required legal/auth gates are
     # already satisfied; this one screen groups recommended permissions
     # (recordings, contacts, notifications) and optional sources (mail/calendar).
-    # System permission dialogs, SAF picker, and OAuth browser flows may appear,
+    # System permission dialogs and OAuth browser flows may appear,
     # but the app must return to this screen and update row status.
 
   - path: /onboarding/recording-folder
@@ -127,20 +127,21 @@ routes:
     # DataStore onboarding_completed=true written only after this screen is dismissed or sync completes.
 
   # -------- MAIN APP (3-tab bottom nav) --------
+  # Bottom nav order: /persons, /today, /commitments.
 
   - path: /today
     screen: TodayTimelineScreen
     data: ["Room commitments query", "Room calendar_events query", "ING-011 foreground catch-up", "SYNC-006 upload flush"]
     components: [OverallSyncIndicator, SourceStatusStrip, TodayTimeline, CommitmentItem, CalendarEventItem, BottomNavigationBar]
     auth: required
-    # Tab 1: 오늘의 타임라인. Settings 접근: 우상단 아이콘 탭 → /settings. HamburgerMenu 없음.
+    # Supporting tab 2: 오늘의 타임라인. Settings 접근: 우상단 아이콘 탭 → /settings. HamburgerMenu 없음.
 
   - path: /persons
     screen: PersonsScreen
     data: ["Room person_interactions aggregate", "Room persons/person_identities mirror", "Room persons_enrichment join", "ING-011 foreground catch-up", "ENR-005 enrichment refresh"]
     components: [PersonCard, UnassignedSection, SearchBar, OfflineBadge, BottomNavigationBar]
     auth: required
-    # Tab 2: 인물. Prototype-aligned person-first layout: "미이행 약속" 섹션을
+    # Primary tab 1: 인물. Prototype-aligned person-first layout: "미이행 약속" 섹션을
     # 먼저 배치하고 나머지는 "최근 연락"으로 배치한다. PersonCard에 enriched
     # 표시명 + DNBadge(미이행 약속 수) + 최근 이벤트 미리보기를 표시한다.
     # 직접 녹음 UI는 이 화면에 추가하지 않는다.

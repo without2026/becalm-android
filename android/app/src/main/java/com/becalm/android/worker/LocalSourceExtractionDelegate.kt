@@ -8,11 +8,14 @@ import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
+import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceExtractionInputAdapter
@@ -27,6 +30,7 @@ internal class LocalSourceExtractionDelegate(
     private val commitmentProgressEventDao: CommitmentProgressEventDao,
     private val personIndexDao: PersonIndexDao,
     private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
+    private val meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao? = null,
     private val sourceExtractionApi: SourceExtractionApi,
     private val rawIngestionRepository: RawIngestionRepository,
     private val userPrefsStore: UserPrefsStore,
@@ -64,14 +68,24 @@ internal class LocalSourceExtractionDelegate(
 
     suspend fun markFailed(entity: RawIngestionEventEntity, reasonCode: String?) {
         logger.w(tag, "mark failed id=${redact(entity.id)} reason=$reasonCode")
+        val now = Clock.System.now()
         rawIngestionEventDao.update(
             entity.copy(
                 syncStatus = "failed",
                 retryCount = entity.retryCount + 1,
-                lastAttemptAt = Clock.System.now(),
+                lastAttemptAt = now,
                 lastError = reasonCode,
             ),
         )
+        if (entity.sourceType == SourceType.MEETING || entity.sourceType == SourceType.CALL_RECORDING) {
+            meetingSpeakerPreviewDao?.markStatus(
+                rawEventId = entity.id,
+                status = MeetingSpeakerPreviewStatus.FAILED,
+                lastError = reasonCode,
+                updatedAt = now,
+            )
+        }
+        processingStatusRepository.recordError(entity.sourceType, reasonCode)
     }
 
     fun uploadRunner(): SourceExtractionUploadRunner =
@@ -89,6 +103,7 @@ internal class LocalSourceExtractionDelegate(
                 workScheduler = workScheduler,
                 logger = logger,
                 selfIdentityAnchorDao = selfIdentityAnchorDao,
+                meetingSpeakerPreviewDao = meetingSpeakerPreviewDao,
             ),
             processingStatusRepository = processingStatusRepository,
             moshi = moshi,

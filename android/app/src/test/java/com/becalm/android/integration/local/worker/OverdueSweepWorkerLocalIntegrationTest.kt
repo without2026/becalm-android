@@ -130,7 +130,7 @@ class OverdueSweepWorkerLocalIntegrationTest {
         dueAt = dueAt,
         dueHint = null,
         actionState = actionState,
-        sourceType = SourceType.GMAIL,
+        sourceType = SourceType.MANUAL,
         sourceRef = "source-ref-$id",
         createdAt = Instant.parse("2026-04-20T00:00:00Z"),
         updatedAt = Instant.parse("2026-04-20T00:00:00Z"),

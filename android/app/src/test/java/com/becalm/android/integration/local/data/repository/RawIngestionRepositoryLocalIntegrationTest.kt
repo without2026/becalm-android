@@ -3,6 +3,8 @@ package com.becalm.android.integration.local.data.repository
 import app.cash.turbine.test
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
+import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.SyncCursorStoreImpl
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -15,9 +17,11 @@ import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.slot
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.After
@@ -127,6 +131,68 @@ class RawIngestionRepositoryLocalIntegrationTest {
         assertEquals("synced", row.syncStatus)
         assertEquals("customer@example.com", row.counterpartyRef)
         assertEquals(1, row.commitmentsExtractedCount)
+    }
+
+    @Test
+    // spec: P0-2 keyset resume after WorkManager/process restart
+    fun `refreshSince resumes from stored keyset cursor after page cap and repository restart`() = runTest {
+        val cursorStore = SyncCursorStoreImpl(
+            dataStore = LocalIntegrationSupport.prefsDataStore("raw-mirror-restart-cursors"),
+        )
+        val firstRepository = cursorBackedRepository(cursorStore)
+        val resumedRepository = cursorBackedRepository(cursorStore)
+        coEvery {
+            api.getRawIngestionEvents(
+                cursor = null,
+                limit = any(),
+                since = null,
+                sourceType = SourceType.GMAIL,
+            )
+        } returns rawPage(1, hasMore = true)
+        (1..4).forEach { previous ->
+            coEvery {
+                api.getRawIngestionEvents(
+                    cursor = "ks1:page-$previous",
+                    limit = any(),
+                    since = null,
+                    sourceType = SourceType.GMAIL,
+                )
+            } returns rawPage(previous + 1, hasMore = true)
+        }
+        coEvery {
+            api.getRawIngestionEvents(
+                cursor = "ks1:page-5",
+                limit = any(),
+                since = null,
+                sourceType = SourceType.GMAIL,
+            )
+        } returns rawPage(6, hasMore = false)
+
+        val firstResult = firstRepository.refreshSince(USER_ID, SourceType.GMAIL, since = null)
+
+        assertTrue(firstResult is BecalmResult.Success)
+        assertEquals(5, (firstResult as BecalmResult.Success).value.fetched)
+        assertTrue(firstResult.value.hasMore)
+        assertEquals("ks1:page-5", cursorStore.observeCursor("raw_ingestion_events:gmail").first())
+        val resumedResult = resumedRepository.refreshSince(USER_ID, SourceType.GMAIL, since = null)
+
+        assertTrue(resumedResult is BecalmResult.Success)
+        assertEquals(1, (resumedResult as BecalmResult.Success).value.fetched)
+        assertEquals("ks1:page-6", cursorStore.observeCursor("raw_ingestion_events:gmail").first())
+        coVerify(exactly = 1) {
+            api.getRawIngestionEvents(
+                cursor = "ks1:page-5",
+                limit = any(),
+                since = null,
+                sourceType = SourceType.GMAIL,
+            )
+        }
+        db.rawIngestionEventDao()
+            .observeRecentForSourceType(USER_ID, SourceType.GMAIL, limit = 20)
+            .test {
+                assertEquals((6 downTo 1).map { "server-raw-$it" }, awaitItem().map { it.id })
+                cancelAndIgnoreRemainingEvents()
+            }
     }
 
     @Test
@@ -306,6 +372,49 @@ class RawIngestionRepositoryLocalIntegrationTest {
             eventTitle = "subject",
             timestamp = Instant.parse("2026-04-28T00:00:00Z"),
         )
+
+    private fun cursorBackedRepository(cursorStore: SyncCursorStore): RawIngestionRepositoryImpl =
+        RawIngestionRepositoryImpl(
+            dao = db.rawIngestionEventDao(),
+            apiProvider = Provider { api },
+            emailBodyRepositoryProvider = Provider { noopEmailBodyRepository },
+            cursorStore = cursorStore,
+            logger = RecordingLogger(),
+        )
+
+    private fun rawPage(page: Int, hasMore: Boolean): Response<RawIngestionEventsResponse> =
+        Response.success(
+            RawIngestionEventsResponse(
+                data = listOf(
+                    RawIngestionEventDto(
+                        id = "server-raw-$page",
+                        clientEventId = "gmail-client-$page",
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "gmail-message-$page",
+                        counterpartyRef = "customer-$page@example.com",
+                        eventTitle = "page $page",
+                        eventSnippet = "snippet $page",
+                        folder = "inbox",
+                        commitmentsExtractedCount = page,
+                        timestamp = Instant.parse("2026-04-28T00:${page.toString().padStart(2, '0')}:00Z"),
+                    ),
+                ),
+                cursor = "ks1:page-$page",
+                hasMore = hasMore,
+            ),
+        )
+
+    private val noopEmailBodyRepository = object : EmailBodyRepository {
+        override suspend fun insert(entity: EmailBodyEntity) = Unit
+        override suspend fun getByRawEventId(rawEventId: String): EmailBodyEntity? = null
+        override suspend fun findByProviderMessage(
+            userId: String,
+            sourceType: String,
+            folder: String,
+            providerMessageId: String,
+        ): EmailBodyEntity? = null
+        override suspend fun markParseFailed(id: String) = Unit
+    }
 
     private companion object {
         const val USER_ID = "user-1"

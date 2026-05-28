@@ -410,7 +410,7 @@ public interface PersonIndexDao {
           AND i.interaction_kind = 'commitment'
           AND i.source_event_id IS NOT NULL
           AND TRIM(i.source_event_id) != ''
-          AND EXISTS (
+          AND NOT EXISTS (
               SELECT 1
               FROM source_event_participants sep
               WHERE sep.user_id = i.user_id
@@ -448,7 +448,7 @@ public interface PersonIndexDao {
               WHERE raw_by_id.user_id = i.user_id
                 AND raw_by_id.id = i.source_event_id
           )
-          AND EXISTS (
+          AND NOT EXISTS (
               SELECT 1
               FROM source_event_participants sep
               JOIN raw_ingestion_events raw_by_ref
@@ -507,9 +507,20 @@ public interface PersonIndexDao {
 
     @Query(
         """
-        SELECT COUNT(*) FROM unmatched_person_interactions
-        WHERE user_id = :userId
-          AND source_type IN ('meeting', 'message_screenshot')
+        SELECT COUNT(DISTINCT source_ref) FROM unmatched_person_interactions AS unmatched
+        WHERE unmatched.user_id = :userId
+          AND unmatched.source_type IN ('meeting', 'message_screenshot')
+          AND NOT EXISTS (
+              SELECT 1
+              FROM source_event_participants AS participant
+              WHERE participant.user_id = unmatched.user_id
+                AND participant.source_type = unmatched.source_type
+                AND (
+                    ('raw:' || participant.source_event_id) = unmatched.source_ref
+                    OR participant.source_event_id = REPLACE(unmatched.source_ref, 'raw:', '')
+                    OR participant.source_ref = unmatched.source_ref
+                )
+          )
         """,
     )
     public fun observeEvidenceImportUnmatchedInteractionCount(userId: String): Flow<Int>
@@ -525,13 +536,164 @@ public interface PersonIndexDao {
 
     @Query(
         """
-        SELECT COUNT(*) FROM source_event_participants
+        SELECT COUNT(DISTINCT COALESCE(NULLIF(source_event_id, ''), NULLIF(source_ref, ''), id))
+        FROM source_event_participants
         WHERE user_id = :userId
           AND source_type IN ('meeting', 'message_screenshot')
           AND resolution_status IN ('unresolved', 'suggested_self')
+          AND COALESCE(LOWER(relation_to_user), '') != 'self'
+          AND NOT (
+            LOWER(role) = 'mentioned'
+            AND LOWER(relation_to_user) = 'referenced'
+          )
+          AND NOT (
+            COALESCE(identity_type, '') = 'speaker_label'
+            OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(normalized_value, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+            OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(display_name_raw, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+            OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(evidence, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+          )
+          AND (
+            NULLIF(TRIM(COALESCE(email_raw, '')), '') IS NOT NULL
+            OR NULLIF(TRIM(COALESCE(phone_raw, '')), '') IS NOT NULL
+            OR (
+                COALESCE(identity_type, '') NOT IN ('organization', 'speaker_label')
+                AND (
+                    (
+                        NULLIF(TRIM(COALESCE(display_name_raw, '')), '') IS NOT NULL
+                        AND NOT LOWER(REPLACE(REPLACE(TRIM(display_name_raw), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                    )
+                    OR (
+                        NULLIF(TRIM(COALESCE(normalized_value, '')), '') IS NOT NULL
+                        AND NOT LOWER(REPLACE(REPLACE(TRIM(normalized_value), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                    )
+                )
+            )
+          )
+          AND (
+            source_type != 'meeting'
+            OR NULLIF(TRIM(COALESCE(email_raw, '')), '') IS NOT NULL
+            OR NULLIF(TRIM(COALESCE(phone_raw, '')), '') IS NOT NULL
+            OR LOWER(relation_to_user) = 'counterparty'
+            OR LOWER(role) = 'counterparty'
+          )
         """,
     )
     public fun observeEvidenceImportUnresolvedSourceEventParticipantCount(userId: String): Flow<Int>
+
+    @Query(
+        """
+        UPDATE source_event_participants
+        SET resolution_status = 'ignored'
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+          AND resolution_status IN ('unresolved', 'suggested_self')
+          AND NOT (
+            COALESCE(LOWER(relation_to_user), '') != 'self'
+            AND NOT (
+                LOWER(role) = 'mentioned'
+                AND LOWER(relation_to_user) = 'referenced'
+            )
+            AND NOT (
+                COALESCE(identity_type, '') = 'speaker_label'
+                OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(normalized_value, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(display_name_raw, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(evidence, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+            )
+            AND (
+                NULLIF(TRIM(COALESCE(email_raw, '')), '') IS NOT NULL
+                OR NULLIF(TRIM(COALESCE(phone_raw, '')), '') IS NOT NULL
+                OR (
+                    COALESCE(identity_type, '') NOT IN ('organization', 'speaker_label')
+                    AND (
+                        (
+                            NULLIF(TRIM(COALESCE(display_name_raw, '')), '') IS NOT NULL
+                            AND NOT LOWER(REPLACE(REPLACE(TRIM(display_name_raw), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                        )
+                        OR (
+                            NULLIF(TRIM(COALESCE(normalized_value, '')), '') IS NOT NULL
+                            AND NOT LOWER(REPLACE(REPLACE(TRIM(normalized_value), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                        )
+                    )
+                )
+            )
+            AND (
+                source_type != 'meeting'
+                OR NULLIF(TRIM(COALESCE(email_raw, '')), '') IS NOT NULL
+                OR NULLIF(TRIM(COALESCE(phone_raw, '')), '') IS NOT NULL
+                OR LOWER(relation_to_user) = 'counterparty'
+                OR LOWER(role) = 'counterparty'
+            )
+          )
+        """,
+    )
+    public suspend fun ignoreNonReviewableEvidenceImportParticipants(userId: String): Int
+
+    @Query(
+        """
+        DELETE FROM unmatched_person_interactions
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+          AND EXISTS (
+              SELECT 1
+              FROM source_event_participants AS participant
+              WHERE participant.user_id = unmatched_person_interactions.user_id
+                AND participant.source_type = unmatched_person_interactions.source_type
+                AND (
+                    ('raw:' || participant.source_event_id) = unmatched_person_interactions.source_ref
+                    OR participant.source_event_id = REPLACE(unmatched_person_interactions.source_ref, 'raw:', '')
+                    OR participant.source_ref = unmatched_person_interactions.source_ref
+                )
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM source_event_participants AS participant
+              WHERE participant.user_id = unmatched_person_interactions.user_id
+                AND participant.source_type = unmatched_person_interactions.source_type
+                AND (
+                    ('raw:' || participant.source_event_id) = unmatched_person_interactions.source_ref
+                    OR participant.source_event_id = REPLACE(unmatched_person_interactions.source_ref, 'raw:', '')
+                    OR participant.source_ref = unmatched_person_interactions.source_ref
+                )
+                AND participant.resolution_status IN ('unresolved', 'suggested_self')
+                AND COALESCE(LOWER(participant.relation_to_user), '') != 'self'
+                AND NOT (
+                    LOWER(participant.role) = 'mentioned'
+                    AND LOWER(participant.relation_to_user) = 'referenced'
+                )
+                AND NOT (
+                    COALESCE(participant.identity_type, '') = 'speaker_label'
+                    OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(participant.normalized_value, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                    OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(participant.display_name_raw, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                    OR LOWER(REPLACE(REPLACE(TRIM(COALESCE(participant.evidence, '')), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                )
+                AND (
+                    NULLIF(TRIM(COALESCE(participant.email_raw, '')), '') IS NOT NULL
+                    OR NULLIF(TRIM(COALESCE(participant.phone_raw, '')), '') IS NOT NULL
+                    OR (
+                        COALESCE(participant.identity_type, '') NOT IN ('organization', 'speaker_label')
+                        AND (
+                            (
+                                NULLIF(TRIM(COALESCE(participant.display_name_raw, '')), '') IS NOT NULL
+                                AND NOT LOWER(REPLACE(REPLACE(TRIM(participant.display_name_raw), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                            )
+                            OR (
+                                NULLIF(TRIM(COALESCE(participant.normalized_value, '')), '') IS NOT NULL
+                                AND NOT LOWER(REPLACE(REPLACE(TRIM(participant.normalized_value), ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*'
+                            )
+                        )
+                    )
+                )
+                AND (
+                    participant.source_type != 'meeting'
+                    OR NULLIF(TRIM(COALESCE(participant.email_raw, '')), '') IS NOT NULL
+                    OR NULLIF(TRIM(COALESCE(participant.phone_raw, '')), '') IS NOT NULL
+                    OR LOWER(participant.relation_to_user) = 'counterparty'
+                    OR LOWER(participant.role) = 'counterparty'
+                )
+          )
+        """,
+    )
+    public suspend fun deleteEvidenceImportUnmatchedWithoutReviewableParticipants(userId: String): Int
 
     @Query(
         """

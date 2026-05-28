@@ -10,12 +10,14 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
 import com.becalm.android.data.remote.dto.MeetingTranscriptSegmentDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.meeting.MeetingImportFilePolicy
+import com.becalm.android.domain.meeting.MeetingSpeakerMappingsJson
 import com.becalm.android.worker.WorkScheduler
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
@@ -116,6 +118,7 @@ public class SourceImportRepository @Inject constructor(
                     rawEventId = rawEventId.toPlainRequestBody(),
                     durationSeconds = (readAudioDurationSeconds(uri) ?: 0).toString().toPlainRequestBody(),
                     sourceType = SourceType.MEETING.toPlainRequestBody(),
+                    processingConfirmed = true.toString().toPlainRequestBody(),
                 )
                 if (!response.isSuccessful) {
                     return@withContext BecalmResult.Failure(BecalmError.Network(response.code(), "meeting speaker preview failed"))
@@ -156,6 +159,57 @@ public class SourceImportRepository @Inject constructor(
     ): BecalmResult<MeetingImportResult> =
         meetingImportRepository.confirmSpeakerReview(rawEventId, speakerReviewContext)
 
+    public suspend fun retryFailedEvidenceImports(): BecalmResult<Int> =
+        withContext(ioDispatcher) {
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                    ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+                val failedRows = when (
+                    val result = rawIngestionRepository.findFailedEvidenceImportsForRetry(userId)
+                ) {
+                    is BecalmResult.Success -> result.value
+                    is BecalmResult.Failure -> return@withContext result
+                }
+                var enqueued = 0
+                val now = Clock.System.now()
+                for (event in failedRows) {
+                    val sourceRef = event.sourceRef?.takeIf { it.isNotBlank() } ?: continue
+                    when (
+                        val reset = rawIngestionRepository.resetFailedEvidenceImportForRetry(
+                            id = event.id,
+                            userId = userId,
+                            now = now,
+                        )
+                    ) {
+                        is BecalmResult.Success -> Unit
+                        is BecalmResult.Failure -> return@withContext reset
+                    }
+                    when (event.sourceType) {
+                        SourceType.MESSAGE_SCREENSHOT -> {
+                            workScheduler.enqueueMessageScreenshotUpload(event.id)
+                            enqueued++
+                        }
+                        SourceType.MEETING -> {
+                            enqueued += retryMeetingEvidenceImport(event, sourceRef, now)
+                        }
+                    }
+                }
+                if (enqueued == 0) {
+                    BecalmResult.Failure(
+                        BecalmError.Validation(
+                            field = "failed_evidence",
+                            message = "no retryable failed evidence imports",
+                        ),
+                    )
+                } else {
+                    BecalmResult.Success(enqueued)
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                BecalmResult.Failure(BecalmError.Unknown(t))
+            }
+        }
+
     public suspend fun importMessageScreenshot(uri: Uri): BecalmResult<SourceImportResult> =
         withContext(ioDispatcher) {
             try {
@@ -193,7 +247,8 @@ public class SourceImportRepository @Inject constructor(
                     clientEventId = deterministicClientEventId(savedFile.displayName),
                     sourceType = SourceType.MESSAGE_SCREENSHOT,
                     sourceRef = Uri.fromFile(savedFile.file).toString(),
-                    eventTitle = meta.displayName,
+                    eventTitle = ImportedEvidenceTitleFormatter.messageScreenshot(occurredAt),
+                    eventSnippet = ImportedEvidenceTitleFormatter.originalFileSnippet(meta.displayName),
                     timestamp = occurredAt,
                     syncStatus = syncStatus,
                 )
@@ -219,6 +274,46 @@ public class SourceImportRepository @Inject constructor(
                 BecalmResult.Failure(BecalmError.Unknown(t))
             }
         }
+
+    private suspend fun retryMeetingEvidenceImport(
+        event: RawIngestionEventEntity,
+        sourceRef: String,
+        now: Instant,
+    ): Int {
+        val preview = meetingSpeakerPreviewDao.findByRawEventId(event.id)
+        val speakerPreviewId = preview?.speakerPreviewId?.takeIf { it.isNotBlank() }
+        val selectedSelfSpeakerId = preview?.selectedSelfSpeakerId?.takeIf { it.isNotBlank() }
+        val speakers = preview?.speakersJson
+            ?.let { speakerListAdapter.fromJson(it) }
+            .orEmpty()
+        if (speakerPreviewId != null && selectedSelfSpeakerId != null && speakers.isNotEmpty()) {
+            meetingSpeakerPreviewDao.markStatus(
+                rawEventId = event.id,
+                status = MeetingSpeakerPreviewStatus.EXTRACT_PENDING,
+                lastError = null,
+                updatedAt = now,
+            )
+            workScheduler.enqueueVoiceUpload(
+                rawEventId = event.id,
+                audioUri = sourceRef,
+                selfSpeakerId = selectedSelfSpeakerId,
+                speakerMappingsJson = MeetingSpeakerMappingsJson.encodeMeetingSelf(
+                    speakers = speakers,
+                    selfSpeakerId = selectedSelfSpeakerId,
+                ),
+                speakerPreviewId = speakerPreviewId,
+            )
+        } else {
+            meetingSpeakerPreviewDao.markStatus(
+                rawEventId = event.id,
+                status = MeetingSpeakerPreviewStatus.PENDING,
+                lastError = null,
+                updatedAt = now,
+            )
+            workScheduler.enqueueMeetingSpeakerPreview(rawEventId = event.id, audioUri = sourceRef)
+        }
+        return 1
+    }
 
     private fun copyIntoMessageScreenshotFolder(
         resolver: ContentResolver,
@@ -292,8 +387,14 @@ public class SourceImportRepository @Inject constructor(
                 )
             }
         }
-        return OpenableMeta(displayName = fallbackName, byteSize = null)
+        return OpenableMeta(displayName = uri.pathFileName() ?: fallbackName, byteSize = null)
     }
+
+    private fun Uri.pathFileName(): String? =
+        lastPathSegment
+            ?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::sanitizeFileName)
 
     private fun isAllowedImage(mimeType: String?, displayName: String): Boolean {
         val normalizedMime = mimeType?.lowercase()

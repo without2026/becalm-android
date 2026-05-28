@@ -5,12 +5,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ApplicationProvider
@@ -18,6 +21,7 @@ import com.becalm.android.R
 import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.LoginForm
 import com.becalm.android.ui.auth.LoginScreen
+import com.becalm.android.ui.auth.PhoneOtpUiState
 import com.becalm.android.ui.auth.SignUpEmailConfirmationContent
 import com.becalm.android.ui.auth.SignUpForm
 import com.becalm.android.ui.auth.SplashContent
@@ -67,15 +71,15 @@ class AuthUiTest {
     fun `splash screen routes signed in unfinished user to onboarding setup`() {
         assertSplashRoute(
             AuthUiState.SignedIn(userId = "user-1", onboardingCompleted = false),
-            BecalmRoute.OnboardingSetup.path,
+            BecalmRoute.OnboardingSetupWelcome.path,
         )
     }
 
     @Test
-    fun `splash screen routes signed in finished user to today`() {
+    fun `splash screen routes signed in finished user to people`() {
         assertSplashRoute(
             AuthUiState.SignedIn(userId = "user-1", onboardingCompleted = true),
-            BecalmRoute.Today.path,
+            BecalmRoute.Persons.path,
         )
     }
 
@@ -122,13 +126,76 @@ class AuthUiTest {
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.login_cta)).performClick()
+        composeRule.onNodeWithText(string(R.string.login_cta)).performScrollTo().performClick()
 
-        composeRule.onNodeWithText(string(R.string.login_error_empty_fields)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.login_error_empty_fields)).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("google-sign-in-button").assertIsNotEnabled()
         composeRule.onNodeWithText(string(R.string.login_google_cta)).assertIsNotEnabled()
         composeRule.onNodeWithText(string(R.string.login_google_setup_required)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.login_email_section_label)).assertIsDisplayed()
+    }
+
+    @Test
+    fun `login form hides phone cta when rollback flag disables phone auth`() {
+        composeRule.setContent {
+            BecalmTheme {
+                LoginForm(
+                    isLoading = false,
+                    googleSignInEnabled = true,
+                    phoneSignInEnabled = false,
+                    onSignIn = { _, _ -> },
+                    onSignUp = {},
+                    onGoogleSignIn = {},
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithTag("phone-sign-in-button").assertCountEquals(0)
+        composeRule.onNodeWithText(string(R.string.login_email_section_label)).assertIsDisplayed()
+    }
+
+    @Test
+    fun `login form phone otp panel requests and verifies entered code`() {
+        var phoneOtpState by mutableStateOf(PhoneOtpUiState())
+        var requestedPhone: String? = null
+        var verifiedPhone: String? = null
+        var verifiedCode: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                LoginForm(
+                    isLoading = false,
+                    googleSignInEnabled = true,
+                    phoneOtpState = phoneOtpState,
+                    onSignIn = { _, _ -> },
+                    onSignUp = {},
+                    onGoogleSignIn = {},
+                    onRequestPhoneOtp = { phone ->
+                        requestedPhone = phone
+                        phoneOtpState = PhoneOtpUiState(
+                            normalizedPhone = "+821012345678",
+                            codeRequested = true,
+                        )
+                    },
+                    onVerifyPhoneOtp = { phone, code ->
+                        verifiedPhone = phone
+                        verifiedCode = code
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("phone-sign-in-button").performClick()
+        composeRule.onNodeWithTag("login-phone").performTextInput("010-1234-5678")
+        composeRule.onNodeWithTag("login-phone-request-code").performScrollTo().performClick()
+        composeRule.onNodeWithTag("login-phone-code").performTextInput("123456")
+        composeRule.onNodeWithTag("login-phone-verify-code").performScrollTo().performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("010-1234-5678", requestedPhone)
+            assertEquals("010-1234-5678", verifiedPhone)
+            assertEquals("123456", verifiedCode)
+        }
     }
 
     @Test
@@ -225,7 +292,7 @@ class AuthUiTest {
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.login_signup_cta)).performClick()
+        composeRule.onNodeWithText(string(R.string.login_signup_cta)).performScrollTo().performClick()
 
         composeRule.runOnIdle {
             assertEquals(1, createAccountCount)
@@ -319,7 +386,10 @@ class AuthUiTest {
                 LoginScreen(
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.SignedOut(termsAccepted = true),
+                    phoneOtpStateOverride = PhoneOtpUiState(),
                     onEmailSignIn = { _, _ -> },
+                    onRequestPhoneOtp = {},
+                    onVerifyPhoneOtp = { _, _ -> },
                     googleSignInEnabledOverride = false,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = {},

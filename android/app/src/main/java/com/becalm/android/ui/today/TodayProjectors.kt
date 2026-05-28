@@ -39,7 +39,8 @@ internal object TodayTimelineProjector {
             .groupBy { it.calendarEventId.orEmpty() }
             .mapValues { (_, rows) -> rows.map { it.sourceType }.distinct() }
         val visibleCommitments = commitments.filterNot { row ->
-            row.id in absorbedCommitmentIds ||
+            row.itemType != CommitmentItemType.SCHEDULE ||
+                row.id in absorbedCommitmentIds ||
                 CommitmentDisplayPolicy.shouldHideNonPersonLifecycleItem(
                     itemType = row.itemType,
                     title = row.title,
@@ -142,7 +143,9 @@ internal object TodaySyncProjector {
         return TodayUiState(
             loading = false,
             timeline = timeline,
-            personFocus = buildTodayPersonFocus(timeline),
+            personFocus = emptyList(),
+            scheduleRangeFilter = snapshot.rangeFilter,
+            today = snapshot.today,
             scheduleConflictReviewItems = buildScheduleConflictReviewItems(
                 commitments = snapshot.commitments,
                 calendarEvents = snapshot.calendarEvents,
@@ -195,7 +198,9 @@ internal object TodaySyncProjector {
         val visibleStates = states.filter { it.shouldShowOnToday(now) }
         val activeStates = visibleStates.filter { it.phase.isActive }
         val actionStates = visibleStates.filter {
-            it.phase == ProcessingPhase.BLOCKED || it.phase == ProcessingPhase.ERROR
+            it.phase == ProcessingPhase.AWAITING_CONFIRMATION ||
+                it.phase == ProcessingPhase.BLOCKED ||
+                it.phase == ProcessingPhase.ERROR
         }
         val latestState = visibleStates.maxByOrNull { state ->
             state.updatedAt?.toEpochMilliseconds() ?: Long.MIN_VALUE
@@ -206,13 +211,26 @@ internal object TodaySyncProjector {
             activeItemCount = activeStates.sumOf { it.itemCount },
             latestPhase = latestState?.phase,
             latestUpdatedAt = latestState?.updatedAt,
+            dismissKey = visibleStates
+                .sortedBy { it.sourceType }
+                .joinToString("|") { state ->
+                    listOf(
+                        state.sourceType,
+                        state.phase.name,
+                        state.itemCount.toString(),
+                        state.updatedAt?.toEpochMilliseconds()?.toString().orEmpty(),
+                    ).joinToString(":")
+                }
+                .takeIf { it.isNotBlank() },
         )
     }
 
     private fun ProcessingSourceState.shouldShowOnToday(now: kotlinx.datetime.Instant): Boolean =
         when {
             phase == ProcessingPhase.IDLE -> false
-            phase == ProcessingPhase.BLOCKED || phase == ProcessingPhase.ERROR -> true
+            phase == ProcessingPhase.AWAITING_CONFIRMATION ||
+                phase == ProcessingPhase.BLOCKED ||
+                phase == ProcessingPhase.ERROR -> true
             phase.isActive -> wasUpdatedWithin(now, ACTIVE_STATUS_STALE_AFTER_MS)
             else -> wasUpdatedWithin(now, RECENT_TERMINAL_STATUS_VISIBLE_MS)
         }

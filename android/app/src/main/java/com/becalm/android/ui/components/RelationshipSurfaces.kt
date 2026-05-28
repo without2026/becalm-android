@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.becalm.android.ui.theme.becalmColors
 
 @Composable
 public fun RelationshipCard(
@@ -20,12 +21,13 @@ public fun RelationshipCard(
     contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val becalmColors = MaterialTheme.becalmColors
     RoleSurface(
         modifier = modifier,
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface,
+        color = becalmColors.glassPanelFill,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(1.dp, becalmColors.glassBorder),
         shadowElevation = 1.dp,
         contentPadding = contentPadding,
         content = content,
@@ -38,12 +40,13 @@ public fun EvidenceCard(
     contentPadding: PaddingValues = PaddingValues(12.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val becalmColors = MaterialTheme.becalmColors
     RoleSurface(
         modifier = modifier,
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f),
+        color = becalmColors.glassPanelFill,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+        border = BorderStroke(1.dp, becalmColors.glassBorder),
         shadowElevation = 0.dp,
         contentPadding = contentPadding,
         content = content,
@@ -56,12 +59,13 @@ public fun RecommendationPanel(
     contentPadding: PaddingValues = PaddingValues(12.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val becalmColors = MaterialTheme.becalmColors
     RoleSurface(
         modifier = modifier,
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f),
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+        color = becalmColors.actionStateReminded.fill,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, becalmColors.actionStateReminded.border),
         shadowElevation = 0.dp,
         contentPadding = contentPadding,
         content = content,
@@ -74,12 +78,13 @@ public fun QuietPanel(
     contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val becalmColors = MaterialTheme.becalmColors
     RoleSurface(
         modifier = modifier,
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
+        color = becalmColors.glassPanelFill,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        border = BorderStroke(1.dp, becalmColors.glassBorder),
         shadowElevation = 0.dp,
         contentPadding = contentPadding,
         content = content,

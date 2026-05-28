@@ -4,7 +4,12 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
+import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.dao.PersonIndexDao
@@ -62,29 +67,16 @@ public interface PersonManualMatchRepository {
 public class PersonManualMatchRepositoryImpl @Inject constructor(
     private val personIndexDao: PersonIndexDao,
     private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
+    private val rawIngestionEventDao: RawIngestionEventDao,
+    private val commitmentDao: CommitmentDao,
     private val workScheduler: WorkScheduler,
-    private val apiProvider: Provider<RailwayApi>,
+    private val apiProvider: Provider<RailwayApi> = Provider { error("RailwayApi is not configured for this repository") },
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : PersonManualMatchRepository {
 
     private val api: RailwayApi?
         get() = runCatching { apiProvider.get() }.getOrNull()
-
-    public constructor(
-        personIndexDao: PersonIndexDao,
-        selfIdentityAnchorDao: SelfIdentityAnchorDao,
-        workScheduler: WorkScheduler,
-        logger: Logger,
-        ioDispatcher: CoroutineDispatcher,
-    ) : this(
-        personIndexDao = personIndexDao,
-        selfIdentityAnchorDao = selfIdentityAnchorDao,
-        workScheduler = workScheduler,
-        apiProvider = Provider { error("RailwayApi is not configured for this test repository") },
-        logger = logger,
-        ioDispatcher = ioDispatcher,
-    )
 
     override suspend fun matchInteraction(
         userId: String,
@@ -107,6 +99,7 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
 
         try {
             val sourceEventId = sourceRef.removePrefix("raw:")
+            val now = Clock.System.now()
             val updated = personIndexDao.resolveUnmatchedSourceEventParticipants(
                 userId = userId,
                 sourceType = sourceType,
@@ -123,17 +116,28 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                 logger.w(TAG, "manual match found no unresolved source participant source=$sourceType ref=$sourceRef")
                 return@withContext noParticipantFailure("manual_match")
             } else {
-                personIndexDao.upsertDirtySources(
-                    listOf(
-                        PersonIndexDirtySources.rawEvent(
-                            userId = userId,
-                            sourceType = sourceType,
-                            sourceEventId = sourceEventId,
-                            reason = "manual_match",
-                            now = Clock.System.now(),
-                        ),
-                    ),
+                val linkedCommitments = upsertCommitmentParticipantsForResolvedCounterparty(
+                    userId = userId,
+                    sourceType = sourceType,
+                    sourceRef = sourceRef,
+                    sourceEventId = sourceEventId,
+                    resolved = resolved,
+                    now = now,
                 )
+                val dirtySources = listOf(
+                    PersonIndexDirtySources.rawEvent(
+                        userId = userId,
+                        sourceType = sourceType,
+                        sourceEventId = sourceEventId,
+                        reason = "manual_match",
+                        now = now,
+                    ),
+                ) + PersonIndexDirtySources.forCommitments(
+                    commitments = linkedCommitments,
+                    reason = "manual_match",
+                    now = now,
+                )
+                personIndexDao.upsertDirtySources(dirtySources)
                 mirrorManualMatch(
                     userId = userId,
                     sourceType = sourceType,
@@ -313,6 +317,65 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                 personIndexDao.deletePendingSourceParticipantMirrors(userId, listOf(participant.id))
             }
         }
+    }
+
+    private suspend fun upsertCommitmentParticipantsForResolvedCounterparty(
+        userId: String,
+        sourceType: String,
+        sourceRef: String,
+        sourceEventId: String,
+        resolved: ManualMatchResolution,
+        now: kotlinx.datetime.Instant,
+    ): List<CommitmentEntity> {
+        val participants = personIndexDao.findSourceEventParticipantsForUserAndEventIds(
+            userId = userId,
+            sourceEventIds = listOf(sourceEventId),
+        ).filter { it.sourceType == sourceType }
+        val sourceRefs = buildList {
+            add(sourceRef)
+            add(sourceEventId)
+            add(sourceRef.removePrefix("raw:"))
+            rawIngestionEventDao.findById(sourceEventId, userId)?.sourceRef?.let(::add)
+            participants.mapNotNullTo(this) { it.sourceRef }
+        }
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+        if (sourceRefs.isEmpty()) return emptyList()
+
+        val commitments = commitmentDao.findLiveReviewableCommitmentsForSourceRefs(
+            userId = userId,
+            sourceType = sourceType,
+            sourceRefs = sourceRefs,
+        )
+        if (commitments.isEmpty()) return emptyList()
+
+        val singleConfirmedCounterpartyPersonId = participants.asSequence()
+            .filter { it.personId != null }
+            .filterNot { it.relationToUser.equals("self", ignoreCase = true) }
+            .filterNot { it.role.equals("self", ignoreCase = true) }
+            .mapNotNull { it.personId }
+            .distinct()
+            .take(2)
+            .toList()
+            .singleOrNull()
+
+        val linkableCommitments = commitments.filter { commitment ->
+            commitment.matchesResolvedCounterparty(resolved) ||
+                singleConfirmedCounterpartyPersonId == resolved.personId
+        }
+        if (linkableCommitments.isEmpty()) return emptyList()
+
+        personIndexDao.upsertCommitmentParticipants(
+            linkableCommitments.map { commitment ->
+                commitment.toReviewCommitmentParticipant(
+                    userId = userId,
+                    personId = resolved.personId,
+                    now = now,
+                )
+            },
+        )
+        return linkableCommitments
     }
 
     private suspend fun upsertSelfIdentityAnchors(
@@ -646,6 +709,37 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
     }
 }
 
+private fun CommitmentEntity.matchesResolvedCounterparty(resolved: ManualMatchResolution): Boolean =
+    listOfNotNull(counterpartyRef, counterpartyRaw)
+        .any(resolved::matchesAnchor)
+
+private fun CommitmentEntity.toReviewCommitmentParticipant(
+    userId: String,
+    personId: String,
+    now: kotlinx.datetime.Instant,
+): CommitmentParticipantEntity {
+    val participantRole = reviewParticipantRole()
+    return CommitmentParticipantEntity(
+        id = UUID.nameUUIDFromBytes(
+            "commitment-participant:$userId:$id:$personId:$participantRole".toByteArray(Charsets.UTF_8),
+        ).toString(),
+        userId = userId,
+        commitmentId = id,
+        personId = personId,
+        role = participantRole,
+        evidence = quote,
+        confidence = confidence,
+        createdAt = now,
+    )
+}
+
+private fun CommitmentEntity.reviewParticipantRole(): String =
+    when (itemType) {
+        CommitmentItemType.ACTION -> direction ?: "owner"
+        CommitmentItemType.DECISION -> "decision_maker"
+        else -> "attendee"
+    }
+
 private fun PersonEntity.isSpeakerLabelPerson(): Boolean =
     PersonIdentityResolver.isSpeakerLabelValue(displayName) ||
         PersonIdentityResolver.isSpeakerLabelValue(primaryEmail) ||
@@ -665,4 +759,23 @@ private data class ManualMatchResolution(
     val rawValue: String,
     val displayNameHint: String?,
     val confidence: Double,
-)
+) {
+    fun matchesAnchor(value: String): Boolean =
+        when (identityType) {
+            "email" -> {
+                val resolvedEmail = PersonIdentityResolver.normalizeRelationEmailAnchor(normalizedValue)
+                    ?: PersonIdentityResolver.normalizeRelationEmailAnchor(rawValue)
+                resolvedEmail != null && PersonIdentityResolver.normalizeRelationEmailAnchor(value) == resolvedEmail
+            }
+            "phone" -> {
+                val resolvedPhone = PersonIdentityResolver.normalizePhoneAnchor(normalizedValue)
+                    ?: PersonIdentityResolver.normalizePhoneAnchor(rawValue)
+                resolvedPhone != null && PersonIdentityResolver.normalizePhoneAnchor(value) == resolvedPhone
+            }
+            else -> {
+                val resolvedAlias = listOf(rawValue, displayNameHint, normalizedValue)
+                    .firstNotNullOfOrNull(PersonIdentityResolver::normalizeAlias)
+                resolvedAlias != null && PersonIdentityResolver.normalizeAlias(value) == resolvedAlias
+            }
+        }
+}

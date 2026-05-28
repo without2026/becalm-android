@@ -22,19 +22,17 @@ import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewEntity
 import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
-import com.becalm.android.data.repository.MeetingSpeakerReviewContext
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.MeetingImportRepository
+import com.becalm.android.data.repository.MeetingSpeakerReviewContext
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.mockkStatic
 import io.mockk.slot
-import io.mockk.unmockkStatic
 import io.mockk.verify
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
+import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
@@ -44,9 +42,12 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -68,68 +69,35 @@ class MeetingImportRepositorySpecTest {
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
 
     private val sourceUri = Uri.parse("content://picked/standup")
-    private val treeUri = Uri.parse("content://tree/root")
-    private val meetingsTreeUri = Uri.parse("content://tree/root%2FBeCalm%20Meetings")
-    private val audioTreeUri = Uri.parse("content://tree/root%2FBeCalm%20Meetings%2FAudio")
-    private val rootDocumentUri = Uri.parse("content://tree/root/document/root")
-    private val rootChildrenUri = Uri.parse("content://tree/root/children/root")
-    private val meetingsUri = Uri.parse("content://tree/root/document/root%2FBeCalm%20Meetings")
-    private val meetingsChildrenUri = Uri.parse("content://tree/root/children/root%2FBeCalm%20Meetings")
-    private val audioDirUri = Uri.parse("content://tree/root/document/root%2FBeCalm%20Meetings%2FAudio")
     private val targetUri = Uri.parse("content://tree/root/document/root%2FBeCalm%20Meetings%2FAudio%2Fstandup.m4a")
+
+    @get:Rule
+    val temporaryFolder: TemporaryFolder = TemporaryFolder()
 
     @Before
     fun setUp() {
-        mockkStatic(DocumentsContract::class)
         every { context.contentResolver } returns resolver
+        every { context.filesDir } returns temporaryFolder.newFolder("files")
         every { userPrefsStore.observeCurrentUserId() } returns flowOf(USER_ID)
-        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(treeUri.toString())
-        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING) } returns flowOf(treeUri.toString())
         every { resolver.getType(sourceUri) } returns "audio/m4a"
-        every { resolver.openInputStream(sourceUri) } returns ByteArrayInputStream(byteArrayOf(1, 2, 3))
-        every { resolver.openOutputStream(targetUri, "w") } returns ByteArrayOutputStream()
+        every { resolver.openInputStream(sourceUri) } answers { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
         every { resolver.query(any(), any<Array<String>>(), null, null, null) } answers {
             when (firstArg<Uri>()) {
                 sourceUri -> openableCursor()
-                rootChildrenUri, meetingsChildrenUri -> emptyDocumentCursor()
                 else -> emptyDocumentCursor()
             }
         }
-        every { DocumentsContract.getTreeDocumentId(treeUri) } returns "root"
-        every { DocumentsContract.buildDocumentUriUsingTree(treeUri, "root") } returns rootDocumentUri
-        every { DocumentsContract.getDocumentId(rootDocumentUri) } returns "root"
-        every { DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, "root") } returns rootChildrenUri
-        every {
-            DocumentsContract.createDocument(
-                resolver,
-                rootDocumentUri,
-                DocumentsContract.Document.MIME_TYPE_DIR,
-                "BeCalm Meetings",
-            )
-        } returns meetingsUri
-        every { DocumentsContract.getDocumentId(meetingsUri) } returns "root/BeCalm Meetings"
-        every { DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, "root/BeCalm Meetings") } returns meetingsChildrenUri
-        every {
-            DocumentsContract.createDocument(
-                resolver,
-                meetingsUri,
-                DocumentsContract.Document.MIME_TYPE_DIR,
-                "Audio",
-            )
-        } returns audioDirUri
-        every { DocumentsContract.createDocument(resolver, audioDirUri, "audio/m4a", any()) } returns targetUri
     }
 
     @After
     fun tearDown() {
         ShadowMediaMetadataRetriever.reset()
-        unmockkStatic(DocumentsContract::class)
     }
 
     @Test
     // spec: ING-001A
     // spec: MTG-002
-    fun `meeting audio import copies into recordings tree and enqueues speaker preview when consented`() = runTest {
+    fun `meeting audio import copies into app private storage and enqueues speaker preview when consented`() = runTest {
         val eventSlot = slot<RawIngestionEventEntity>()
         every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
         io.mockk.coEvery { rawIngestionRepository.insertLocal(capture(eventSlot)) } answers {
@@ -140,10 +108,11 @@ class MeetingImportRepositorySpecTest {
 
         assertTrue(result is BecalmResult.Success)
         assertEquals(SourceType.MEETING, eventSlot.captured.sourceType)
-        assertEquals(targetUri.toString(), eventSlot.captured.sourceRef)
-        assertEquals("standup.m4a", eventSlot.captured.eventTitle)
+        assertAppPrivateAudioRef(eventSlot.captured.sourceRef)
+        assertTrue(eventSlot.captured.eventTitle.orEmpty().startsWith("회의 녹음 · "))
+        assertEquals("원본 파일: standup.m4a", eventSlot.captured.eventSnippet)
         assertEquals(MeetingSpeakerPreviewStatus.PENDING, eventSlot.captured.syncStatus)
-        verify(exactly = 1) { workScheduler.enqueueMeetingSpeakerPreview(eventSlot.captured.id, targetUri.toString()) }
+        verify(exactly = 1) { workScheduler.enqueueMeetingSpeakerPreview(eventSlot.captured.id, eventSlot.captured.sourceRef!!) }
         verify(exactly = 0) { workScheduler.enqueueVoiceUpload(any(), any(), any(), any(), any()) }
     }
 
@@ -181,7 +150,7 @@ class MeetingImportRepositorySpecTest {
         verify(exactly = 1) {
             workScheduler.enqueueVoiceUpload(
                 eventSlot.captured.id,
-                targetUri.toString(),
+                eventSlot.captured.sourceRef!!,
                 "SPEAKER_01",
                 reviewContext.speakerMappingsJson,
                 "preview-1",
@@ -295,10 +264,12 @@ class MeetingImportRepositorySpecTest {
             assertEquals("meeting_preview_pending", eventSlot.captured.syncStatus)
             assertEquals(61, eventSlot.captured.durationSeconds)
             assertEquals(CommitmentItemType.SCHEDULE, commitmentSlot.captured.itemType)
-            assertEquals("standup.m4a", commitmentSlot.captured.title)
-            assertEquals(targetUri.toString(), commitmentSlot.captured.sourceRef)
+            assertTrue(commitmentSlot.captured.title.startsWith("회의 녹음 · "))
+            assertTrue(commitmentSlot.captured.sourceEventTitle.orEmpty().startsWith("회의 녹음 · "))
+            assertEquals(eventSlot.captured.sourceRef, commitmentSlot.captured.sourceRef)
+            assertAppPrivateAudioRef(commitmentSlot.captured.sourceRef)
             verify(exactly = 1) {
-                workScheduler.enqueueMeetingSpeakerPreview(eventSlot.captured.id, targetUri.toString())
+                workScheduler.enqueueMeetingSpeakerPreview(eventSlot.captured.id, eventSlot.captured.sourceRef!!)
             }
             verify(exactly = 0) {
                 workScheduler.enqueueVoiceUpload(any(), any(), any(), any(), any())
@@ -337,7 +308,8 @@ class MeetingImportRepositorySpecTest {
         assertEquals(fileNameRecordedAt, eventSlot.captured.timestamp)
         assertEquals(fileNameRecordedAt, commitmentSlot.captured.sourceEventOccurredAt)
         assertEquals(fileNameRecordedAt, commitmentSlot.captured.dueAt)
-        assertEquals("20260518_143045_client-sync.m4a", eventSlot.captured.eventTitle)
+        assertEquals("회의 녹음 · 5월 18일 14:30", eventSlot.captured.eventTitle)
+        assertEquals("원본 파일: 20260518_143045_client-sync.m4a", eventSlot.captured.eventSnippet)
         assertTrue(embeddedRecordedAt != eventSlot.captured.timestamp)
     }
 
@@ -510,15 +482,9 @@ class MeetingImportRepositorySpecTest {
     }
 
     @Test
-    fun `meeting audio import reuses selected audio target directory without nesting meetings folders`() = runTest {
+    fun `meeting audio import does not require meeting recording folder tree selection`() = runTest {
         val eventSlot = slot<RawIngestionEventEntity>()
-        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING) } returns flowOf(audioTreeUri.toString())
         every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
-        every { DocumentsContract.getTreeDocumentId(audioTreeUri) } returns "root/BeCalm Meetings/Audio"
-        every {
-            DocumentsContract.buildDocumentUriUsingTree(audioTreeUri, "root/BeCalm Meetings/Audio")
-        } returns audioDirUri
-        every { DocumentsContract.createDocument(resolver, audioDirUri, "audio/m4a", any()) } returns targetUri
         io.mockk.coEvery { rawIngestionRepository.insertLocal(capture(eventSlot)) } answers {
             BecalmResult.Success(eventSlot.captured.id)
         }
@@ -526,65 +492,28 @@ class MeetingImportRepositorySpecTest {
         val result = repository().importAudio(sourceUri)
 
         assertTrue(result is BecalmResult.Success)
-        assertEquals(targetUri.toString(), eventSlot.captured.sourceRef)
-        verify(exactly = 0) {
-            DocumentsContract.createDocument(
-                resolver,
-                audioDirUri,
-                DocumentsContract.Document.MIME_TYPE_DIR,
-                "BeCalm Meetings",
-            )
-        }
-        verify(exactly = 0) {
-            DocumentsContract.createDocument(
-                resolver,
-                audioDirUri,
-                DocumentsContract.Document.MIME_TYPE_DIR,
-                "Audio",
-            )
-        }
+        assertAppPrivateAudioRef(eventSlot.captured.sourceRef)
+        verify(exactly = 0) { userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING) }
     }
 
     @Test
-    fun `meeting audio import creates audio under selected meetings directory without nesting meetings directory`() =
+    fun `meeting audio import uses stable idempotency key for the same selected file`() =
         runTest {
-            val eventSlot = slot<RawIngestionEventEntity>()
-            every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING) } returns
-                flowOf(meetingsTreeUri.toString())
+            val events = mutableListOf<RawIngestionEventEntity>()
             every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
-            every { DocumentsContract.getTreeDocumentId(meetingsTreeUri) } returns "root/BeCalm Meetings"
-            every {
-                DocumentsContract.buildDocumentUriUsingTree(meetingsTreeUri, "root/BeCalm Meetings")
-            } returns meetingsUri
-            every { DocumentsContract.getDocumentId(meetingsUri) } returns "root/BeCalm Meetings"
-            every {
-                DocumentsContract.buildChildDocumentsUriUsingTree(meetingsTreeUri, "root/BeCalm Meetings")
-            } returns meetingsChildrenUri
-            every {
-                DocumentsContract.createDocument(
-                    resolver,
-                    meetingsUri,
-                    DocumentsContract.Document.MIME_TYPE_DIR,
-                    "Audio",
-                )
-            } returns audioDirUri
-            every { DocumentsContract.createDocument(resolver, audioDirUri, "audio/m4a", any()) } returns targetUri
-            io.mockk.coEvery { rawIngestionRepository.insertLocal(capture(eventSlot)) } answers {
-                BecalmResult.Success(eventSlot.captured.id)
+            io.mockk.coEvery { rawIngestionRepository.insertLocal(capture(events)) } answers {
+                BecalmResult.Success(events.last().id)
             }
 
-            val result = repository().importAudio(sourceUri)
+            val first = repository().importAudio(sourceUri)
+            val second = repository().importAudio(sourceUri)
 
-            assertTrue(result is BecalmResult.Success)
-            assertEquals(targetUri.toString(), eventSlot.captured.sourceRef)
-            verify(exactly = 0) {
-                DocumentsContract.createDocument(
-                    resolver,
-                    meetingsUri,
-                    DocumentsContract.Document.MIME_TYPE_DIR,
-                    "BeCalm Meetings",
-                )
-            }
+            assertTrue(first is BecalmResult.Success)
+            assertTrue(second is BecalmResult.Success)
+            assertEquals(2, events.size)
+            assertEquals(events.first().clientEventId, events.last().clientEventId)
+            assertEquals(events.first().sourceRef, events.last().sourceRef)
+            assertAppPrivateAudioRef(events.first().sourceRef)
         }
 
     private fun repository(): MeetingImportRepository =
@@ -619,6 +548,16 @@ class MeetingImportRepositorySpecTest {
         MatrixCursor(arrayOf(columnName)).apply {
             addRow(arrayOf<Any?>(value))
         }
+
+    private fun assertAppPrivateAudioRef(sourceRef: String?) {
+        val uri = Uri.parse(sourceRef)
+        assertEquals("file", uri.scheme)
+        val file = File(requireNotNull(uri.path))
+        assertTrue(file.exists())
+        assertTrue(file.path.contains("meeting_imports"))
+        assertTrue(file.path.endsWith("standup.m4a"))
+        assertFalse(file.path.contains("BeCalm Meetings"))
+    }
 
     private fun meetingPreview(rawEventId: String, expiresAt: Instant?): MeetingSpeakerPreviewEntity =
         MeetingSpeakerPreviewEntity(

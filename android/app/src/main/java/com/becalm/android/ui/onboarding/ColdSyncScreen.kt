@@ -29,6 +29,7 @@ import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.sourcePresentationFor
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.today.ColdSyncEffect
 import com.becalm.android.ui.today.DefaultColdSyncRuntimeCoordinator
@@ -41,7 +42,7 @@ import kotlinx.coroutines.flow.Flow
  * Cold sync loading screen shown on first run when Room is entirely empty.
  *
  * Observes [ColdSyncUiState.overallProgress] and shows a [CircularProgressIndicator].
- * Auto-navigates to [BecalmRoute.Today] when [ColdSyncUiState.done] is true.
+ * Auto-navigates to [BecalmRoute.Persons] when [ColdSyncUiState.done] is true.
  * The [OnboardingViewModel.onCompleteOnboarding] writes `onboarding_completed = true`
  * to DataStore when the user continues.
  *
@@ -49,7 +50,7 @@ import kotlinx.coroutines.flow.Flow
  *
  * Primary VM: [ColdSyncViewModel], secondary: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingColdSync]
- * Navigation exit: [BecalmRoute.Today]
+ * Navigation exit: [BecalmRoute.Persons]
  */
 @Composable
 public fun ColdSyncScreen(
@@ -73,8 +74,8 @@ public fun ColdSyncScreen(
         val collectedState by requireNotNull(viewModel).state.collectAsStateWithLifecycle()
         collectedState
     }
-    val navigateToToday = onNavigateToToday ?: {
-        navController.navigate(BecalmRoute.Today.path) {
+    val navigateToHome = onNavigateToToday ?: {
+        navController.navigate(BecalmNavigationDefaults.authenticatedHomeRoute) {
             popUpTo(BecalmRoute.OnboardingRecordingFolder.path) { inclusive = true }
         }
     }
@@ -84,7 +85,7 @@ public fun ColdSyncScreen(
     }
     CollectFlowEffect(effectsOverride ?: requireNotNull(viewModel).effects) { effect ->
         when (effect) {
-            ColdSyncEffect.NavigateToToday -> navigateToToday()
+            ColdSyncEffect.NavigateToToday -> navigateToHome()
         }
     }
 

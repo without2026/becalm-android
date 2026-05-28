@@ -8,7 +8,6 @@ import com.becalm.android.ui.evidence.EvidenceImportPickerRequests
 import com.becalm.android.ui.sources.MeetingOpenDocumentContract
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +44,6 @@ class EvidenceImportPickerRequestsSpecTest {
 
         assertEquals(Intent.ACTION_OPEN_DOCUMENT, intent.action)
         assertTrue(request.mimeTypes.all { it.startsWith("audio/") || it == "application/octet-stream" })
-        assertNull(request.initialUri)
+        assertFalse(intent.hasExtra(DocumentsContract.EXTRA_INITIAL_URI))
     }
 }

@@ -177,7 +177,7 @@ class AuthCheckpoint1E2eTest {
     @Test
     fun e2e_006_returning_signed_in_user_bypasses_auth_routes() {
         assertEquals(
-            BecalmRoute.Today.path,
+            BecalmRoute.Persons.path,
             splashDestinationFor(
                 AuthUiState.SignedIn(
                     userId = "user-1",

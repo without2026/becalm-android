@@ -15,6 +15,7 @@ import com.becalm.android.ui.today.TodayEffect
 private const val SOURCE_RECONNECT_RETURN_KEY = "source_reconnect_return"
 private const val SOURCE_RECONNECT_RETURN_ROUTE_KEY = "source_reconnect_return_route"
 private const val SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY = "source_reconnect_target_source_type"
+internal const val SOURCE_CONNECTION_SUCCESS_MESSAGE_KEY = "source_connection_success_message"
 
 internal fun NavHostController.dispatchTodayEffect(effect: TodayEffect) {
     when (effect) {
@@ -86,6 +87,7 @@ internal fun NavHostController.navigateAfterSourceReconnectOr(route: String) {
 }
 
 internal fun NavHostController.returnToSettingsSourcesAfterSourceConnect() {
+    markSourceConnectionCompleted()
     val previousHandle = previousBackStackEntry?.savedStateHandle
     val returnRoute = previousHandle?.get<String>(SOURCE_RECONNECT_RETURN_ROUTE_KEY)
     if (returnRoute != null) {
@@ -96,6 +98,13 @@ internal fun NavHostController.returnToSettingsSourcesAfterSourceConnect() {
     }
     if (!popBackStack(BecalmRoute.SettingsSources.path, inclusive = false)) {
         navigate(BecalmRoute.SettingsSources.path)
+    }
+}
+
+private fun NavHostController.markSourceConnectionCompleted() {
+    runCatching {
+        getBackStackEntry(BecalmRoute.SettingsSources.path)
+            .savedStateHandle[SOURCE_CONNECTION_SUCCESS_MESSAGE_KEY] = true
     }
 }
 

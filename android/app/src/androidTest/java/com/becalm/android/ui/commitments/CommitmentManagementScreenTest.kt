@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -106,16 +107,16 @@ class CommitmentManagementScreenTest {
         composeTestRule.onNodeWithTag("commitment-filter-all").assertIsDisplayed()
         composeTestRule.onNodeWithTag("commitment-filter-give").assertIsDisplayed()
         composeTestRule.onNodeWithTag("commitment-filter-take").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("commitment-filter-schedule").assertIsDisplayed()
+        composeTestRule.onAllNodesWithTag("commitment-filter-schedule").assertCountEquals(0)
         composeTestRule.onNodeWithTag("commitment-filter-closed").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Alice Kim").assertCountEquals(2)
         composeTestRule.onNodeWithText("Schedule change").assertIsDisplayed()
         composeTestRule.onNodeWithText("Active commitment").performClick()
-        composeTestRule.onNodeWithTag("commitment-filter-schedule").performClick()
+        composeTestRule.onNodeWithTag("commitment-filter-give").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals("active-1", openedDetailId)
-            assertEquals(CommitmentFilter.SCHEDULE, selectedFilter)
+            assertEquals(CommitmentFilter.GIVE, selectedFilter)
         }
     }
 

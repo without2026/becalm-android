@@ -12,6 +12,7 @@ import com.becalm.android.data.remote.dto.CalendarAttendeeDto
 import com.becalm.android.data.remote.dto.CalendarEventDto
 import com.becalm.android.data.remote.dto.CalendarOrganizerDto
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
+import com.becalm.android.data.remote.dto.SourceType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -178,8 +179,9 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         ioLogMessage = "refreshSince network error",
         unexpectedLogMessage = "refreshSince unexpected error",
     ) {
-        // Resume from the persisted cursor; override start-time via `since` when supplied.
-        var cursor: String? = cursorStore.observeCursor(CURSOR_KEY).first()
+        // Resume from the persisted cursor only for the full mirror path.
+        val useStoredCursor = since == null && rangeStart == null && rangeEnd == null
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(CURSOR_KEY).first() else null
         val sinceStr: String? = since?.toString()
 
         var totalFetched = 0
@@ -188,7 +190,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         var lastCursor: String? = cursor
 
         for (page in 1..REFRESH_PAGE_CAP) {
-            val outcome = when (val r = fetchAndPersistPage(userId, cursor, sinceStr, page, rangeStart, rangeEnd)) {
+            val outcome = when (val r = fetchAndPersistPage(userId, cursor, sinceStr, page, rangeStart, rangeEnd, useStoredCursor)) {
                 is BecalmResult.Success -> r.value
                 is BecalmResult.Failure -> return@safeApi BecalmResult.Failure(r.error)
             }
@@ -228,6 +230,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         page: Int,
         rangeStart: Instant?,
         rangeEnd: Instant?,
+        persistCursor: Boolean,
     ): BecalmResult<PageOutcome> {
         val response = api.getCalendarEvents(
             cursor = cursor,
@@ -250,10 +253,12 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         val entities = filtered.map { it.toEntity(userId) }
         dao.insertAll(entities)
 
-        // Persist the cursor immediately after each page is durably written.
-        // If the process is killed mid-refresh, the next run resumes from the
-        // last successfully upserted page instead of re-fetching from scratch.
-        cursorStore.setCursor(CURSOR_KEY, body.cursor)
+        if (persistCursor) {
+            // Persist the cursor immediately after each page is durably written.
+            // If the process is killed mid-refresh, the next run resumes from the
+            // last successfully upserted page instead of re-fetching from scratch.
+            cursorStore.setCursor(CURSOR_KEY, body.cursor)
+        }
 
         return BecalmResult.Success(
             PageOutcome(
@@ -295,8 +300,43 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             ?: return@safeApi BecalmResult.Failure(
                 BecalmError.Unknown(IllegalStateException("null body")),
             )
-        logger.d(TAG, "triggerServerSync synced=${body.synced}")
-        BecalmResult.Success(body)
+        when (
+            val pollResult = SourceSyncJobPoller(
+                api = api,
+                logger = logger,
+            ).awaitTerminal(SourceType.GOOGLE_CALENDAR, body.toSourceSyncJobSnapshot())
+        ) {
+            is SourceSyncJobPollResult.Completed -> {
+                logger.d(TAG, "triggerServerSync synced=${pollResult.synced}")
+                BecalmResult.Success(body.copy(synced = pollResult.synced, status = "succeeded", accepted = false))
+            }
+            is SourceSyncJobPollResult.Pending -> {
+                logger.d(TAG, "triggerServerSync pending retryAfter=${pollResult.retryAfterSeconds}")
+                BecalmResult.Success(
+                    body.copy(
+                        status = body.status ?: "pending",
+                        accepted = true,
+                        retryAfterSeconds = pollResult.retryAfterSeconds ?: body.retryAfterSeconds,
+                        errorCode = pollResult.reasonCode ?: body.errorCode,
+                        errorMessage = if (pollResult.reasonCode != null) {
+                            pollResult.message
+                        } else {
+                            body.errorMessage
+                        },
+                    ),
+                )
+            }
+            is SourceSyncJobPollResult.Failed -> {
+                logger.w(TAG, "triggerServerSync job failed message=${pollResult.message}")
+                BecalmResult.Failure(
+                    if (pollResult.retryable) {
+                        BecalmError.ServerError(503, pollResult.message)
+                    } else {
+                        BecalmError.Validation(null, pollResult.message)
+                    },
+                )
+            }
+        }
     }
 
     override suspend fun deleteAllForUser(userId: String): BecalmResult<Int> =

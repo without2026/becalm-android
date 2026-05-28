@@ -4,15 +4,16 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +24,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -35,7 +37,6 @@ import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
-import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
@@ -131,6 +132,12 @@ public fun GmailOAuthScreen(
                     is EmailConnectEvent.PendingIntentRequired -> {
                         launchPendingIntent(IntentSenderRequest.Builder(event.pendingIntent).build())
                     }
+                    is EmailConnectEvent.Syncing -> {
+                        pendingOAuthResumeRefresh = false
+                    }
+                    is EmailConnectEvent.NotConnected -> {
+                        pendingOAuthResumeRefresh = false
+                    }
                     is EmailConnectEvent.Failed -> {
                         pendingOAuthResumeRefresh = false
                         if (event.errorCode != "user_cancelled") {
@@ -176,6 +183,7 @@ internal fun GmailOAuthContent(
 ) {
     OAuthPlaceholderContent(
         modifier = modifier,
+        icon = Icons.Outlined.Email,
         headline = stringResource(R.string.onb_gmail_headline),
         body = stringResource(R.string.onb_gmail_body),
         connectLabel = stringResource(R.string.action_connect),
@@ -199,6 +207,7 @@ private fun PreviewGmailOAuthScreen() {
 
 @Composable
 internal fun OAuthPlaceholderContent(
+    icon: ImageVector,
     headline: String,
     body: String,
     connectLabel: String,
@@ -212,25 +221,13 @@ internal fun OAuthPlaceholderContent(
             .padding(horizontal = 16.dp, vertical = 24.dp)
             .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(
-            text = headline,
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+        SourceStoryHeader(
+            icon = icon,
+            headline = headline,
+            body = body,
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        QuietPanel(
-            modifier = Modifier
-                .fillMaxWidth(),
-        ) {
-            Text(
-                text = body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-        Spacer(modifier = Modifier.height(32.dp))
         BecalmButton(
             text = connectLabel,
             onClick = onConnect,

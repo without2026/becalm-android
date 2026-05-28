@@ -75,7 +75,10 @@ public fun TermsScreen(
     val resolvedOnContinue = onContinue ?: requireNotNull(resolvedAuthViewModel)::onAcceptTermsAndContinue
     val resolvedOnDecline = onDecline ?: requireNotNull(resolvedAuthViewModel)::onDeclineTerms
     val resolvedNavigateToLogin = onNavigateToLogin ?: {
-        navController.navigate(BecalmRoute.Login.path)
+        navController.navigate(BecalmRoute.Login.path) {
+            popUpTo(BecalmRoute.Terms.path) { inclusive = true }
+            launchSingleTop = true
+        }
     }
     val resolvedFinishApp = onFinishApp ?: {
         (context as? android.app.Activity)?.finish()

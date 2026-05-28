@@ -33,6 +33,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -63,7 +64,6 @@ import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
-import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.components.commitmentScheduleStatusLabelRes
@@ -76,7 +76,6 @@ import com.becalm.android.ui.evidence.EvidenceImportViewModel
 import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
 import com.becalm.android.ui.evidence.rememberEvidenceImportActions
 import com.becalm.android.ui.main.MainTabHeaderState
-import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
@@ -106,15 +105,14 @@ private val CommitmentListBottomPadding = 144.dp
 public fun CommitmentManagementScreen(
     viewModel: CommitmentManagementViewModel = hiltViewModel(),
     evidenceImportViewModel: EvidenceImportViewModel = hiltViewModel(),
-    headerViewModel: MainTabHeaderViewModel = hiltViewModel(),
     onOpenDetail: (id: String) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenSources: () -> Unit = onOpenSettings,
+    onOpenProcessingStatus: () -> Unit = {},
     onOpenUnassigned: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
-    val headerState by headerViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val pullState = rememberPullRefreshState(
@@ -128,6 +126,11 @@ public fun CommitmentManagementScreen(
     HandleSnackbarMessage(importMessage, snackbarHostState, evidenceImportViewModel::onMessageShown)
 
     val evidenceImportActions = rememberEvidenceImportActions(evidenceImportViewModel)
+    LaunchedEffect(evidenceImportState.foregroundReviewRequestKey) {
+        val requestKey = evidenceImportState.foregroundReviewRequestKey ?: return@LaunchedEffect
+        onOpenUnassigned()
+        evidenceImportViewModel.onForegroundReviewOpened(requestKey)
+    }
 
     // CMT-013 — collect one-shot undo snapshots emitted by [onComplete] / [onCancel]
     // and present a `[복구]` snackbar with a 5 s window. Material3 does not expose a
@@ -168,7 +171,6 @@ public fun CommitmentManagementScreen(
         state = state,
         snackbarHostState = snackbarHostState,
         pullState = pullState,
-        headerState = headerState,
         onFilterChange = viewModel::onFilterChange,
         onMessageScreenshotImport = {
             evidenceImportActions.openMessageScreenshotPicker()
@@ -176,10 +178,15 @@ public fun CommitmentManagementScreen(
         onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
         evidenceImportState = evidenceImportState,
         onMeetingSelfSpeakerSelected = evidenceImportViewModel::onMeetingSelfSpeakerSelected,
+        onMeetingCounterpartySpeakerSelected = evidenceImportViewModel::onMeetingCounterpartySpeakerSelected,
         onMeetingSpeakerReviewConfirmed = evidenceImportViewModel::onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = evidenceImportViewModel::onMeetingSpeakerReviewCancelled,
+        onMeetingSpeakerReviewAction = evidenceImportViewModel::onMeetingSpeakerReviewAction,
         onMeetingPreviewLoadingCancelled = evidenceImportViewModel::onMeetingPreviewLoadingCancelled,
+        onRetryFailedImports = evidenceImportViewModel::onRetryFailedImports,
         onReviewRequiredClick = onOpenUnassigned,
+        onStatusDetailsClick = onOpenProcessingStatus,
+        onConsentRequiredClick = onOpenSettings,
         onOpenSettings = onOpenSettings,
         onOpenSources = onOpenSources,
         onOpenDetail = viewModel::onCommitmentSelected,
@@ -210,11 +217,16 @@ public fun CommitmentManagementScreenContent(
     headerState: MainTabHeaderState = MainTabHeaderState(),
     evidenceImportState: EvidenceImportUiState = EvidenceImportUiState(),
     onMeetingSelfSpeakerSelected: (String) -> Unit = {},
+    onMeetingCounterpartySpeakerSelected: (String) -> Unit = {},
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
+    onMeetingSpeakerReviewAction: () -> Unit = {},
     onMeetingPreviewLoadingCancelled: () -> Unit = {},
+    onRetryFailedImports: () -> Unit = {},
     onReviewRequiredClick: () -> Unit = {},
+    onStatusDetailsClick: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onConsentRequiredClick: () -> Unit = onOpenSettings,
     onOpenSources: () -> Unit = onOpenSettings,
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
@@ -236,11 +248,6 @@ public fun CommitmentManagementScreenContent(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            MainTabStatusHeader(
-                state = headerState,
-                onOpenSettings = onOpenSettings,
-                onOpenSources = onOpenSources,
-            )
             FilterChipRow(
                 selectedFilter = state.filter,
                 onFilterSelect = onFilterChange,
@@ -262,132 +269,113 @@ public fun CommitmentManagementScreenContent(
                             title = stringResource(R.string.commitments_empty_title),
                             message = stringResource(R.string.commitments_empty_message),
                         )
-                    }
-                    else -> {
-                        if (state.filter == CommitmentFilter.SCHEDULE) {
-                            val scheduleRows = if (state.scheduleUpcomingItems.isNotEmpty() || state.schedulePastSection.visible) {
-                                state.scheduleUpcomingItems
-                            } else {
-                                state.items
-                            }
-                            val pastHeader = stringResource(
-                                R.string.commitment_section_past_fmt,
-                                state.schedulePastSection.count,
-                            )
-                            ScheduleTimelineList(
-                                rows = scheduleRows,
-                                pastSection = state.schedulePastSection,
-                                pastHeader = pastHeader,
-                                onTogglePastSection = onTogglePastSection,
-                                onOpenDetail = onOpenDetail,
-                            )
-                        } else {
-                            val confirmedHeader = stringResource(
-                                R.string.commitment_section_confirmed_fmt,
-                                state.confirmedSection.count,
-                            )
-                            val reviewHeader = stringResource(
-                                R.string.commitment_section_review_fmt,
-                                state.reviewSection.count,
-                            )
-                            val pastHeader = stringResource(
-                                R.string.commitment_section_past_fmt,
-                                state.pastSection.count,
-                            )
-                            val completedHeader = stringResource(
-                                R.string.commitment_section_completed_fmt,
-                                state.completedSection.count,
-                            )
-                            val cancelledHeader = stringResource(
-                                R.string.commitment_section_cancelled_fmt,
-                                state.cancelledSection.count,
-                            )
-                            LazyColumn(
-                                contentPadding = PaddingValues(
-                                    start = 16.dp,
-                                    top = 8.dp,
-                                    end = 16.dp,
-                                    bottom = CommitmentListBottomPadding,
-                                ),
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .testTag("commitment-list"),
-                            ) {
-                                commitmentBucketSection(
-                                    sectionKey = "confirmed",
-                                    title = confirmedHeader,
-                                    section = state.confirmedSection,
-                                    showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
-                                    onToggle = onToggleConfirmedSection,
-                                    onReviewRequiredClick = onReviewRequiredClick,
-                                    onOpenDetail = onOpenDetail,
-                                )
+	                    }
+	                    else -> {
+	                        val confirmedHeader = stringResource(
+	                            R.string.commitment_section_confirmed_fmt,
+	                            state.confirmedSection.count,
+	                        )
+	                        val reviewHeader = stringResource(
+	                            R.string.commitment_section_review_fmt,
+	                            state.reviewSection.count,
+	                        )
+	                        val pastHeader = stringResource(
+	                            R.string.commitment_section_past_fmt,
+	                            state.pastSection.count,
+	                        )
+	                        val completedHeader = stringResource(
+	                            R.string.commitment_section_completed_fmt,
+	                            state.completedSection.count,
+	                        )
+	                        val cancelledHeader = stringResource(
+	                            R.string.commitment_section_cancelled_fmt,
+	                            state.cancelledSection.count,
+	                        )
+	                        LazyColumn(
+	                            contentPadding = PaddingValues(
+	                                start = 16.dp,
+	                                top = 8.dp,
+	                                end = 16.dp,
+	                                bottom = CommitmentListBottomPadding,
+	                            ),
+	                            modifier = Modifier
+	                                .fillMaxSize()
+	                                .testTag("commitment-list"),
+	                        ) {
+	                            commitmentBucketSection(
+	                                sectionKey = "confirmed",
+	                                title = confirmedHeader,
+	                                section = state.confirmedSection,
+	                                showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
+	                                onToggle = onToggleConfirmedSection,
+	                                onReviewRequiredClick = onReviewRequiredClick,
+	                                onOpenDetail = onOpenDetail,
+	                            )
 
-                                commitmentBucketSection(
-                                    sectionKey = "review",
-                                    title = reviewHeader,
-                                    section = state.reviewSection,
-                                    showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
-                                    onToggle = onToggleReviewSection,
-                                    onReviewRequiredClick = onReviewRequiredClick,
-                                    onOpenDetail = onOpenDetail,
-                                )
+	                            commitmentBucketSection(
+	                                sectionKey = "review",
+	                                title = reviewHeader,
+	                                section = state.reviewSection,
+	                                showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
+	                                onToggle = onToggleReviewSection,
+	                                onReviewRequiredClick = onReviewRequiredClick,
+	                                onOpenDetail = onOpenDetail,
+	                            )
 
-                                commitmentBucketSection(
-                                    sectionKey = "past",
-                                    title = pastHeader,
-                                    section = state.pastSection,
-                                    showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
-                                    onToggle = onTogglePastSection,
-                                    onReviewRequiredClick = onReviewRequiredClick,
-                                    onOpenDetail = onOpenDetail,
-                                )
+	                            commitmentBucketSection(
+	                                sectionKey = "past",
+	                                title = pastHeader,
+	                                section = state.pastSection,
+	                                showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
+	                                onToggle = onTogglePastSection,
+	                                onReviewRequiredClick = onReviewRequiredClick,
+	                                onOpenDetail = onOpenDetail,
+	                            )
 
-                                if (state.completedSection.visible) {
-                                    item(key = "header-completed") {
-                                        ExpandableSectionHeader(
-                                            title = completedHeader,
-                                            expanded = state.completedSection.expanded,
-                                            onToggle = onToggleCompletedSection,
-                                        )
-                                    }
-                                    if (state.completedSection.expanded) {
-                                        items(
-                                            items = state.completedSection.items,
-                                            key = { "completed-${it.id}" },
-                                        ) { row ->
-                                            CommitmentRowCard(
-                                                row = row,
-                                                onOpenDetail = onOpenDetail,
-                                            )
-                                        }
-                                    }
-                                }
+	                            if (state.completedSection.visible) {
+	                                item(key = "header-completed") {
+	                                    ExpandableSectionHeader(
+	                                        title = completedHeader,
+	                                        expanded = state.completedSection.expanded,
+	                                        onToggle = onToggleCompletedSection,
+	                                    )
+	                                }
+	                                if (state.completedSection.expanded) {
+	                                    items(
+	                                        items = state.completedSection.items,
+	                                        key = { "completed-${it.id}" },
+	                                    ) { row ->
+	                                        CommitmentRowCard(
+	                                            row = row,
+	                                            onOpenDetail = onOpenDetail,
+	                                        )
+	                                    }
+	                                }
+	                            }
 
-                                if (state.cancelledSection.visible) {
-                                    item(key = "header-cancelled") {
-                                        ExpandableSectionHeader(
-                                            title = cancelledHeader,
-                                            expanded = state.cancelledSection.expanded,
-                                            onToggle = onToggleCancelledSection,
-                                        )
-                                    }
-                                    if (state.cancelledSection.expanded) {
-                                        items(
-                                            items = state.cancelledSection.items,
-                                            key = { "cancelled-${it.id}" },
-                                        ) { row ->
-                                            CommitmentRowCard(
-                                                row = row,
-                                                onOpenDetail = onOpenDetail,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+	                            if (state.cancelledSection.visible) {
+	                                item(key = "header-cancelled") {
+	                                    ExpandableSectionHeader(
+	                                        title = cancelledHeader,
+	                                        expanded = state.cancelledSection.expanded,
+	                                        onToggle = onToggleCancelledSection,
+	                                    )
+	                                }
+	                                if (state.cancelledSection.expanded) {
+	                                    items(
+	                                        items = state.cancelledSection.items,
+	                                        key = { "cancelled-${it.id}" },
+	                                    ) { row ->
+	                                        CommitmentRowCard(
+	                                            row = row,
+	                                            onOpenDetail = onOpenDetail,
+	                                        )
+	                                    }
+	                                }
+	                            }
+	                        }
+	                    }
+	                }
 
                 PullRefreshIndicator(
                     refreshing = state.refreshing,
@@ -404,10 +392,15 @@ public fun CommitmentManagementScreenContent(
         onMeetingAudioImport = onMeetingAudioImport,
         state = evidenceImportState,
         onMeetingSelfSpeakerSelected = onMeetingSelfSpeakerSelected,
+        onMeetingCounterpartySpeakerSelected = onMeetingCounterpartySpeakerSelected,
         onMeetingSpeakerReviewConfirmed = onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = onMeetingSpeakerReviewCancelled,
+        onMeetingSpeakerReviewAction = onMeetingSpeakerReviewAction,
         onMeetingPreviewLoadingCancelled = onMeetingPreviewLoadingCancelled,
+        onRetryFailedImports = onRetryFailedImports,
         onReviewRequiredClick = onReviewRequiredClick,
+        onStatusDetailsClick = onStatusDetailsClick,
+        onConsentRequiredClick = onConsentRequiredClick,
     )
 }
 
@@ -672,7 +665,7 @@ private fun ScheduleTimelineTimeColumn(
     val primary = timing?.dayLabel ?: stringResource(R.string.today_untimed_section)
     Column(
         modifier = modifier
-            .width(64.dp)
+            .width(76.dp)
             .padding(top = 10.dp, start = 8.dp),
     ) {
         Text(
@@ -932,7 +925,6 @@ private fun FilterChipRow(
         CommitmentFilter.ALL to stringResource(R.string.commitments_filter_all),
         CommitmentFilter.GIVE to stringResource(R.string.commitments_filter_give),
         CommitmentFilter.TAKE to stringResource(R.string.commitments_filter_take),
-        CommitmentFilter.SCHEDULE to stringResource(R.string.commitments_filter_schedule),
         CommitmentFilter.CLOSED to stringResource(R.string.commitments_filter_closed),
     )
     LazyRow(

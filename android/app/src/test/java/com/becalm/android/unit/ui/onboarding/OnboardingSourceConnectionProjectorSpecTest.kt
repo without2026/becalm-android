@@ -40,6 +40,19 @@ class OnboardingSourceConnectionProjectorSpecTest {
     }
 
     @Test
+    fun `source state maps durable in progress step to syncing without transient state`() {
+        val syncing = SourceConnectionProjector.sourceStateFor(
+            provider = OnboardingSourceProvider.GOOGLE_CALENDAR,
+            stepStates = mapOf(OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.IN_PROGRESS),
+            transientStates = emptyMap(),
+            respectStepStates = true,
+            defaultState = SourceConnectionState.Idle,
+        )
+
+        assertEquals(SourceConnectionState.Syncing, syncing)
+    }
+
+    @Test
     fun `settings source entry ignores old step states so sources can reconnect`() {
         val skipped = SourceConnectionProjector.sourceStateFor(
             provider = OnboardingSourceProvider.GMAIL,
@@ -81,12 +94,10 @@ class OnboardingSourceConnectionProjectorSpecTest {
     }
 
     @Test
-    fun `setup source entry includes google calendar as a recommended first run source`() {
+    fun `setup source entry keeps one starter source for progressive activation`() {
         assertEquals(
             setOf(
                 OnboardingSourceProvider.GMAIL,
-                OnboardingSourceProvider.OUTLOOK_MAIL,
-                OnboardingSourceProvider.GOOGLE_CALENDAR,
             ),
             SourceConnectionProjector.sourceProvidersFor(SourceConnectionsEntryPoint.Setup),
         )
@@ -113,6 +124,24 @@ class OnboardingSourceConnectionProjectorSpecTest {
     }
 
     @Test
+    fun `settings projection marks providers with existing connections as connected`() {
+        val items = SourceConnectionProjector.sourceConnectionItems(
+            stepStates = emptyMap(),
+            transientStates = emptyMap(),
+            respectStepStates = false,
+            includedProviders = setOf(OnboardingSourceProvider.GMAIL),
+            existingConnectionProviders = setOf(OnboardingSourceProvider.GMAIL),
+            stringFor = { resId -> "res:$resId" },
+        )
+
+        assertEquals(SourceConnectionState.Connected, items.single().state)
+        assertEquals(
+            "res:${R.string.settings_source_connections_add_another_account}",
+            items.single().primaryActionLabel,
+        )
+    }
+
+    @Test
     // spec: RUX-006
     fun `legacy source onboarding omits calendar oauth until provider is launch ready`() {
         val items = SourceConnectionProjector.sourceConnectionItems(
@@ -130,9 +159,9 @@ class OnboardingSourceConnectionProjectorSpecTest {
     }
 
     @Test
-    fun `setup source projection marks completed google calendar as connected`() {
+    fun `setup source projection starts with one mail source`() {
         val items = SourceConnectionProjector.sourceConnectionItems(
-            stepStates = mapOf(OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.COMPLETE),
+            stepStates = mapOf(OnboardingStep.LINK_GMAIL to StepStatus.COMPLETE),
             transientStates = emptyMap(),
             respectStepStates = SourceConnectionProjector.respectStepStatesFor(SourceConnectionsEntryPoint.Setup),
             includedProviders = SourceConnectionProjector.sourceProvidersFor(SourceConnectionsEntryPoint.Setup),
@@ -142,14 +171,12 @@ class OnboardingSourceConnectionProjectorSpecTest {
         assertEquals(
             listOf(
                 OnboardingSourceProvider.GMAIL,
-                OnboardingSourceProvider.OUTLOOK_MAIL,
-                OnboardingSourceProvider.GOOGLE_CALENDAR,
             ),
             items.map { it.provider },
         )
         assertEquals(
             SourceConnectionState.Connected,
-            items.first { it.provider == OnboardingSourceProvider.GOOGLE_CALENDAR }.state,
+            items.single { it.provider == OnboardingSourceProvider.GMAIL }.state,
         )
     }
 
@@ -214,6 +241,10 @@ class OnboardingSourceConnectionProjectorSpecTest {
 
         assertEquals(R.string.onb_sources_status_consent, sourceConnectionPresentationFor(SourceConnectionState.ConsentRequired).labelRes)
         assertEquals(StatusTone.Attention, sourceConnectionPresentationFor(SourceConnectionState.ConsentRequired).tone)
+
+        assertEquals(R.string.onb_sources_status_syncing, sourceConnectionPresentationFor(SourceConnectionState.Syncing).labelRes)
+        assertEquals(StatusTone.Progress, sourceConnectionPresentationFor(SourceConnectionState.Syncing).tone)
+        assertEquals(false, sourceConnectionPresentationFor(SourceConnectionState.Syncing).terminal)
     }
 
     @Test

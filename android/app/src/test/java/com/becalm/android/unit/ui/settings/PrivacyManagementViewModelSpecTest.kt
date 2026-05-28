@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.settings
 
 import com.becalm.android.R
+import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
@@ -9,12 +10,15 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceArchiveDeleteResult
 import com.becalm.android.data.repository.SourceArchiveSummary
 import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.ui.settings.PrivacyDataExporter
 import com.becalm.android.ui.settings.PrivacyExportPayload
 import com.becalm.android.ui.settings.PrivacyManagementEffect
@@ -38,6 +42,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -55,6 +60,7 @@ class PrivacyManagementViewModelSpecTest {
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
     private val enrichmentDao: PersonEnrichmentDao = mockk(relaxed = true)
     private val exporter: PrivacyDataExporter = mockk(relaxed = true)
+    private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
     private val sourceArtifactRepository: SourceArtifactRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator = mockk(relaxed = true)
@@ -80,6 +86,7 @@ class PrivacyManagementViewModelSpecTest {
         coEvery { rawDao.countEmailRowsForUser("user-1") } returns 5
         coEvery { enrichmentDao.countAll() } returns 2
         coEvery { sourceArtifactRepository.summary("user-1") } returns SourceArchiveSummary(count = 0, totalBytes = 0L)
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
     }
 
     @After
@@ -148,6 +155,52 @@ class PrivacyManagementViewModelSpecTest {
     }
 
     @Test
+    fun `P1-6 withdrawing Gmail consent disconnects backend source connection before local flags`() = runTest {
+        val connected = sourceConnection(
+            id = "conn-gmail",
+            provider = "google",
+            capability = "mail",
+            status = "connected",
+        )
+        val disconnected = connected.copy(status = "disconnected")
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(listOf(connected))
+        coEvery {
+            sourceConnectionRepository.disconnectConnection("user-1", "conn-gmail")
+        } returns BecalmResult.Success(disconnected)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        viewModel.onWithdrawConsent(WithdrawConsentTarget.GMAIL)
+        advanceUntilIdle()
+
+        coVerify { sourceConnectionRepository.refresh("user-1") }
+        coVerify { sourceConnectionRepository.disconnectConnection("user-1", "conn-gmail") }
+        coVerify { userPrefsStore.setEmailPipaConsent(EmailPipaProvider.GMAIL, granted = false) }
+        coVerify { userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, connected = false) }
+        coVerify { userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, managed = false) }
+        coVerify {
+            userPrefsStore.appendPipaActionLog(
+                match { it.action == "consent_withdraw" && it.details["source"] == EmailPipaProvider.GMAIL.storageKey },
+            )
+        }
+    }
+
+    @Test
+    fun `P1-6 source withdrawal failure leaves local source flags untouched`() = runTest {
+        coEvery {
+            sourceConnectionRepository.refresh("user-1")
+        } returns BecalmResult.Failure(BecalmError.Network(503, "unavailable"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        viewModel.onWithdrawConsent(WithdrawConsentTarget.GOOGLE_CALENDAR)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userPrefsStore.setSourceEnabled(SourceType.GOOGLE_CALENDAR, false) }
+        assertEquals(R.string.privacy_error_source_withdraw_failed, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
     fun `PIPA-005 local account delete confirms then signs out`() = runTest {
         coEvery { authRepository.signOut() } returns BecalmResult.Success(Unit)
 
@@ -193,6 +246,7 @@ class PrivacyManagementViewModelSpecTest {
         userPrefsStore = userPrefsStore,
         authRepository = authRepository,
         rawIngestionRepository = rawRepo,
+        sourceConnectionRepository = sourceConnectionRepository,
         rawIngestionEventDao = rawDao,
         commitmentDao = commitmentDao,
         personEnrichmentDao = enrichmentDao,
@@ -211,5 +265,24 @@ class PrivacyManagementViewModelSpecTest {
         userId = "user-1",
         email = "user@example.com",
         expiresAt = kotlinx.datetime.Instant.parse("2026-05-01T00:00:00Z"),
+    )
+
+    private fun sourceConnection(
+        id: String,
+        provider: String,
+        capability: String,
+        status: String,
+    ) = SourceConnectionEntity(
+        id = id,
+        userId = "user-1",
+        provider = provider,
+        capability = capability,
+        accountIdentifier = "account@example.com",
+        accountDisplayName = null,
+        ownership = "self",
+        status = status,
+        linkedSelfAnchorId = null,
+        lastSyncAt = Instant.parse("2026-05-01T00:00:00Z"),
+        lastError = null,
     )
 }

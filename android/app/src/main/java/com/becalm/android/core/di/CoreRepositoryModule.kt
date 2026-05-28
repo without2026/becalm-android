@@ -4,8 +4,12 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthRepositoryImpl
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.EmailBodyRepositoryImpl
+import com.becalm.android.data.repository.FirstMemoryRepository
+import com.becalm.android.data.repository.FirstMemoryRepositoryImpl
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepositoryImpl
+import com.becalm.android.data.repository.OnboardingActivationPreviewRepository
+import com.becalm.android.data.repository.OnboardingActivationPreviewRepositoryImpl
 import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
 import com.becalm.android.data.repository.PersonMemoryRemoteRepository
@@ -61,6 +65,18 @@ public abstract class CoreRepositoryModule {
     public abstract fun bindCommitmentParticipantRepository(
         impl: CommitmentParticipantRepositoryImpl,
     ): CommitmentParticipantRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindFirstMemoryRepository(
+        impl: FirstMemoryRepositoryImpl,
+    ): FirstMemoryRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindOnboardingActivationPreviewRepository(
+        impl: OnboardingActivationPreviewRepositoryImpl,
+    ): OnboardingActivationPreviewRepository
 
     @Binds
     @Singleton

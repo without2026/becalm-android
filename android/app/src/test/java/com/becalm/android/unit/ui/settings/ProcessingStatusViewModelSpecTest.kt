@@ -2,13 +2,18 @@ package com.becalm.android.unit.ui.settings
 
 import app.cash.turbine.test
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.supabase.SupabaseSession
+import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.AudioProcessingConfirmationRepository
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.settings.ProcessingStatusViewModel
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -30,10 +35,15 @@ class ProcessingStatusViewModelSpecTest {
 
     private val processingStatusRepository: ProcessingStatusRepository = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk()
+    private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
+    private val audioProcessingConfirmationRepository: AudioProcessingConfirmationRepository = mockk(relaxed = true)
+    private val authRepository: AuthRepository = mockk()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
+        coEvery { authRepository.currentSession() } returns session()
+        every { rawIngestionRepository.observeActiveProcessingItems("user-1", any()) } returns MutableStateFlow(emptyList())
     }
 
     @After
@@ -69,6 +79,9 @@ class ProcessingStatusViewModelSpecTest {
         val viewModel = ProcessingStatusViewModel(
             processingStatusRepository = processingStatusRepository,
             sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepository = rawIngestionRepository,
+            audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
+            authRepository = authRepository,
         )
 
         viewModel.state.test {
@@ -97,6 +110,9 @@ class ProcessingStatusViewModelSpecTest {
         val viewModel = ProcessingStatusViewModel(
             processingStatusRepository = processingStatusRepository,
             sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepository = rawIngestionRepository,
+            audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
+            authRepository = authRepository,
         )
 
         viewModel.state.test {
@@ -116,5 +132,13 @@ class ProcessingStatusViewModelSpecTest {
         status = connectionStatus,
         lastSyncedAt = null,
         errorMessage = null,
+    )
+
+    private fun session(): SupabaseSession = SupabaseSession(
+        accessToken = "access",
+        refreshToken = "refresh",
+        userId = "user-1",
+        email = "user@example.com",
+        expiresAt = Instant.fromEpochMilliseconds(60_000),
     )
 }

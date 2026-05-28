@@ -20,8 +20,15 @@
             tools:ignore="ExportedReceiver">
             <intent-filter>
                 <action android:name="com.becalm.android.DEBUG_SEED_PERSON_RENDERING" />
+                <action android:name="com.becalm.android.DEBUG_SEED_SCALE_PERSON_TIMELINE" />
+                <action android:name="com.becalm.android.DEBUG_PREPARE_STAGING_MIRROR_SMOKE" />
+                <action android:name="com.becalm.android.DEBUG_REPORT_STAGING_MIRROR_SMOKE" />
                 <action android:name="com.becalm.android.DEBUG_ENQUEUE_CLOVA_AUDIO_E2E" />
                 <action android:name="com.becalm.android.DEBUG_SEED_MEETING_SPEAKER_JOURNEY" />
+                <action android:name="com.becalm.android.DEBUG_SEED_SYNC_FAILURE_UI_SMOKE" />
+                <action android:name="com.becalm.android.DEBUG_SEED_PROCESSING_STATUS_SMOKE" />
+                <action android:name="com.becalm.android.DEBUG_SEED_ACCOUNT_SWAP_SMOKE" />
+                <action android:name="com.becalm.android.DEBUG_SEED_PRIVACY_SMOKE" />
             </intent-filter>
         </receiver>
 

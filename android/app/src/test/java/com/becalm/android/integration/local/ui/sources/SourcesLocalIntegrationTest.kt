@@ -17,6 +17,7 @@ import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.MeetingImportRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
@@ -98,6 +99,11 @@ class SourcesLocalIntegrationTest {
         ioDispatcher = UnconfinedTestDispatcher(),
         logger = logger,
     )
+    private val processingStatusRepository = ProcessingStatusRepository(
+        userPrefs = LocalIntegrationSupport.prefsDataStore("sources-processing-status-prefs"),
+        ioDispatcher = UnconfinedTestDispatcher(),
+        logger = logger,
+    )
     private val contactsPermissionChecker = FakeContactsPermissionChecker(granted = true)
     private val sourceSyncPort = RecordingSourceSyncPort()
 
@@ -158,6 +164,7 @@ class SourcesLocalIntegrationTest {
         val viewModel = SourcesListViewModel(
             authRepository = authRepository,
             sourceStatusRepository = sourceStatusRepository,
+            processingStatusRepository = processingStatusRepository,
             personEnrichmentRepository = enrichmentRepository,
             contactsPermissionChecker = contactsPermissionChecker,
             logger = logger,
@@ -224,7 +231,9 @@ class SourcesLocalIntegrationTest {
         val sourceDetailViewModel = SourceDetailViewModel(
             savedStateHandle = SavedStateHandle(mapOf(ARG_SOURCE_TYPE to SourceType.GMAIL)),
             sourceStatusRepository = sourceStatusRepository,
+            processingStatusRepository = processingStatusRepository,
             rawIngestionRepository = rawIngestionRepository,
+            authRepository = authRepository,
             sourceAdministrationPort = object : SourceAdministrationPort {
                 override suspend fun disconnect(sourceType: String) = error("not used")
             },
@@ -312,7 +321,9 @@ class SourcesLocalIntegrationTest {
         val sourceDetailViewModel = SourceDetailViewModel(
             savedStateHandle = SavedStateHandle(mapOf(ARG_SOURCE_TYPE to SourceType.NAVER_IMAP)),
             sourceStatusRepository = sourceStatusRepository,
+            processingStatusRepository = processingStatusRepository,
             rawIngestionRepository = rawIngestionRepository,
+            authRepository = authRepository,
             sourceAdministrationPort = DefaultSourceAdministrationPort(
                 sourceStatusRepository = sourceStatusRepository,
                 syncCursorStore = syncCursorStore,

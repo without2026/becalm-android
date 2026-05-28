@@ -4,6 +4,8 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.NoopSyncCursorStore
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -15,6 +17,7 @@ import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -39,6 +42,7 @@ public interface SourceEventParticipantRepository {
 public class SourceEventParticipantRepositoryImpl @Inject constructor(
     private val personIndexDao: PersonIndexDao,
     private val apiProvider: Provider<RailwayApi>,
+    private val cursorStore: SyncCursorStore,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : SourceEventParticipantRepository {
@@ -53,6 +57,7 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
     ) : this(
         personIndexDao = personIndexDao,
         apiProvider = Provider { api },
+        cursorStore = NoopSyncCursorStore,
         logger = logger,
     )
 
@@ -61,7 +66,9 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
         sourceType: String?,
         since: Instant?,
     ): BecalmResult<SourceEventParticipantRepository.RefreshStats> = withContext(ioDispatcher) {
-        var cursor: String? = null
+        val cursorKey = sourceParticipantCursorKey(sourceType)
+        val useStoredCursor = since == null
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -137,6 +144,9 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
             lastHasMore = body.hasMore
             lastCursor = body.cursor
             cursor = body.cursor
+            if (useStoredCursor) {
+                cursorStore.setCursor(cursorKey, body.cursor)
+            }
         }
 
         logger.d(
@@ -287,3 +297,5 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
         private const val REFRESH_PAGE_CAP = 10
     }
 }
+
+private fun sourceParticipantCursorKey(sourceType: String?): String = "source_event_participants:${sourceType ?: "all"}"

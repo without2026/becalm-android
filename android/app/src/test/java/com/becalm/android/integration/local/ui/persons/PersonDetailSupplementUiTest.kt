@@ -120,7 +120,7 @@ class PersonDetailSupplementUiTest {
             }
         }
 
-        composeRule.onNodeWithText("김지훈 · 91%").assertIsDisplayed()
+        composeRule.onNodeWithText("김지훈").assertIsDisplayed()
         composeRule.onNodeWithTag("unassigned-match-confirm-event-candidate")
             .performScrollTo()
             .performClick()
@@ -244,7 +244,7 @@ class PersonDetailSupplementUiTest {
             .performTextInput("noreply@navercorp.com")
         composeRule.onNodeWithTag("unassigned-match-nickname-event-1")
             .performTextInput("네이버 예약팀")
-        composeRule.onNodeWithText(string(R.string.persons_manual_match_action))
+        composeRule.onNodeWithText(string(R.string.persons_manual_add_person_action))
             .performScrollTo()
             .performClick()
 
