@@ -443,6 +443,9 @@ class PersonDetailSupplementUiTest {
             }
         }
 
+        composeRule.onNodeWithTag("unassigned-match-confirm-event-other")
+            .performScrollTo()
+            .assertIsNotEnabled()
         composeRule.onNodeWithTag("unassigned-match-other-event-other")
             .performScrollTo()
             .performClick()
@@ -466,7 +469,7 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
-    fun `unassigned events add person defaults blank nickname to anchor`() {
+    fun `unassigned events add person requires display name for technical anchor`() {
         var matchedAnchor: String? = null
         var matchedNickname: String? = null
 
@@ -492,13 +495,52 @@ class PersonDetailSupplementUiTest {
 
         composeRule.onNodeWithTag("unassigned-match-anchor-event-2")
             .performTextInput("+821012345678")
+        composeRule.onNodeWithText(string(R.string.persons_manual_add_person_name_required))
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_manual_add_person_action))
+            .performScrollTo()
+            .assertIsNotEnabled()
+
+        composeRule.runOnIdle {
+            assertEquals(null, matchedAnchor)
+            assertEquals(null, matchedNickname)
+        }
+    }
+
+    @Test
+    fun `unassigned events add person can use typed name as anchor`() {
+        var matchedAnchor: String? = null
+        var matchedNickname: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-new-name",
+                            sourceType = SourceType.VOICE,
+                            title = "회의 녹음",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        ),
+                    ),
+                    onManualMatch = { _, anchor, nickname ->
+                        matchedAnchor = anchor
+                        matchedNickname = nickname
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-anchor-event-new-name")
+            .performTextInput("김민지")
         composeRule.onNodeWithText(string(R.string.persons_manual_add_person_action))
             .performScrollTo()
             .performClick()
 
         composeRule.runOnIdle {
-            assertEquals("+821012345678", matchedAnchor)
-            assertEquals("+821012345678", matchedNickname)
+            assertEquals("김민지", matchedAnchor)
+            assertEquals("김민지", matchedNickname)
         }
     }
 

@@ -19,6 +19,7 @@ import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceEventParticipantPatchRequestDto
 import com.becalm.android.domain.person.PersonIdentityResolver
+import com.becalm.android.domain.person.PersonIdentityResolution
 import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.worker.WorkScheduler
 import java.io.IOException
@@ -86,16 +87,18 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         personAnchor: String,
         nickname: String?,
     ): BecalmResult<Unit> = withContext(ioDispatcher) {
-        val cleanedNickname = nickname?.trim()?.takeIf { it.isNotEmpty() }
+        val cleanedNickname = sanitizeDisplayName(nickname)
         val cleanedAnchor = personAnchor.trim()
         if (PersonIdentityResolver.isSpeakerLabelValue(cleanedAnchor)) {
             return@withContext speakerLabelFailure()
         }
         val resolved = resolveManualMatch(userId, personAnchor, cleanedNickname)
-            ?: return@withContext speakerLabelFailure()
+            ?: return@withContext manualMatchValidationFailure(
+                field = "displayName",
+                message = "new people require a real display name",
+            )
         val displayNameHint = cleanedNickname
-            ?.takeUnless { PersonIdentityResolver.isSpeakerLabelValue(it) }
-            ?: resolved.displayNameHint?.takeUnless { PersonIdentityResolver.isSpeakerLabelValue(it) }
+            ?: resolved.displayNameHint
 
         try {
             val sourceEventId = sourceRef.removePrefix("raw:")
@@ -619,16 +622,82 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             if (person.isSpeakerLabelPerson()) return null
             return resolveExistingPerson(userId = userId, person = person, nickname = nickname)
         }
-        return PersonIdentityResolver.resolve(userId, anchor)?.let { resolved ->
-            ManualMatchResolution(
-                personId = resolved.personId,
-                identityType = resolved.identityType,
-                normalizedValue = resolved.identityKey.substringAfter(':', resolved.rawValue),
-                rawValue = resolved.rawValue,
-                displayNameHint = resolved.displayNameHint,
-                confidence = resolved.confidence,
-            )
+        val resolved = PersonIdentityResolver.resolve(userId, anchor) ?: return null
+        val normalizedValue = resolved.identityKey.substringAfter(':', resolved.rawValue)
+        personIndexDao.findPersonForIdentity(
+            userId = userId,
+            identityType = resolved.identityType,
+            normalizedValue = normalizedValue,
+        )?.let { person ->
+            if (person.isSpeakerLabelPerson()) return null
+            return resolveExistingPerson(userId = userId, person = person, nickname = nickname)
         }
+        val displayName = safeNewPersonDisplayName(nickname)
+            ?: safeNewPersonDisplayName(resolved.displayNameHint)
+            ?: return null
+        return createManualMatchPerson(
+            userId = userId,
+            resolved = resolved,
+            normalizedValue = normalizedValue,
+            displayName = displayName,
+        )
+    }
+
+    private suspend fun createManualMatchPerson(
+        userId: String,
+        resolved: PersonIdentityResolution,
+        normalizedValue: String,
+        displayName: String,
+    ): ManualMatchResolution {
+        val now = Clock.System.now()
+        personIndexDao.upsertPersons(
+            listOf(
+                PersonEntity(
+                    id = resolved.personId,
+                    userId = userId,
+                    displayName = displayName,
+                    kind = "person",
+                    primaryEmail = resolved.identityType.takeIf { it == "email" }?.let { resolved.rawValue },
+                    primaryPhone = resolved.identityType.takeIf { it == "phone" }?.let { resolved.rawValue },
+                    confidence = resolved.confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
+                    createdAt = now,
+                    updatedAt = now,
+                    archivedAt = null,
+                ),
+            ),
+        )
+        personIndexDao.upsertIdentities(
+            listOf(
+                PersonIdentityEntity(
+                    id = PersonIdentityResolver.stableIdentityId(userId = userId, identityKey = resolved.identityKey),
+                    userId = userId,
+                    personId = resolved.personId,
+                    identityKey = resolved.identityKey,
+                    identityType = resolved.identityType,
+                    rawValue = resolved.rawValue,
+                    displayNameHint = displayName,
+                    identityValue = resolved.rawValue,
+                    normalizedValue = normalizedValue,
+                    displayName = displayName,
+                    sourceType = "manual_match",
+                    sourceRef = null,
+                    confidence = resolved.confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
+                    isPrimary = true,
+                    verified = true,
+                    lastSeenAt = now,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            ),
+        )
+        return ManualMatchResolution(
+            personId = resolved.personId,
+            identityType = resolved.identityType,
+            normalizedValue = normalizedValue,
+            rawValue = resolved.rawValue,
+            displayNameHint = displayName,
+            confidence = resolved.confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
+        )
     }
 
     private suspend fun resolveExistingPerson(
@@ -643,7 +712,12 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                     !it.isSpeakerLabelIdentity()
             }
         if (identity != null) {
-            return identity.toManualMatchResolution(personId = person.id, displayNameFallback = nickname ?: person.displayName)
+            return identity.toManualMatchResolution(
+                personId = person.id,
+                displayNameFallback = sanitizeDisplayName(nickname)
+                    ?: sanitizeDisplayName(person.displayName)
+                    ?: UNKNOWN_PERSON_DISPLAY_NAME,
+            )
         }
 
         person.primaryEmail?.let { email ->
@@ -653,7 +727,8 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                     identityType = "email",
                     normalizedValue = normalized,
                     rawValue = email,
-                    displayNameHint = nickname ?: person.displayName,
+                    displayNameHint = sanitizeDisplayName(nickname)
+                        ?: sanitizeDisplayName(person.displayName),
                     confidence = person.confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
                 )
             }
@@ -665,14 +740,14 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                     identityType = "phone",
                     normalizedValue = normalized,
                     rawValue = phone,
-                    displayNameHint = nickname ?: person.displayName,
+                    displayNameHint = sanitizeDisplayName(nickname)
+                        ?: sanitizeDisplayName(person.displayName),
                     confidence = person.confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
                 )
             }
         }
 
-        val displayName = nickname ?: person.displayName
-        if (PersonIdentityResolver.isSpeakerLabelValue(displayName)) return null
+        val displayName = sanitizeDisplayName(nickname) ?: sanitizeDisplayName(person.displayName) ?: return null
         val nameResolution = PersonIdentityResolver.resolve(userId, displayName)
         return ManualMatchResolution(
             personId = person.id,
@@ -680,7 +755,7 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             normalizedValue = nameResolution?.identityKey?.substringAfter(':', nameResolution.rawValue)
                 ?: person.displayName.lowercase().replace(Regex("\\s+"), "-"),
             rawValue = nameResolution?.rawValue ?: person.displayName,
-            displayNameHint = nickname ?: person.displayName,
+            displayNameHint = displayName,
             confidence = person.confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
         )
     }
@@ -696,16 +771,39 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                 identityKey.substringAfter(':', rawValue)
             },
             rawValue = rawValue.ifBlank { identityValue.ifBlank { normalizedValue } },
-            displayNameHint = displayName ?: displayNameHint ?: displayNameFallback,
+            displayNameHint = sanitizeDisplayName(displayName)
+                ?: sanitizeDisplayName(displayNameHint)
+                ?: sanitizeDisplayName(displayNameFallback),
             confidence = confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
         )
+
+    private fun sanitizeDisplayName(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (PersonIdentityResolver.isSpeakerLabelValue(value)) return null
+        if (PersonIdentityResolver.normalizeEmailAnchor(value) != null) return null
+        if (PersonIdentityResolver.normalizePhoneAnchor(value) != null) return null
+        if (value == UNKNOWN_PERSON_DISPLAY_NAME) return null
+        if (PERSON_ID_LIKE_REGEX.matches(value)) return null
+        return value
+    }
+
+    private fun safeNewPersonDisplayName(raw: String?): String? =
+        sanitizeDisplayName(raw)
+
+    private fun manualMatchValidationFailure(field: String, message: String): BecalmResult.Failure =
+        BecalmResult.Failure(BecalmError.Validation(field = field, message = message))
 
     private companion object {
         private const val TAG = "PersonManualMatchRepo"
         private const val EXISTING_PERSON_CONFIDENCE = 0.95
+        private const val UNKNOWN_PERSON_DISPLAY_NAME = "아직 이름을 모르는 연락처"
         private const val SELF_MATCH_CONFIDENCE = 0.98
         private const val NOT_SELF_CONFIDENCE = 1.0
         private val MATCHABLE_IDENTITY_TYPES = setOf("email", "phone", "alias", "name")
+        private val PERSON_ID_LIKE_REGEX = Regex(
+            """^(?:person[-_:])?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^(?:person[-_:])?[0-9a-f]{32}$""",
+            RegexOption.IGNORE_CASE,
+        )
     }
 }
 

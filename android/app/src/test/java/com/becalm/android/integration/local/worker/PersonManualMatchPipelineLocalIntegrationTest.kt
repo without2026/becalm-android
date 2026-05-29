@@ -166,6 +166,54 @@ class PersonManualMatchPipelineLocalIntegrationTest {
     }
 
     @Test
+    fun `manual match rejects new email person without display name`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-email-only", snippet = "확인 부탁드립니다."))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-email-only",
+                    sourceEventId = "raw-email-only",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-email-only",
+                    displayName = CUSTOMER_EMAIL,
+                ).copy(
+                    identityType = "email",
+                    normalizedValue = CUSTOMER_EMAIL,
+                    emailRaw = CUSTOMER_EMAIL,
+                ),
+            ),
+        )
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-email-only",
+            interactionKind = "email",
+            personAnchor = CUSTOMER_EMAIL,
+            nickname = null,
+        )
+
+        assertTrue(result is BecalmResult.Failure)
+        val participant = db.personIndexDao().findSourceEventParticipantsForUserAndEventIds(
+            userId = USER_ID,
+            sourceEventIds = listOf("raw-email-only"),
+        ).single()
+        assertEquals(null, participant.personId)
+        assertEquals("unresolved", participant.resolutionStatus)
+        assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 10).first().isEmpty())
+    }
+
+    @Test
     fun `manual match creates commitment participant for message screenshot commitments`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         val raw = rawEvent(id = "raw-message-1", snippet = "금요일까지 제안서를 보내주세요.").copy(

@@ -51,6 +51,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -327,6 +328,9 @@ private fun PersonMatchReviewCard(
     var selectedNickname by remember(event.id) { mutableStateOf(candidate?.displayName.orEmpty()) }
     var nickname by remember(event.id) { mutableStateOf("") }
     val isSelfSuggestion = candidate?.isSelfSuggestion == true || candidate?.role == "suggested"
+    val candidateDisplayName = safeManualMatchDisplayName(
+        selectedNickname.ifBlank { candidate?.displayName.orEmpty() },
+    )
 
     LaunchedEffect(event.id, notSelfRejected) {
         if (notSelfRejected) {
@@ -408,12 +412,12 @@ private fun PersonMatchReviewCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("unassigned-match-confirm-${event.id}"),
-                    enabled = !saving,
+                    enabled = !saving && candidateDisplayName != null,
                     loading = saving,
                     onClick = {
                         onConfirm(
                             candidate.anchor,
-                            selectedNickname.ifBlank { candidate.displayName },
+                            candidateDisplayName.orEmpty(),
                         )
                     },
                     variant = BecalmButtonVariant.Primary,
@@ -454,10 +458,10 @@ private fun PersonMatchReviewCard(
                 onLater = onLater,
                 onSelf = onSelf,
                 saving = saving,
-                onConfirm = {
+                onConfirm = { displayName ->
                     onConfirm(
                         personAnchor,
-                        nickname.ifBlank { personAnchor },
+                        displayName,
                     )
                 },
             )
@@ -538,7 +542,7 @@ private fun ManualMatchPanel(
     onLater: () -> Unit,
     onSelf: () -> Unit,
     saving: Boolean,
-    onConfirm: () -> Unit,
+    onConfirm: (String) -> Unit,
 ) {
     val normalizedQuery = personAnchor.trim()
     val candidateChoices = eventCandidates
@@ -547,7 +551,7 @@ private fun ManualMatchPanel(
             PersonMatchChoiceRow(
                 anchor = candidate.anchor,
                 displayName = candidate.displayName,
-                detail = candidate.detail ?: candidate.evidence,
+                detail = candidate.detail ?: candidate.evidence?.let(::sanitizeChoiceDetail),
                 hasInteractions = true,
                 kind = PersonMatchChoiceKind.CANDIDATE,
             )
@@ -584,6 +588,14 @@ private fun ManualMatchPanel(
         ),
     )
     val selectedKnownChoice = allChoices.any { it.anchor == personAnchor }
+    val newPersonDisplayName = safeManualMatchDisplayName(nickname)
+        ?: safeManualMatchDisplayName(personAnchor)
+    val confirmDisplayName = if (selectedKnownChoice) {
+        safeManualMatchDisplayName(nickname).orEmpty()
+    } else {
+        newPersonDisplayName.orEmpty()
+    }
+    val canConfirm = personAnchor.isNotBlank() && !saving && (selectedKnownChoice || newPersonDisplayName != null)
 
     Text(
         text = stringResource(R.string.person_match_manual_label),
@@ -631,6 +643,15 @@ private fun ManualMatchPanel(
             modifier = Modifier.padding(horizontal = 2.dp),
         )
     }
+    if (personAnchor.isNotBlank() && !selectedKnownChoice && newPersonDisplayName == null) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.persons_manual_add_person_name_required),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+    }
     Spacer(modifier = Modifier.height(8.dp))
     BecalmTextField(
         value = nickname,
@@ -669,9 +690,9 @@ private fun ManualMatchPanel(
                     R.string.persons_manual_add_person_action
                 },
             ),
-            enabled = personAnchor.isNotBlank() && !saving,
+            enabled = canConfirm,
             loading = saving,
-            onClick = onConfirm,
+            onClick = { onConfirm(confirmDisplayName) },
             variant = BecalmButtonVariant.Primary,
         )
     }
@@ -703,9 +724,8 @@ private fun ManualMatchChoiceSectionContent(
             val selected = choice.anchor == selectedAnchor
             ContactRow(
                 headline = choice.displayName,
-                metadata = choice.detail ?: choice.anchor
-                    .takeUnless { it == choice.displayName }
-                    ?.takeIf(::isDisplayableManualMatchAnchor),
+                metadata = choice.detail
+                    ?.takeIf { isDisplayableManualMatchMetadata(it) },
                 attentionLabel = when {
                     selected -> stringResource(R.string.person_match_selected_label)
                     choice.kind == PersonMatchChoiceKind.CANDIDATE ->
@@ -755,24 +775,54 @@ private enum class MatchQueueFilter {
 
 private const val MAX_MANUAL_MATCH_CHOICES_PER_SECTION = 12
 
-private fun isDisplayableManualMatchAnchor(anchor: String): Boolean =
-    anchor.contains("@") || anchor.startsWith("+")
+private fun isDisplayableManualMatchMetadata(value: String): Boolean {
+    val trimmed = value.trim().takeIf { it.isNotEmpty() } ?: return false
+    if (trimmed.contains("@")) return false
+    if (PersonIdentityResolver.normalizePhoneAnchor(trimmed) != null) return false
+    return true
+}
+
+private fun sanitizeChoiceDetail(raw: String): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isBlank() || trimmed.contains("@")) return null
+    return trimmed
+}
 
 private fun UnassignedEventSummary.bestCandidate(): PersonMatchCandidateSummary? =
-    candidates.firstOrNull()
+    candidates.firstOrNull()?.safeDisplayNameCopy()
         ?: suggestedLabel
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.let {
+                val safeDisplayName = safeManualMatchDisplayName(it) ?: UNKNOWN_PERSON_DISPLAY_NAME
                 PersonMatchCandidateSummary(
                     anchor = it,
-                    displayName = it,
+                    displayName = safeDisplayName,
                     detail = null,
                     role = "suggested",
                     evidence = null,
                     confidence = 0.72,
                 )
             }
+
+private fun PersonMatchCandidateSummary.safeDisplayNameCopy(): PersonMatchCandidateSummary =
+    copy(displayName = safeManualMatchDisplayName(displayName) ?: UNKNOWN_PERSON_DISPLAY_NAME)
+
+private fun safeManualMatchDisplayName(raw: String?): String? {
+    val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    if (value == UNKNOWN_PERSON_DISPLAY_NAME) return null
+    if (PersonIdentityResolver.normalizeEmailAnchor(value) != null) return null
+    if (PersonIdentityResolver.normalizePhoneAnchor(value) != null) return null
+    if (PersonIdentityResolver.isSpeakerLabelValue(value)) return null
+    if (PERSON_ID_LIKE_REGEX.matches(value)) return null
+    return value
+}
+
+private const val UNKNOWN_PERSON_DISPLAY_NAME = "아직 이름을 모르는 연락처"
+private val PERSON_ID_LIKE_REGEX = Regex(
+    """^(?:person[-_:])?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^(?:person[-_:])?[0-9a-f]{32}$""",
+    RegexOption.IGNORE_CASE,
+)
 
 @PreviewLightDark
 @Composable
