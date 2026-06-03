@@ -69,7 +69,11 @@ public interface WorkScheduler {
     public fun enqueueSourceParticipantMirrorRetry(initialDelaySeconds: Long = 0L)
 
     /** Continues backend mirror pagination for [sourceType] after a capped refresh reports `hasMore=true`. */
-    public fun enqueueSourceRelationRefresh(sourceType: String, initialDelaySeconds: Long = 0L) {}
+    public fun enqueueSourceRelationRefresh(
+        sourceType: String,
+        initialDelaySeconds: Long = 0L,
+        resetBeforeRefresh: Boolean = false,
+    ) {}
 
     /**
      * Regenerates and mirrors the compact markdown memory for [personId].
@@ -202,10 +206,19 @@ public interface WorkScheduler {
 
     /**
      * Enqueues one immediate MediaStore audio scan. Recording permission/path grant flows use
-     * this to import existing call, meeting, and voice recordings without waiting for observer
-     * callbacks or the next foreground catch-up.
+     * this to detect recent call, meeting, and voice recordings without waiting for observer
+     * callbacks or the next foreground catch-up. Passing null uses MediaStoreWorker's bounded
+     * automatic discovery window; detected files still require per-file user approval before
+     * upload/STT/speaker-preview processing.
      */
     public fun enqueueMediaStoreOneShotNow(lookbackDays: Int?) {}
+
+    /**
+     * Appends a follow-up MediaStore scan after the current unique chain when a single run
+     * hit the bounded scan cap. This is distinct from [enqueueMediaStoreOneShotNow], whose
+     * user-triggered behavior may replace existing work.
+     */
+    public fun enqueueMediaStoreContinuation(lookbackDays: Int?) {}
 
     /**
      * Cancels the [VoiceUploadWorker] unique-work entry for [rawEventId], if one is enqueued

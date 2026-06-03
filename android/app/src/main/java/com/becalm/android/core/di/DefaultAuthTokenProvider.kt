@@ -3,6 +3,8 @@ package com.becalm.android.core.di
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.getOrNull
 import com.becalm.android.core.util.Logger
+import com.becalm.android.BuildConfig
+import com.becalm.android.data.remote.interceptor.AuthInterceptor
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
@@ -46,6 +48,10 @@ public class DefaultAuthTokenProvider @Inject constructor(
         refreshMutex.withLock {
             val current = sessionStore.load()
                 ?: return@withLock AuthTokenProvider.RefreshResult.Unauthenticated
+            if (current.accessToken.isDebugLocalOnlyToken()) {
+                updateCache(current.accessToken)
+                return@withLock AuthTokenProvider.RefreshResult.Failed
+            }
             if (current.refreshToken.isBlank()) {
                 sessionStore.clear()
                 updateCache(null)
@@ -93,5 +99,16 @@ public class DefaultAuthTokenProvider @Inject constructor(
 
     private fun updateCache(accessToken: String?) {
         cachedAccessToken.set(accessToken)
+    }
+
+    private fun String.isDebugLocalOnlyToken(): Boolean =
+        BuildConfig.DEBUG &&
+            substringAfterLast('.', missingDelimiterValue = "") in DEBUG_LOCAL_ONLY_TOKEN_SIGNATURES
+
+    private companion object {
+        private val DEBUG_LOCAL_ONLY_TOKEN_SIGNATURES = setOf(
+            AuthInterceptor.DEBUG_LOCAL_ONLY_TOKEN_SIGNATURE,
+            "debug",
+        )
     }
 }

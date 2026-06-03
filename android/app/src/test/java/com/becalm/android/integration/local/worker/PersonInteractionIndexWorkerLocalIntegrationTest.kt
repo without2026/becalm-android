@@ -7,6 +7,8 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
+import com.becalm.android.data.local.db.entity.PersonEntity
+import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.dto.SourceType
@@ -505,6 +507,53 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         val unmatched = db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20)
         assertEquals(1, unmatched.size)
         assertEquals("민홍", unmatched.single().suggestedLabel)
+    }
+
+    @Test
+    fun `unverified email identity does not auto match future source participant`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        db.personIndexDao().upsertPersons(listOf(person(personId = personId, displayName = "Customer")))
+        db.personIndexDao().upsertIdentities(
+            listOf(
+                identity(
+                    id = "identity-unverified-email",
+                    personId = personId,
+                    rawValue = CUSTOMER_EMAIL,
+                    verified = false,
+                ),
+            ),
+        )
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-unverified-email",
+                sourceType = SourceType.GMAIL,
+                counterpartyRef = null,
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-unverified-email",
+                    sourceEventId = "raw-unverified-email",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-unverified-email",
+                    personId = null,
+                    email = CUSTOMER_EMAIL,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    resolutionStatus = "unresolved",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertTrue(db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first().isEmpty())
+        val unmatched = db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20)
+        assertEquals(1, unmatched.size)
+        assertEquals("Customer", unmatched.single().suggestedLabel)
     }
 
     @Test
@@ -1017,6 +1066,47 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             confidence = 0.95,
             resolutionStatus = resolutionStatus,
             createdAt = Instant.parse("2026-04-29T04:00:00Z"),
+        )
+
+    private fun person(personId: String, displayName: String): PersonEntity =
+        PersonEntity(
+            id = personId,
+            userId = USER_ID,
+            displayName = displayName,
+            kind = "person",
+            primaryEmail = null,
+            primaryPhone = null,
+            confidence = 0.95,
+            createdAt = Instant.parse("2026-04-29T04:00:00Z"),
+            updatedAt = Instant.parse("2026-04-29T04:00:00Z"),
+            archivedAt = null,
+        )
+
+    private fun identity(
+        id: String,
+        personId: String,
+        rawValue: String,
+        verified: Boolean,
+    ): PersonIdentityEntity =
+        PersonIdentityEntity(
+            id = id,
+            userId = USER_ID,
+            personId = personId,
+            identityKey = "email:${rawValue.lowercase()}",
+            identityType = "email",
+            rawValue = rawValue,
+            displayNameHint = "Customer",
+            identityValue = rawValue,
+            normalizedValue = rawValue.lowercase(),
+            displayName = "Customer",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-unverified-email",
+            confidence = 0.95,
+            isPrimary = true,
+            verified = verified,
+            lastSeenAt = Instant.parse("2026-04-29T04:00:00Z"),
+            createdAt = Instant.parse("2026-04-29T04:00:00Z"),
+            updatedAt = Instant.parse("2026-04-29T04:00:00Z"),
         )
 
     private fun commitmentParticipant(

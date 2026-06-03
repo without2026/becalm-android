@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -22,22 +24,17 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
+import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.ui.components.RelationshipCard
+import com.becalm.android.ui.theme.becalmColors
 
 /**
  * Top header composable for [PersonDetailScreen] — renders the person's display
  * name plus an optional role/company subtitle.
  *
- * Respects ENR-006 fallback: when [displayName] is null / blank the canonical
- * [personId] is shown so the screen remains stable before enrichment has run.
- *
- * The subtitle composes [jobTitle] and [companyName] into one of four shapes:
- * both → `"Engineer · Acme"`, job only → `"Engineer"`, company only → `"Acme"`,
- * neither → subtitle omitted. The string resources carry the separator so
- * locales can customize it (English uses `@`, Korean uses `·`).
- *
- * Spec: `.spec/contracts/ui-map.yml:106-111 § PersonDetail.components § PersonHeader`,
- * `.spec/person-enrichment.spec.yml:57-63 § ENR-006` (fallback).
+ * Respects ENR-006 fallback: when [displayName] is null / blank, a
+ * user-facing unknown-contact label is shown so raw technical identity values are
+ * not exposed.
  */
 @Composable
 internal fun PersonHeader(
@@ -53,7 +50,9 @@ internal fun PersonHeader(
     meetingCount: Int = 0,
     pendingCommitmentCount: Int = 0,
 ) {
-    val nameLine = displayName?.takeIf { it.isNotBlank() } ?: personId
+    val nameLine = listOf(displayName, nickname)
+        .firstOrNull { isDisplayNameValue(it) }
+        ?: stringResource(R.string.persons_unidentified)
     val subtitle = composeSubtitle(jobTitle = jobTitle, companyName = companyName)
     val metaLine = composeMetaLine(
         nickname = nickname,
@@ -103,10 +102,10 @@ internal fun PersonHeader(
                     }
                 }
             }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 StatTile(
                     label = stringResource(R.string.person_detail_stat_email),
                     count = emailInteractionCount,
@@ -132,6 +131,14 @@ internal fun PersonHeader(
     }
 }
 
+private fun isDisplayNameValue(raw: String?): Boolean {
+    val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return false
+    if (PersonIdentityResolver.isSpeakerLabelValue(value)) return false
+    if (PersonIdentityResolver.normalizeEmailAnchor(value) != null) return false
+    if (PersonIdentityResolver.normalizePhoneAnchor(value) != null) return false
+    return true
+}
+
 @Composable
 private fun HeaderAvatar(seed: String) {
     Box(
@@ -152,18 +159,33 @@ private fun HeaderAvatar(seed: String) {
 
 @Composable
 private fun StatTile(label: String, count: Int, modifier: Modifier = Modifier) {
-    Box(
+    Surface(
         modifier = modifier
-            .padding(vertical = 2.dp),
-        contentAlignment = Alignment.Center,
+            .height(52.dp),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.becalmColors.glassBorder),
     ) {
-        Text(
-            text = "$label $count",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

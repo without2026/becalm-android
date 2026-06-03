@@ -163,6 +163,46 @@ class PersonDetailSupplementScreenTest {
     }
 
     @Test
+    fun unassigned_events_manual_match_name_only_input_routes_as_new_person_anchor() {
+        var matchedEventId: String? = null
+        var matchedAnchor: String? = null
+        var matchedNickname: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-name-only",
+                            sourceType = SourceType.GMAIL,
+                            title = "회의 요청",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        ),
+                    ),
+                    onManualMatch = { event, anchor, nickname ->
+                        matchedEventId = event.id
+                        matchedAnchor = anchor
+                        matchedNickname = nickname
+                    },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("unassigned-match-nickname-event-name-only")
+            .performTextInput("김민지")
+        composeTestRule.onNodeWithText(string(R.string.persons_manual_add_person_action))
+            .performScrollTo()
+            .performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("event-name-only", matchedEventId)
+            assertEquals("김민지", matchedAnchor)
+            assertEquals("김민지", matchedNickname)
+        }
+    }
+
+    @Test
     fun unassigned_events_other_person_renders_existing_people_and_matches_selected_row() {
         var matchedAnchor: String? = null
         var matchedNickname: String? = null

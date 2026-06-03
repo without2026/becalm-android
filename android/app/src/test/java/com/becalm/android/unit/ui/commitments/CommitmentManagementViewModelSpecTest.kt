@@ -12,6 +12,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentAgendaIntent
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
@@ -71,6 +72,7 @@ class CommitmentManagementViewModelSpecTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeDisabledCommitmentReminderIds() } returns flowOf(emptySet())
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(emptyList())
         every {
             scheduleEventLinkRepository.observeForProjectionRefs(any(), any(), any(), any())
@@ -177,6 +179,31 @@ class CommitmentManagementViewModelSpecTest {
             assertNull(row.sourceOccurredAt)
             assertEquals(Instant.parse("2026-05-20T05:00:00Z"), row.dueAt)
 
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun schedule_coordination_actions_stay_in_ordinary_commitment_feed() = runTest {
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                entity(id = "ordinary-action", direction = "give"),
+                entity(
+                    id = "meeting-coordinate",
+                    direction = "take",
+                    agendaIntent = CommitmentAgendaIntent.SCHEDULE_COORDINATION,
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val settled = awaitItem()
+
+            assertEquals(listOf("ordinary-action", "meeting-coordinate"), settled.items.map { it.id })
+            assertTrue(settled.items.any { it.id == "meeting-coordinate" })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -683,55 +710,56 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
-    fun `CMT-005 remind success schedules reminder when dueAt is present`() = runTest {
+    fun `CMT-005 reminder toggle on stores opt-in and schedules reminder when dueAt is present`() = runTest {
         val dueAt = Instant.parse("2026-04-20T03:00:00Z")
         val pending = entity(id = "remind-1", dueAt = dueAt)
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(pending))
-        coEvery { commitmentRepository.transitionState("remind-1", CommitmentEvent.Remind) } returns
-            BecalmResult.Success(pending.copy(actionState = "reminded"))
         coEvery { reminderScheduler.schedule(any(), any()) } just runs
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
-        viewModel.onRemind("remind-1")
+        viewModel.onToggleReminder("remind-1", enabled = true)
         advanceUntilIdle()
 
         assertNull(viewModel.uiState.value.error)
-        coVerify(exactly = 1) { reminderScheduler.schedule("remind-1", dueAt) }
+        coVerify(atLeast = 1) { userPrefsStore.setCommitmentReminderDisabled("remind-1", false) }
+        coVerify(atLeast = 1) { reminderScheduler.schedule("remind-1", dueAt) }
+        coVerify(exactly = 0) { commitmentRepository.transitionState("remind-1", CommitmentEvent.Remind) }
     }
 
     @Test
-    fun `CMT-005 remind forwards null dueAt to scheduler which owns alarm gating`() = runTest {
+    fun `CMT-005 reminder toggle on forwards null dueAt to scheduler which owns alarm gating`() = runTest {
         val pending = entity(id = "remind-2", dueAt = null)
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(pending))
-        coEvery { commitmentRepository.transitionState("remind-2", CommitmentEvent.Remind) } returns
-            BecalmResult.Success(pending.copy(actionState = "reminded"))
         coEvery { reminderScheduler.schedule(any(), any()) } just runs
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
-        viewModel.onRemind("remind-2")
+        viewModel.onToggleReminder("remind-2", enabled = true)
         advanceUntilIdle()
 
         assertNull(viewModel.uiState.value.error)
+        coVerify(atLeast = 1) { userPrefsStore.setCommitmentReminderDisabled("remind-2", false) }
         coVerify(exactly = 1) { reminderScheduler.schedule("remind-2", null) }
     }
 
     @Test
-    fun `CMT-005 remind failure surfaces error and skips reminder scheduling`() = runTest {
-        coEvery { commitmentRepository.transitionState("remind-3", CommitmentEvent.Remind) } returns
-            BecalmResult.Failure(BecalmError.Validation("actionState", "illegal"))
+    fun `CMT-005 reminder toggle off stores opt-out and cancels alarm`() = runTest {
+        val pending = entity(id = "remind-3", dueAt = Instant.parse("2026-04-20T03:00:00Z"))
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(pending))
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
-        viewModel.onRemind("remind-3")
+        viewModel.onToggleReminder("remind-3", enabled = false)
         advanceUntilIdle()
 
-        assertEquals(R.string.commitments_error_action_failed, viewModel.uiState.value.error?.resId)
-        coVerify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+        assertNull(viewModel.uiState.value.error)
+        coVerify(atLeast = 1) { userPrefsStore.setCommitmentReminderDisabled("remind-3", true) }
+        verifyCancel("remind-3")
+        coVerify(exactly = 0) { commitmentRepository.transitionState("remind-3", CommitmentEvent.Remind) }
     }
 
     @Test
@@ -939,6 +967,7 @@ class CommitmentManagementViewModelSpecTest {
         sourceEventOccurredAt: Instant = Instant.parse("2026-04-18T00:00:00Z"),
         scheduleStatus: String? = null,
         decisionStatus: String? = null,
+        agendaIntent: String? = null,
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
@@ -946,6 +975,7 @@ class CommitmentManagementViewModelSpecTest {
         direction = direction,
         scheduleStatus = scheduleStatus,
         decisionStatus = decisionStatus,
+        agendaIntent = agendaIntent,
         counterpartyRaw = counterpartyRaw,
         counterpartyRef = counterpartyRef,
         title = "title-$id",
@@ -978,6 +1008,7 @@ class CommitmentManagementViewModelSpecTest {
                 direction = entity.direction,
                 scheduleStatus = entity.scheduleStatus,
                 decisionStatus = entity.decisionStatus,
+                agendaIntent = entity.agendaIntent,
                 actionState = entity.actionState,
                 dueAt = entity.dueAt,
                 dueIsApproximate = entity.dueIsApproximate,

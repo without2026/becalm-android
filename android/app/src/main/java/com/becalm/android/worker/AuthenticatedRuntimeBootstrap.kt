@@ -8,9 +8,12 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
+import com.becalm.android.domain.reminder.CommitmentReminderReconciler
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
@@ -29,6 +32,8 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
     private val syncCursorStore: SyncCursorStore,
     private val databaseProvider: BeCalmDatabaseProvider,
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
+    private val sourceConnectionLocalStateHydratorProvider: Provider<SourceConnectionLocalStateHydrator>,
+    private val commitmentReminderReconciler: CommitmentReminderReconciler,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
@@ -83,6 +88,12 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
                 runStep("database warm-open") {
                     databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
                 }
+                runStep("source connection local state hydration") {
+                    sourceConnectionLocalStateHydratorProvider.get().hydrate(userId)
+                }
+                runStep("commitment reminder reconcile") {
+                    commitmentReminderReconciler.reconcileUser(userId)
+                }
             }
 
             withContext(mainDispatcher) {
@@ -120,9 +131,23 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
         }
     }
 
+    public fun resetForAuthBoundary() {
+        synchronized(bootstrapLock) {
+            bootstrappedUserId = null
+            inFlightUserId = null
+        }
+        appRuntimeSyncCoordinator.resetForAuthBoundary()
+        logger.d(TAG, "runtime bootstrap reset for auth boundary")
+    }
+
     private suspend fun runStep(name: String, block: suspend () -> Unit) {
-        runCatching { block() }
-            .onFailure { logger.e(TAG, "$name failed", it) }
+        try {
+            block()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            logger.e(TAG, "$name failed", error)
+        }
     }
 
     private companion object {

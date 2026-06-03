@@ -8,17 +8,18 @@ import com.squareup.moshi.JsonClass
  * source types.
  *
  * Per EMAIL-005 (`.spec/email-pipeline.spec.yml:49-54`) every email row stores a
- * JSON blob `{message_id, in_reply_to?, references?}` as `source_ref` so the
+ * JSON blob `{message_id, in_reply_to?, references?, source_account_key_hash?}` as `source_ref` so the
  * extraction and thread-view layers can reconstruct RFC 5322 threading without
  * a second fetch. Gmail, Outlook Mail, and IMAP ingestion all serialise through
  * this single type so Supabase mirrors, device-side dedupe queries, and any future
  * migration script observe one canonical shape.
  *
  * ## JSON field names
- * [inReplyTo] and [references] use snake_case on the wire
- * (`in_reply_to`, `references`) so the serialisation matches the RFC 5322
- * header names as they appear in every provider's `internetMessageHeaders`
- * array. [messageId] maps to `message_id`.
+ * [inReplyTo], [references], and [sourceAccountKeyHash] use snake_case on the wire
+ * (`in_reply_to`, `references`, `source_account_key_hash`). The first two match
+ * the RFC 5322 header names as they appear in every provider's `internetMessageHeaders`
+ * array; [sourceAccountKeyHash] is a privacy-preserving account scope for local
+ * IMAP sources. [messageId] maps to `message_id`.
  *
  * ## Null handling
  * Both [inReplyTo] and [references] are nullable to mirror `header absent`. The
@@ -38,4 +39,5 @@ public data class SourceRefEnvelope(
     @Json(name = "message_id") val messageId: String,
     @Json(name = "in_reply_to") val inReplyTo: String? = null,
     @Json(name = "references") val references: String? = null,
+    @Json(name = "source_account_key_hash") val sourceAccountKeyHash: String? = null,
 )

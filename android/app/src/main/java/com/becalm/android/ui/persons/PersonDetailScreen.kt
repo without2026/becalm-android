@@ -39,6 +39,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -46,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.EmptyState
@@ -104,7 +106,7 @@ public fun PersonDetailScreen(
 
     PersonDetailScreenContent(
         state = state,
-        title = state.displayName ?: personId.take(16),
+        title = state.displayName ?: stringResource(R.string.persons_unidentified),
         snackbarHostState = snackbarHostState,
         onBack = {
             if (!navController.popBackStack()) {
@@ -271,7 +273,6 @@ private fun PersonDetailList(
                 pendingCommitmentCount = state.pendingCommitmentCount,
             )
         }
-        val nextActionCards = sourceCards.filter { it.nextAction != null }
         val firstMemoryCards = sourceCards.filter { it.firstMemoryOrigin != null }
         if (firstMemoryCards.isNotEmpty()) {
             item(key = "first-memory-recommendations") {
@@ -282,10 +283,13 @@ private fun PersonDetailList(
                 )
             }
         }
-        if (nextActionCards.isNotEmpty()) {
+        if (state.topActions.isNotEmpty()) {
             item(key = "next-actions") {
                 PersonNextActionsPanel(
-                    cards = nextActionCards,
+                    actions = state.topActions,
+                    onActionClick = { action ->
+                        action.sourceEventId?.let(onEventTap)
+                    },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
@@ -404,7 +408,8 @@ private fun RecommendationActionRow(
 
 @Composable
 private fun PersonNextActionsPanel(
-    cards: List<SourceEventCardProjection>,
+    actions: List<PersonActionItemUi>,
+    onActionClick: (PersonActionItemUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     RecommendationPanel(
@@ -418,21 +423,64 @@ private fun PersonNextActionsPanel(
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
-            cards.take(3).forEach { card ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    EventSourceBadge(sourceType = card.sourceType)
-                    Text(
-                        text = stringResource(requireNotNull(card.nextAction).labelRes),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+            actions.take(3).forEach { action ->
+                PersonActionRecommendationRow(
+                    action = action,
+                    onClick = { onActionClick(action) },
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun PersonActionRecommendationRow(
+    action: PersonActionItemUi,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("person-detail-action-${action.id}")
+            .clickable(
+                enabled = action.sourceEventId != null,
+                role = Role.Button,
+                onClick = onClick,
+            ),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.46f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            action.sourceType?.let { EventSourceBadge(sourceType = it) }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = action.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = action.shortReason,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = action.primaryVerb,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

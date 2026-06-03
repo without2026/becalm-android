@@ -3,6 +3,8 @@ package com.becalm.android.data.repository
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.analytics.ProductAnalyticsAttributionStore
+import com.becalm.android.core.analytics.ProductAnalyticsEventQueue
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.SyncCursorStore
@@ -16,6 +18,7 @@ import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.worker.ContentObserverBootstrap
+import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import com.becalm.android.worker.WorkScheduler
 import java.io.IOException
 import javax.inject.Provider
@@ -41,11 +44,17 @@ internal class AuthSessionCleanupPlanner(
     private val sourceArtifactRepository: SourceArtifactRepository,
     private val imapCredentialStore: ImapCredentialStore,
     private val oauthCredentialStore: OAuthCredentialStore,
+    private val sourceStatusRepository: SourceStatusRepository,
+    private val processingStatusRepository: ProcessingStatusRepository,
+    private val runtimeBootstrap: AuthenticatedRuntimeBootstrap,
+    private val productAnalyticsEventQueue: ProductAnalyticsEventQueue,
+    private val productAnalyticsAttributionStore: ProductAnalyticsAttributionStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
     suspend fun buildSignOutSteps(session: SupabaseSession?): List<NamedAuthStep> = buildList {
         add(ioStep("cancelAllWorkers") { workScheduler.cancelAll() })
         add(ioStep("stopContentObservers") { contentObserverBootstrap.stop() })
+        add(NamedAuthStep("runtimeBootstrapReset") { runtimeBootstrap.resetForAuthBoundary() })
         if (session != null) add(NamedAuthStep("serverRevoke") { authClientProvider.get().signOut(session.accessToken) })
         if (session != null) add(ioStep("sourceArchiveDeleteAll") { sourceArtifactRepository.deleteAllForUser(session.userId) })
         add(ioStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
@@ -55,6 +64,10 @@ internal class AuthSessionCleanupPlanner(
         add(NamedAuthStep("tokenProviderInvalidate") { tokenProvider.invalidate() })
         add(NamedAuthStep("deviceKeyClear") { deviceKeyStore.clear() })
         add(NamedAuthStep("syncCursorClear") { syncCursorStore.clearAll() })
+        add(NamedAuthStep("sourceStatusClearAll") { sourceStatusRepository.clearAll() })
+        add(NamedAuthStep("processingStatusClearAll") { processingStatusRepository.clearAll() })
+        add(NamedAuthStep("productAnalyticsQueueClearAll") { productAnalyticsEventQueue.clearAll() })
+        add(NamedAuthStep("productAnalyticsAttributionClear") { productAnalyticsAttributionStore.clearNotificationOpen() })
         add(NamedAuthStep("userPrefsClearAll") { userPrefsStore.clearAll() })
         add(ioStep("databaseClearAll") { databaseProvider.current().clearAllTables() })
         add(ioStep("databaseClose") { databaseProvider.close() })
@@ -63,12 +76,18 @@ internal class AuthSessionCleanupPlanner(
     suspend fun buildInvalidateSessionSteps(session: SupabaseSession?): List<NamedAuthStep> = buildList {
         add(ioStep("cancelAllWorkers") { workScheduler.cancelAll() })
         add(ioStep("stopContentObservers") { contentObserverBootstrap.stop() })
+        add(NamedAuthStep("runtimeBootstrapReset") { runtimeBootstrap.resetForAuthBoundary() })
         if (session != null) add(NamedAuthStep("serverRevoke") { authClientProvider.get().signOut(session.accessToken) })
         add(NamedAuthStep("imapCredentialClear") { imapCredentialStore.clearAll() })
         add(NamedAuthStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() })
         add(NamedAuthStep("sessionStoreClear") { sessionStore.clear() })
         add(NamedAuthStep("tokenProviderInvalidate") { tokenProvider.invalidate() })
         add(NamedAuthStep("deviceKeyClear") { deviceKeyStore.clear() })
+        add(NamedAuthStep("syncCursorClear") { syncCursorStore.clearAll() })
+        add(NamedAuthStep("sourceStatusClearAll") { sourceStatusRepository.clearAll() })
+        add(NamedAuthStep("processingStatusClearAll") { processingStatusRepository.clearAll() })
+        add(NamedAuthStep("productAnalyticsQueueClearAll") { productAnalyticsEventQueue.clearAll() })
+        add(NamedAuthStep("productAnalyticsAttributionClear") { productAnalyticsAttributionStore.clearNotificationOpen() })
         add(NamedAuthStep("currentUserIdClear") { userPrefsStore.setCurrentUserId(null) })
     }
 

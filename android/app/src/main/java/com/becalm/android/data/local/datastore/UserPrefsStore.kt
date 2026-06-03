@@ -103,6 +103,12 @@ public interface UserPrefsStore {
     /** Adds [personRef] to the user-scoped hidden-person set. Repeated calls are idempotent. */
     public suspend fun blockPersonRef(personRef: String)
 
+    /** Emits commitment ids for which the user explicitly disabled the default reminder. */
+    public fun observeDisabledCommitmentReminderIds(): Flow<Set<String>>
+
+    /** Persists a per-commitment reminder opt-out. Default reminder state is enabled. */
+    public suspend fun setCommitmentReminderDisabled(commitmentId: String, disabled: Boolean)
+
     /** Emits the epoch-millisecond timestamp when Stage 1 first completed, or null. */
     public fun observeColdSyncStage1CompletedAt(): Flow<Long?>
 
@@ -256,6 +262,12 @@ public interface UserPrefsStore {
      */
     public suspend fun setCallLogMatchingConsent(granted: Boolean)
 
+    /** Emits whether the current account explicitly consented to reading Android contacts. */
+    public fun observeContactsConsent(): Flow<Boolean>
+
+    /** Persists the current account's Android contacts consent decision. */
+    public suspend fun setContactsConsent(granted: Boolean)
+
     /** Emits whether all background processing is temporarily paused (PIPA-004). */
     public fun observeProcessingPaused(): Flow<Boolean>
 
@@ -297,6 +309,9 @@ public interface UserPrefsStore {
      * Email sources continue to use [observeEmailSourceConnected].
      */
     public fun observeSourceEnabled(sourceType: String): Flow<Boolean>
+
+    /** Emits when the current account enabled [sourceType], or null when never enabled. */
+    public fun observeSourceEnabledAt(sourceType: String): Flow<Long?>
 
     /**
      * Persists whether the non-email [sourceType] is enabled for ingestion.
@@ -610,6 +625,27 @@ public class UserPrefsStoreImpl @Inject constructor(
         }
     }
 
+    override fun observeDisabledCommitmentReminderIds(): Flow<Set<String>> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map emptySet()
+            decodeStringSet(prefs[userScoped(userId).disabledCommitmentReminderIdsKey])
+        }
+
+    override suspend fun setCommitmentReminderDisabled(commitmentId: String, disabled: Boolean) {
+        val id = commitmentId.trim().takeIf { it.isNotBlank() } ?: return
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val key = userScoped(userId).disabledCommitmentReminderIdsKey
+            val current = decodeStringSet(prefs[key])
+            val next = if (disabled) current + id else current - id
+            if (next.isEmpty()) {
+                prefs.remove(key)
+            } else {
+                prefs[key] = encodeStringSet(next)
+            }
+        }
+    }
+
     override fun observeColdSyncStage1CompletedAt(): Flow<Long?> =
         observeUserLong { coldSyncStage1CompletedAtKey }
 
@@ -734,6 +770,22 @@ public class UserPrefsStoreImpl @Inject constructor(
         editUserBoolean(granted) { callLogMatchingConsentKey }
     }
 
+    override fun observeContactsConsent(): Flow<Boolean> =
+        observeUserBoolean(default = false) { contactsConsentKey }
+
+    override suspend fun setContactsConsent(granted: Boolean) {
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val keys = userScoped(userId)
+            prefs[keys.contactsConsentKey] = granted
+            if (granted) {
+                prefs[keys.contactsConsentAtKey] = System.currentTimeMillis()
+            } else {
+                prefs.remove(keys.contactsConsentAtKey)
+            }
+        }
+    }
+
     override fun observeProcessingPaused(): Flow<Boolean> =
         observeUserBoolean(default = false) { processingPausedKey }
 
@@ -805,13 +857,25 @@ public class UserPrefsStoreImpl @Inject constructor(
             prefs[userScoped(userId).sourceEnabledKey(sourceType)] ?: false
         }
 
+    override fun observeSourceEnabledAt(sourceType: String): Flow<Long?> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map null
+            prefs[userScoped(userId).sourceEnabledAtKey(sourceType)]
+        }
+
     override suspend fun setSourceEnabled(sourceType: String, enabled: Boolean) {
         require(sourceType in SUPPORTED_NON_EMAIL_SOURCES) {
             "setSourceEnabled only supports $SUPPORTED_NON_EMAIL_SOURCES, got '$sourceType'"
         }
         dataStore.edit { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@edit
-            prefs[userScoped(userId).sourceEnabledKey(sourceType)] = enabled
+            val keys = userScoped(userId)
+            prefs[keys.sourceEnabledKey(sourceType)] = enabled
+            if (enabled) {
+                prefs[keys.sourceEnabledAtKey(sourceType)] = System.currentTimeMillis()
+            } else {
+                prefs.remove(keys.sourceEnabledAtKey(sourceType))
+            }
         }
     }
 
@@ -893,6 +957,8 @@ public class UserPrefsStoreImpl @Inject constructor(
             stringPreferencesKey(namespaced(scopedUserId, "onboarding_setup_route_v1"))
         val blockedPersonRefsKey: Preferences.Key<String> =
             stringPreferencesKey(namespaced(scopedUserId, "blocked_person_refs_v1"))
+        val disabledCommitmentReminderIdsKey: Preferences.Key<String> =
+            stringPreferencesKey(namespaced(scopedUserId, "disabled_commitment_reminder_ids_v1"))
         val coldSyncStage1CompletedAtKey: Preferences.Key<Long> =
             longKey("cold_sync_stage1_completed_at")
         val coldSyncStage1DeferredKey: Preferences.Key<Boolean> =
@@ -911,6 +977,10 @@ public class UserPrefsStoreImpl @Inject constructor(
             longKey("pipa_consent_timestamp_millis")
         val callLogMatchingConsentKey: Preferences.Key<Boolean> =
             booleanKey("call_log_matching_consent")
+        val contactsConsentKey: Preferences.Key<Boolean> =
+            booleanKey("contacts_consent")
+        val contactsConsentAtKey: Preferences.Key<Long> =
+            longKey("contacts_consent_at")
         val processingPausedKey: Preferences.Key<Boolean> =
             booleanKey("processing_paused")
         val pauseStartedAtKey: Preferences.Key<Long> =
@@ -932,6 +1002,9 @@ public class UserPrefsStoreImpl @Inject constructor(
 
         fun sourceEnabledKey(sourceType: String): Preferences.Key<Boolean> =
             booleanKey("${sourceType}_enabled")
+
+        fun sourceEnabledAtKey(sourceType: String): Preferences.Key<Long> =
+            longKey("${sourceType}_enabled_at")
 
         fun recordingFolderTreeUriKey(sourceType: String): Preferences.Key<String> =
             stringPreferencesKey(namespaced(scopedUserId, "${sourceType}_recording_folder_tree_uri"))

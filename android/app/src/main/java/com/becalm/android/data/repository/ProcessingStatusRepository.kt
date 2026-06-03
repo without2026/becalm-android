@@ -59,6 +59,7 @@ public data class ProcessingSourceState(
 
 public object ProcessingStatusMessages {
     public const val SOURCE_SYNC_BACKPRESSURE_DELAYED: String = "source_sync_backpressure_delayed"
+    public const val SOURCE_SYNC_IMPORTING_MORE_PAGES: String = "source_sync_importing_more_pages"
     public const val LLM_DAILY_BUDGET_EXCEEDED: String = "llm_daily_budget_exceeded"
     public const val LLM_RATE_LIMITED_RETRYING: String = "llm_rate_limited_retrying"
     public const val AUDIO_CONFIRMATION_REQUIRED: String = "audio_confirmation_required"
@@ -74,6 +75,21 @@ public class ProcessingStatusRepository @Inject constructor(
         userPrefs.data
             .map { prefs -> DISPLAY_SOURCES.map { prefs.toProcessingState(it) } }
             .distinctUntilChanged()
+
+    public suspend fun clearAll() = withContext(ioDispatcher) {
+        runCatching {
+            userPrefs.edit { prefs ->
+                DISPLAY_SOURCES.forEach { sourceType ->
+                    prefs.remove(phaseKey(sourceType))
+                    prefs.remove(countKey(sourceType))
+                    prefs.remove(messageKey(sourceType))
+                    prefs.remove(updatedAtKey(sourceType))
+                }
+            }
+        }.onFailure { error ->
+            logger.w(TAG, "clear processing status failed", error)
+        }
+    }
 
     public suspend fun recordScanning(sourceType: String, message: String? = null) {
         record(sourceType, ProcessingPhase.SCANNING, message = message)

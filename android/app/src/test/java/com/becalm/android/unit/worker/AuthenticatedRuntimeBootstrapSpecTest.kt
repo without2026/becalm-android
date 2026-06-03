@@ -6,8 +6,11 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
+import com.becalm.android.domain.reminder.CommitmentReminderReconciler
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
+import com.becalm.android.worker.SourceConnectionLocalStateHydrator
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.Runs
 import io.mockk.every
@@ -15,10 +18,14 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertSame
+import org.junit.Assert.fail
 import org.junit.Test
+import javax.inject.Provider
 
 class AuthenticatedRuntimeBootstrapSpecTest {
 
@@ -27,6 +34,10 @@ class AuthenticatedRuntimeBootstrapSpecTest {
     private val syncCursorStore: SyncCursorStore = mockk(relaxed = true)
     private val databaseProvider: BeCalmDatabaseProvider = mockk(relaxed = true)
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator = mockk(relaxed = true)
+    private val sourceConnectionLocalStateHydrator: SourceConnectionLocalStateHydrator = mockk(relaxed = true)
+    private val commitmentReminderReconciler: CommitmentReminderReconciler = mockk(relaxed = true)
+    private val sourceConnectionLocalStateHydratorProvider: Provider<SourceConnectionLocalStateHydrator> =
+        Provider { sourceConnectionLocalStateHydrator }
     private val logger: Logger = mockk(relaxed = true)
 
     @Test
@@ -93,12 +104,30 @@ class AuthenticatedRuntimeBootstrapSpecTest {
         verify(exactly = 1) { appRuntimeSyncCoordinator.startAfterStartup() }
     }
 
+    @Test
+    fun `AUTH-009 startup cancellation is propagated without error logging`() = runTest {
+        val cancellation = CancellationException("runtime owner stopped")
+        coEvery { imapCredentialStoreMigrator.migrateIfNeeded() } throws cancellation
+
+        try {
+            buildBootstrap().startForUser("user-1")
+            fail("Expected startup cancellation to propagate")
+        } catch (error: CancellationException) {
+            assertSame(cancellation, error)
+        }
+
+        verify(exactly = 0) { logger.e(any(), any(), any()) }
+        verify(exactly = 0) { appRuntimeSyncCoordinator.startAfterStartup() }
+    }
+
     private fun buildBootstrap(): AuthenticatedRuntimeBootstrap = AuthenticatedRuntimeBootstrap(
         userPrefsStore = userPrefsStore,
         imapCredentialStoreMigrator = imapCredentialStoreMigrator,
         syncCursorStore = syncCursorStore,
         databaseProvider = databaseProvider,
         appRuntimeSyncCoordinator = appRuntimeSyncCoordinator,
+        sourceConnectionLocalStateHydratorProvider = sourceConnectionLocalStateHydratorProvider,
+        commitmentReminderReconciler = commitmentReminderReconciler,
         logger = logger,
         ioDispatcher = Dispatchers.Unconfined,
         mainDispatcher = Dispatchers.Unconfined,

@@ -6,6 +6,8 @@ import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.CommitmentRepositoryImpl
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
+import com.becalm.android.data.repository.ScheduleRowTombstoneRepository
+import com.becalm.android.data.repository.ScheduleRowTombstoneRepositoryImpl
 import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.data.repository.UserProfileRepositoryImpl
 import dagger.Binds
@@ -29,6 +31,12 @@ public abstract class TimelineRepositoryModule {
     public abstract fun bindCalendarEventRepository(
         impl: CalendarEventRepositoryImpl,
     ): CalendarEventRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindScheduleRowTombstoneRepository(
+        impl: ScheduleRowTombstoneRepositoryImpl,
+    ): ScheduleRowTombstoneRepository
 
     @Binds
     @Singleton

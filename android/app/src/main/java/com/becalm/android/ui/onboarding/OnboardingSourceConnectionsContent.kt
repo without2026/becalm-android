@@ -40,10 +40,7 @@ internal fun SourceConnectionsContent(
     onSelfPhoneChange: (String) -> Unit = {},
     onSelfAliasChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
-    sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
-    sourceOwnershipsReady: Boolean = true,
-    updatingSourceOwnershipId: String? = null,
-    onSourceOwnership: (String, String) -> Unit = { _, _ -> },
+    connectedAccounts: List<OnboardingSourceOwnershipUi> = emptyList(),
     onConnectSetupItem: (OnboardingSetupItem) -> Unit = {},
     onSkipSetupItem: (OnboardingSetupItem) -> Unit = {},
     continueEnabled: Boolean = true,
@@ -61,9 +58,7 @@ internal fun SourceConnectionsContent(
     val mailItems = visibleSourceItems.filter { it.category == SourceConnectionCategory.Mail }
     val calendarItems = visibleSourceItems.filter { it.category == SourceConnectionCategory.Calendar }
     val selfIdentityGateOpen = selfIdentity?.confirmed != false
-    val sourceOwnershipGateOpen = (sourceOwnershipsReady || sourceOwnerships.isEmpty()) &&
-        sourceOwnerships.none { it.ownership == "unknown" }
-    val continueGateOpen = selfIdentityGateOpen && (progressiveSetup || sourceOwnershipGateOpen)
+    val continueGateOpen = selfIdentityGateOpen
     val showRequiredSetup = !progressiveSetup && (setupItems.isNotEmpty() || selfIdentity != null)
     val showSetupRecommendedCalendar = !progressiveSetup && setupItems.isNotEmpty() && calendarItems.isNotEmpty() && selfIdentityGateOpen
     val showImapLaterNoticePanel = !progressiveSetup && showImapLaterNotice && selfIdentityGateOpen && mailItems.isNotEmpty()
@@ -196,8 +191,8 @@ internal fun SourceConnectionsContent(
                 skipLabel = skipLabel,
             )
         }
-        if (!progressiveSetup && selfIdentityGateOpen && sourceOwnerships.isNotEmpty()) {
-            item(key = "source-ownership-title") {
+        if (!progressiveSetup && selfIdentityGateOpen && connectedAccounts.isNotEmpty()) {
+            item(key = "connected-accounts-title") {
                 Text(
                     text = stringResource(R.string.settings_identity_connections_section),
                     style = MaterialTheme.typography.titleMedium,
@@ -205,21 +200,8 @@ internal fun SourceConnectionsContent(
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
-            if (!sourceOwnershipGateOpen) {
-                item(key = "source-ownership-required") {
-                    Text(
-                        text = stringResource(R.string.onb_setup_source_ownership_required),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            items(sourceOwnerships, key = { item -> item.id }) { item ->
-                SourceOwnershipSetupRow(
-                    item = item,
-                    updating = updatingSourceOwnershipId == item.id,
-                    onOwnership = { ownership -> onSourceOwnership(item.id, ownership) },
-                )
+            items(connectedAccounts, key = { item -> item.id }) { item ->
+                SourceConnectedAccountRow(item = item)
             }
         }
         item {

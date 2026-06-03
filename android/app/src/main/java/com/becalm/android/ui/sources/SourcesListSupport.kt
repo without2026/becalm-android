@@ -20,6 +20,7 @@ internal object SourcesListProjector {
         processingStates: List<ProcessingSourceState> = emptyList(),
         enrichmentSummary: PersonEnrichmentSummary,
         permissionGranted: Boolean,
+        contactsConsented: Boolean,
     ): SourcesListUiState {
         val processingBySource = processingStates
             .filterNot { state -> state.phase == ProcessingPhase.IDLE }
@@ -41,7 +42,7 @@ internal object SourcesListProjector {
                     processingNeedsAction = processing?.phase.isActionNeeded(),
                 )
             }
-        val contactsStatus = if (permissionGranted) {
+        val contactsStatus = if (permissionGranted && contactsConsented) {
             SourceSyncStatus.Connected
         } else {
             SourceSyncStatus.Disconnected
@@ -86,9 +87,10 @@ internal object SourcesListNavigationResolver {
     fun resolve(
         sourceType: String,
         contactsPermissionGranted: Boolean,
+        contactsConsented: Boolean = false,
     ): SourcesListNavigation =
         if (sourceType == CONTACTS_SOURCE_TYPE) {
-            if (contactsPermissionGranted) {
+            if (contactsPermissionGranted && contactsConsented) {
                 SourcesListNavigation.ContactsDetail
             } else {
                 SourcesListNavigation.ContactsPermission

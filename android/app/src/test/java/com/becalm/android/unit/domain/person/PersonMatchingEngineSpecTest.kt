@@ -44,7 +44,7 @@ class PersonMatchingEngineSpecTest {
     }
 
     @Test
-    fun `confirmed alias auto matches when unique`() {
+    fun `confirmed alias requires user confirmation when unique`() {
         val decision = engine().decide(
             participant = participant(displayName = "Jane from Acme"),
             candidates = listOf(
@@ -55,7 +55,22 @@ class PersonMatchingEngineSpecTest {
             ),
         )
 
-        assertAuto(decision, "person-jane", "confirmed_alias")
+        assertConfirmation(decision, listOf("person-jane"))
+        val candidate = (decision as PersonMatchDecision.NeedsUserConfirmation).candidates.single()
+        assertTrue(candidate.reasons.contains("confirmed_alias"))
+    }
+
+    @Test
+    fun `outgoing sent salutation exact name is a strong review recommendation`() {
+        val decision = engine().decide(
+            participant = participant(outgoingSalutationNames = listOf("강지훈")),
+            candidates = listOf(candidate(personId = "person-kang", displayName = "강지훈")),
+        )
+
+        assertConfirmation(decision, listOf("person-kang"))
+        val candidate = (decision as PersonMatchDecision.NeedsUserConfirmation).candidates.single()
+        assertTrue(candidate.confidence >= 0.90)
+        assertTrue(candidate.reasons.contains("outgoing_salutation_name"))
     }
 
     @Test
@@ -179,6 +194,7 @@ class PersonMatchingEngineSpecTest {
         organization: String? = null,
         title: String? = null,
         evidence: String? = null,
+        outgoingSalutationNames: List<String> = emptyList(),
     ): PersonMatchParticipant =
         PersonMatchParticipant(
             displayName = displayName,
@@ -188,6 +204,7 @@ class PersonMatchingEngineSpecTest {
             title = title,
             sourceType = "gmail",
             evidence = evidence,
+            outgoingSalutationNames = outgoingSalutationNames,
         )
 
     private fun candidate(

@@ -16,6 +16,11 @@ import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorOrigin
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
+import com.becalm.android.data.local.db.entity.stableSourceEventAnchorId
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
@@ -33,9 +38,12 @@ import com.becalm.android.domain.commitment.CommitmentStateMachine
 import com.becalm.android.domain.commitment.ManualCommitmentInput
 import com.becalm.android.domain.commitment.TransitionError
 import com.becalm.android.domain.commitment.TransitionResult
+import com.becalm.android.domain.reminder.CommitmentReminderReconcilePort
+import com.becalm.android.domain.reminder.NoopCommitmentReminderReconcilePort
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -46,9 +54,6 @@ import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
 
-// ─── Cursor key ──────────────────────────────────────────────────────────────
-
-private const val CURSOR_KEY = "commitments_cursor"
 private const val PAGE_LIMIT = 50
 private const val TAG = "CommitmentRepository"
 
@@ -73,6 +78,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
     private val cursorStore: SyncCursorStore,
     private val userPrefsStore: UserPrefsStore,
     private val databaseProvider: Provider<BeCalmDatabase>,
+    private val reminderReconcilePort: CommitmentReminderReconcilePort,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CommitmentRepository {
@@ -88,12 +94,14 @@ public class CommitmentRepositoryImpl @Inject constructor(
         database: BeCalmDatabase,
         logger: Logger,
         ioDispatcher: CoroutineDispatcher,
+        reminderReconcilePort: CommitmentReminderReconcilePort = NoopCommitmentReminderReconcilePort,
     ) : this(
         dao = dao,
         apiProvider = Provider { api },
         cursorStore = cursorStore,
         userPrefsStore = userPrefsStore,
         databaseProvider = Provider { database },
+        reminderReconcilePort = reminderReconcilePort,
         logger = logger,
         ioDispatcher = ioDispatcher,
     )
@@ -105,6 +113,11 @@ public class CommitmentRepositoryImpl @Inject constructor(
 
     override fun observeManagementRowsForUser(userId: String): Flow<List<CommitmentManagementRow>> =
         dao.observeManagementRowsForUser(userId)
+            .onStart {
+                withContext(ioDispatcher) {
+                    linkResolvedParticipantsForUser(userId)
+                }
+            }
 
     override fun observePendingForToday(
         userId: String,
@@ -139,7 +152,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
         actionState: String?,
     ): BecalmResult<CommitmentRepository.RefreshStats> {
         val useStoredCursor = since == null && counterpartyRef == null && direction == null && actionState == null
-        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(CURSOR_KEY).firstOrNull() else null
+        val cursorKey = MirrorCursorKeys.commitments(userId)
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).firstOrNull() else null
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -156,6 +170,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
                     personId = counterpartyRef,
                     direction = direction,
                     actionState = actionState,
+                    includeUnresolvedCounterparty = true,
                 )
             }) {
                 is BecalmResult.Failure -> return apiResult
@@ -177,8 +192,12 @@ public class CommitmentRepositoryImpl @Inject constructor(
                         dao.findByIdsForMerge(userId, page.data.map { it.id })
                             .associateBy { it.id }
                     val entities = page.data.map { it.toEntity(userId, existingById[it.id]) }
+                    logCommitmentRefreshShapes(pageIndex = pageIndex, entities = entities)
                     dao.insertAll(entities)
+                    reminderReconcilePort.reconcileRows(entities)
+                    upsertSourceEventAnchorsForCommitments(userId, entities)
                     if (entities.isNotEmpty()) {
+                        linkResolvedParticipantsForCommitments(userId, entities)
                         databaseProvider.get().personIndexDao().upsertDirtySources(
                             PersonIndexDirtySources.forCommitments(
                                 commitments = entities,
@@ -193,7 +212,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
                     lastCursor = page.cursor
                     cursor = page.cursor
                     if (useStoredCursor) {
-                        cursorStore.setCursor(CURSOR_KEY, page.cursor)
+                        cursorStore.setCursor(cursorKey, page.cursor)
                     }
                 }
             }
@@ -207,6 +226,183 @@ public class CommitmentRepositoryImpl @Inject constructor(
                 nextCursor = lastCursor,
             )
         )
+    }
+
+    private fun logCommitmentRefreshShapes(pageIndex: Int, entities: List<CommitmentEntity>) {
+        if (entities.isEmpty()) return
+        val summary = entities
+            .groupingBy {
+                CommitmentRefreshShape(
+                    sourceType = it.sourceType,
+                    itemType = it.itemType,
+                    scheduleStatus = it.scheduleStatus,
+                    hasDirection = !it.direction.isNullOrBlank(),
+                )
+            }
+            .eachCount()
+            .entries
+            .sortedWith(
+                compareBy<Map.Entry<CommitmentRefreshShape, Int>> { it.key.sourceType }
+                    .thenBy { it.key.itemType }
+                    .thenBy { it.key.scheduleStatus.orEmpty() }
+                    .thenBy { it.key.hasDirection },
+            )
+            .joinToString(separator = ";") { (shape, count) ->
+                "source=${shape.sourceType},item=${shape.itemType},schedule=${shape.scheduleStatus ?: "none"}," +
+                    "direction=${shape.hasDirection},count=$count"
+            }
+        logger.d(TAG, "refreshSince page=$pageIndex commitment_shapes=$summary")
+    }
+
+    private data class CommitmentRefreshShape(
+        val sourceType: String,
+        val itemType: String,
+        val scheduleStatus: String?,
+        val hasDirection: Boolean,
+    )
+
+    private suspend fun upsertSourceEventAnchorsForCommitments(
+        userId: String,
+        commitments: List<CommitmentEntity>,
+    ) {
+        val now = Clock.System.now()
+        val db = databaseProvider.get()
+        val sourceKeys = commitments.flatMap { commitment ->
+            listOfNotNull(
+                commitment.sourceEventId?.trim()?.takeIf { it.isNotEmpty() },
+                commitment.sourceRef?.trim()?.takeIf { it.isNotEmpty() },
+            )
+        }.distinct()
+        val rawEvents = if (sourceKeys.isEmpty()) {
+            emptyList()
+        } else {
+            db.rawIngestionEventDao().findByIdsForUser(userId = userId, ids = sourceKeys) +
+                db.rawIngestionEventDao().findBySourceRefsForUser(userId = userId, sourceRefs = sourceKeys)
+        }.distinctBy { it.id }
+        val rawById = rawEvents.associateBy { it.id }
+        val rawBySourceRef = rawEvents
+            .filter { !it.sourceRef.isNullOrBlank() }
+            .associateBy { it.sourceRef }
+        val anchors = commitments.mapNotNull { commitment ->
+            val sourceEventId = commitment.sourceEventId?.trim()?.takeIf { it.isNotEmpty() }
+            val sourceRef = commitment.sourceRef?.trim()?.takeIf { it.isNotEmpty() }
+            val title = commitment.sourceEventTitle?.trim()?.takeIf { it.isNotEmpty() }
+                ?: commitment.title.trim().takeIf { it.isNotEmpty() }
+            if (sourceEventId == null && sourceRef == null && title == null) return@mapNotNull null
+            val raw = sourceEventId?.let(rawById::get)
+                ?: sourceRef?.let(rawById::get)
+                ?: sourceRef?.let(rawBySourceRef::get)
+            SourceEventAnchorEntity(
+                id = stableSourceEventAnchorId(
+                    userId = userId,
+                    sourceType = commitment.sourceType,
+                    sourceEventId = sourceEventId,
+                    localRawEventId = null,
+                    sourceRef = sourceRef,
+                    providerEventId = sourceRef,
+                ),
+                userId = userId,
+                sourceType = commitment.sourceType,
+                sourceOrigin = SourceEventAnchorOrigin.BACKEND,
+                sourceEventId = sourceEventId,
+                localRawEventId = raw?.id,
+                sourceConnectionId = null,
+                sourceAccountKey = null,
+                providerEventId = raw?.sourceRef ?: sourceRef,
+                conversationRef = raw?.conversationRef,
+                sourceRef = sourceRef,
+                title = title,
+                snippet = raw?.eventSnippet,
+                occurredAt = raw?.timestamp ?: commitment.sourceEventOccurredAt,
+                createdAt = commitment.createdAt,
+                updatedAt = now,
+            )
+        }
+        if (anchors.isNotEmpty()) {
+            db.sourceEventAnchorDao().upsertAll(anchors)
+        }
+    }
+
+    private suspend fun linkResolvedParticipantsForUser(userId: String): Int {
+        val commitments = dao.findLiveReviewableCommitmentsForUser(userId)
+        return linkResolvedParticipantsForCommitments(userId, commitments)
+    }
+
+    private suspend fun linkResolvedParticipantsForCommitments(
+        userId: String,
+        commitments: List<CommitmentEntity>,
+    ): Int {
+        val reviewable = commitments.filter { commitment ->
+            commitment.itemType in REVIEWABLE_PERSON_LINK_ITEM_TYPES &&
+                (!commitment.sourceRef.isNullOrBlank() || !commitment.sourceEventId.isNullOrBlank())
+        }
+        if (reviewable.isEmpty()) return 0
+
+        val personIndexDao = databaseProvider.get().personIndexDao()
+        val now = Clock.System.now()
+        val rows = reviewable
+            .groupBy { it.sourceType }
+            .flatMap { (sourceType, sourceCommitments) ->
+                val refs = sourceCommitments.mapNotNull { it.sourceRef?.trim()?.takeIf(String::isNotEmpty) }.distinct()
+                val eventIds = sourceCommitments.mapNotNull { it.sourceEventId?.trim()?.takeIf(String::isNotEmpty) }.distinct()
+                val participantsByRef = if (refs.isEmpty()) {
+                    emptyMap()
+                } else {
+                    personIndexDao
+                        .findResolvedCounterpartyParticipantsForSourceRefs(
+                            userId = userId,
+                            sourceType = sourceType,
+                            sourceRefs = refs,
+                        )
+                        .filter(SourceEventParticipantEntity::isResolvedCounterparty)
+                        .groupBy { it.sourceRef }
+                }
+                val participantsByEventId = if (eventIds.isEmpty()) {
+                    emptyMap()
+                } else {
+                    personIndexDao
+                        .findSourceEventParticipantsForUserAndEventIds(
+                            userId = userId,
+                            sourceEventIds = eventIds,
+                        )
+                        .filter { it.sourceType == sourceType }
+                        .filter(SourceEventParticipantEntity::isResolvedCounterparty)
+                        .groupBy { it.sourceEventId }
+                }
+                sourceCommitments.flatMap { commitment ->
+                    val participants = (
+                        participantsByRef[commitment.sourceRef].orEmpty() +
+                            commitment.sourceEventId?.let { participantsByEventId[it] }.orEmpty()
+                        ).distinctBy { it.id }
+                    val singleCounterpartyPersonId = participants
+                        .mapNotNull { it.personId }
+                        .distinct()
+                        .take(2)
+                        .singleOrNull()
+                    participants
+                        .filter { participant ->
+                            participant.personId != null &&
+                                (commitment.matchesResolvedParticipant(participant) || participant.personId == singleCounterpartyPersonId)
+                        }
+                        .distinctBy { it.personId }
+                        .mapNotNull { participant ->
+                            participant.personId?.let { personId ->
+                                commitment.toResolvedCommitmentParticipant(
+                                    userId = userId,
+                                    personId = personId,
+                                    now = now,
+                                )
+                            }
+                        }
+                }
+            }
+            .distinctBy { it.id }
+
+        if (rows.isNotEmpty()) {
+            personIndexDao.upsertCommitmentParticipants(rows)
+            logger.d(TAG, "linked resolved source participants to commitments count=${rows.size}")
+        }
+        return rows.size
     }
 
     // ── State machine ─────────────────────────────────────────────────────────
@@ -517,6 +713,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
             actionState = "pending",
             sourceType = oldRow.sourceType,
             sourceRef = oldRow.sourceRef,
+            sourceEventId = oldRow.sourceEventId,
             confidence = oldRow.confidence,
             commitmentState = CommitmentLifecycleLegacy.DRAFT,
             syncStatus = "pending",
@@ -755,4 +952,57 @@ public class CommitmentRepositoryImpl @Inject constructor(
             else -> BecalmResult.Failure(BecalmError.Network(code, message() ?: "unknown error"))
         }
     }
+}
+
+private val REVIEWABLE_PERSON_LINK_ITEM_TYPES: Set<String> =
+    setOf(CommitmentItemType.ACTION, CommitmentItemType.DECISION)
+
+private fun SourceEventParticipantEntity.isResolvedCounterparty(): Boolean =
+    personId != null &&
+        relationToUser in setOf("counterparty", "participant") &&
+        resolutionStatus in setOf("person_resolved", "resolved")
+
+private fun CommitmentEntity.matchesResolvedParticipant(participant: SourceEventParticipantEntity): Boolean {
+    val participantTokens = listOfNotNull(
+        participant.normalizedValue,
+        participant.emailRaw,
+        participant.phoneRaw,
+        participant.displayNameRaw,
+    ).mapNotNull(::commitmentParticipantIdentityToken).toSet()
+    if (participantTokens.isEmpty()) return false
+    return listOfNotNull(counterpartyRef, counterpartyRaw)
+        .mapNotNull(::commitmentParticipantIdentityToken)
+        .any(participantTokens::contains)
+}
+
+private fun CommitmentEntity.toResolvedCommitmentParticipant(
+    userId: String,
+    personId: String,
+    now: Instant,
+): CommitmentParticipantEntity {
+    val participantRole = when (itemType) {
+        CommitmentItemType.DECISION -> "decision_maker"
+        else -> direction ?: "owner"
+    }
+    return CommitmentParticipantEntity(
+        id = UUID.nameUUIDFromBytes(
+            "commitment-participant:$userId:$id:$personId:$participantRole".toByteArray(Charsets.UTF_8),
+        ).toString(),
+        userId = userId,
+        commitmentId = id,
+        personId = personId,
+        role = participantRole,
+        evidence = quote,
+        confidence = confidence,
+        createdAt = now,
+    )
+}
+
+private fun commitmentParticipantIdentityToken(value: String?): String? {
+    val raw = value?.trim().orEmpty()
+    if (raw.isBlank()) return null
+    if ("@" in raw) return raw.lowercase()
+    val digits = raw.filter { it.isDigit() || it == '+' }
+    if (digits.startsWith("+") && digits.length >= 8) return digits
+    return raw.lowercase().split(Regex("\\s+")).filter(String::isNotBlank).joinToString(" ")
 }

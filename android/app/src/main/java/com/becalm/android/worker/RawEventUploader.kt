@@ -48,6 +48,10 @@ internal class RawEventUploader(
 
             when (val uploadResult = rawIngestionRepository.uploadBatch(pending)) {
                 is BecalmResult.Success -> {
+                    rawIngestionRepository.recordServerAcknowledgements(
+                        userId = userId,
+                        acknowledgements = uploadResult.value.acknowledgements,
+                    )
                     val ack = partitionAndAckBatch(pending, uploadResult.value, Clock.System.now())
                     recordBatchAck(pending, uploadResult.value, progressBySource)
                     totalUploaded += ack.syncedCount

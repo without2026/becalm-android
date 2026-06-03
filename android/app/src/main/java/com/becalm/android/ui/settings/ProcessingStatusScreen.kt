@@ -1,5 +1,7 @@
 package com.becalm.android.ui.settings
 
+import androidx.annotation.StringRes
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -53,24 +54,34 @@ import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.isActive
-import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
+import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.localizedProcessingStatusMessage
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.dispatchSourceDetailEffect
+import com.becalm.android.ui.sources.SourceDetailActionResolver
+import com.becalm.android.ui.sources.SourceDetailEffect
+import com.becalm.android.ui.sources.SourceReconnectDestination
+import com.becalm.android.ui.sources.SourceSyncPort
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -89,6 +100,8 @@ public data class ProcessingStatusRow(
     val updatedAt: Instant?,
     val items: List<ProcessingStatusItem> = emptyList(),
     val opensSourceDetail: Boolean = true,
+    val recoveryAction: ProcessingStatusRecoveryAction? = null,
+    val recoveryInProgress: Boolean = false,
 )
 
 @Immutable
@@ -102,14 +115,49 @@ public data class ProcessingStatusItem(
     val updatedAt: Instant?,
 )
 
+public enum class ProcessingStatusRecoveryActionType {
+    RETRY_SOURCE_SYNC,
+    RECONNECT_SOURCE,
+    OPEN_RECORDING_SETUP,
+    OPEN_CONSENT_SETTINGS,
+}
+
+@Immutable
+public data class ProcessingStatusRecoveryAction(
+    val type: ProcessingStatusRecoveryActionType,
+    @StringRes val labelRes: Int,
+)
+
+public sealed interface ProcessingStatusEffect {
+    public data class OpenReconnect(
+        val destination: SourceReconnectDestination,
+        val sourceType: String,
+    ) : ProcessingStatusEffect
+
+    public data object OpenConsentSettings : ProcessingStatusEffect
+}
+
 @HiltViewModel
 public class ProcessingStatusViewModel @Inject constructor(
     processingStatusRepository: ProcessingStatusRepository,
-    sourceStatusRepository: SourceStatusRepository,
+    private val sourceStatusRepository: SourceStatusRepository,
     rawIngestionRepository: RawIngestionRepository,
     private val audioProcessingConfirmationRepository: AudioProcessingConfirmationRepository,
+    private val sourceSyncPort: SourceSyncPort,
     authRepository: AuthRepository,
 ) : ViewModel() {
+    private val actionInProgressSourceType: MutableStateFlow<String?> = MutableStateFlow(null)
+    private val _effects: MutableSharedFlow<ProcessingStatusEffect> =
+        MutableSharedFlow(extraBufferCapacity = 1)
+
+    public val effects: SharedFlow<ProcessingStatusEffect> = _effects.asSharedFlow()
+
+    init {
+        viewModelScope.launch {
+            sourceStatusRepository.refreshFromServer()
+        }
+    }
+
     private val processingItemsFlow = flow {
         val userId = authRepository.currentSession()?.userId
         if (userId.isNullOrBlank()) {
@@ -124,20 +172,22 @@ public class ProcessingStatusViewModel @Inject constructor(
             processingStatusRepository.observeAll(),
             sourceStatusRepository.observeSources(),
             processingItemsFlow,
-        ) { states, sourceStatuses, activeItems ->
-                val itemsBySource = activeItems
-                    .map(RawIngestionEventEntity::toProcessingStatusItem)
-                    .groupBy { item -> item.sourceType }
-                ProcessingStatusUiState(
-                    rows = states.mapNotNull { state ->
-                        toRow(
-                            state = state,
-                            sourceStatus = sourceStatuses[state.sourceType],
-                            items = itemsBySource[state.sourceType].orEmpty(),
-                        )
-                    },
-                )
-            }
+            actionInProgressSourceType,
+        ) { states, sourceStatuses, activeItems, inProgressSourceType ->
+            val itemsBySource = activeItems
+                .map(RawIngestionEventEntity::toProcessingStatusItem)
+                .groupBy { item -> item.sourceType }
+            ProcessingStatusUiState(
+                rows = states.mapNotNull { state ->
+                    toRow(
+                        state = state.withSourceStatusOverlay(sourceStatuses[state.sourceType]),
+                        sourceStatus = sourceStatuses[state.sourceType],
+                        items = itemsBySource[state.sourceType].orEmpty(),
+                        inProgressSourceType = inProgressSourceType,
+                    )
+                },
+            )
+        }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
@@ -148,6 +198,7 @@ public class ProcessingStatusViewModel @Inject constructor(
         state: ProcessingSourceState,
         sourceStatus: SourceStatus?,
         items: List<ProcessingStatusItem>,
+        inProgressSourceType: String?,
     ): ProcessingStatusRow? {
         val isManualEvidence = state.sourceType == SourceType.MESSAGE_SCREENSHOT
         if (
@@ -165,6 +216,8 @@ public class ProcessingStatusViewModel @Inject constructor(
             updatedAt = state.updatedAt,
             items = items,
             opensSourceDetail = !isManualEvidence && state.phase != ProcessingPhase.AWAITING_CONFIRMATION,
+            recoveryAction = recoveryActionFor(state, sourceStatus),
+            recoveryInProgress = inProgressSourceType == state.sourceType,
         )
     }
 
@@ -178,6 +231,118 @@ public class ProcessingStatusViewModel @Inject constructor(
         viewModelScope.launch {
             audioProcessingConfirmationRepository.skip(rawEventId)
         }
+    }
+
+    public fun onRecoveryAction(sourceType: String, actionType: ProcessingStatusRecoveryActionType) {
+        when (actionType) {
+            ProcessingStatusRecoveryActionType.RETRY_SOURCE_SYNC -> retrySourceSync(sourceType)
+            ProcessingStatusRecoveryActionType.RECONNECT_SOURCE,
+            ProcessingStatusRecoveryActionType.OPEN_RECORDING_SETUP,
+            -> openReconnect(sourceType)
+            ProcessingStatusRecoveryActionType.OPEN_CONSENT_SETTINGS ->
+                _effects.tryEmit(ProcessingStatusEffect.OpenConsentSettings)
+        }
+    }
+
+    private fun retrySourceSync(sourceType: String) {
+        if (actionInProgressSourceType.value == sourceType) return
+        viewModelScope.launch {
+            actionInProgressSourceType.value = sourceType
+            try {
+                sourceSyncPort.requestManualSync(sourceType)
+                sourceStatusRepository.refreshFromServer()
+            } finally {
+                actionInProgressSourceType.value = null
+            }
+        }
+    }
+
+    private fun openReconnect(sourceType: String) {
+        val destination = SourceDetailActionResolver.reconnectDestinationFor(sourceType) ?: return
+        _effects.tryEmit(
+            ProcessingStatusEffect.OpenReconnect(
+                destination = destination,
+                sourceType = sourceType,
+            ),
+        )
+    }
+
+    private fun recoveryActionFor(
+        state: ProcessingSourceState,
+        sourceStatus: SourceStatus?,
+    ): ProcessingStatusRecoveryAction? {
+        if (state.sourceType == SourceType.MESSAGE_SCREENSHOT) return null
+        if (state.phase == ProcessingPhase.AWAITING_CONFIRMATION) return null
+
+        val message = state.message.normalizedRecoveryMessage()
+        return when (state.phase) {
+            ProcessingPhase.BLOCKED -> blockedRecoveryAction(state.sourceType, message, sourceStatus)
+            ProcessingPhase.ERROR -> errorRecoveryAction(state.sourceType, message, sourceStatus)
+            else -> null
+        }
+    }
+
+    private fun blockedRecoveryAction(
+        sourceType: String,
+        message: String,
+        sourceStatus: SourceStatus?,
+    ): ProcessingStatusRecoveryAction? =
+        when {
+            message.isConsentRequiredMessage() -> ProcessingStatusRecoveryAction(
+                type = ProcessingStatusRecoveryActionType.OPEN_CONSENT_SETTINGS,
+                labelRes = R.string.evidence_import_status_action_consent,
+            )
+            message.isRecordingSetupMessage() -> ProcessingStatusRecoveryAction(
+                type = ProcessingStatusRecoveryActionType.OPEN_RECORDING_SETUP,
+                labelRes = R.string.processing_status_action_recording_setup,
+            )
+            message.isCredentialOrAuthMessage() -> ProcessingStatusRecoveryAction(
+                type = ProcessingStatusRecoveryActionType.RECONNECT_SOURCE,
+                labelRes = R.string.action_reconnect,
+            )
+            sourceStatus?.status == SourceConnectionStatus.ERROR -> ProcessingStatusRecoveryAction(
+                type = ProcessingStatusRecoveryActionType.RECONNECT_SOURCE,
+                labelRes = R.string.action_reconnect,
+            )
+            sourceType.isSyncRetryableSource() -> ProcessingStatusRecoveryAction(
+                type = ProcessingStatusRecoveryActionType.RETRY_SOURCE_SYNC,
+                labelRes = R.string.evidence_import_status_action_retry_failed,
+            )
+            else -> null
+        }
+
+    private fun errorRecoveryAction(
+        sourceType: String,
+        message: String,
+        sourceStatus: SourceStatus?,
+    ): ProcessingStatusRecoveryAction? {
+        val sourceError = sourceStatus?.errorMessage.normalizedRecoveryMessage()
+        if (message.isCredentialOrAuthMessage() || sourceError.isCredentialOrAuthMessage()) {
+            return ProcessingStatusRecoveryAction(
+                type = ProcessingStatusRecoveryActionType.RECONNECT_SOURCE,
+                labelRes = R.string.action_reconnect,
+            )
+        }
+        if (!sourceType.isSyncRetryableSource()) return null
+        return ProcessingStatusRecoveryAction(
+            type = ProcessingStatusRecoveryActionType.RETRY_SOURCE_SYNC,
+            labelRes = R.string.evidence_import_status_action_retry_failed,
+        )
+    }
+}
+
+private fun ProcessingSourceState.withSourceStatusOverlay(sourceStatus: SourceStatus?): ProcessingSourceState {
+    if (phase != ProcessingPhase.IDLE) return this
+    return when (sourceStatus?.status) {
+        SourceConnectionStatus.SYNCING -> copy(
+            phase = ProcessingPhase.SCANNING,
+            message = message ?: sourceStatus.errorMessage,
+        )
+        SourceConnectionStatus.ERROR -> copy(
+            phase = ProcessingPhase.ERROR,
+            message = message ?: sourceStatus.errorMessage,
+        )
+        else -> this
     }
 }
 
@@ -204,9 +369,23 @@ public fun ProcessingStatusScreen(
         onOpenSource = { sourceType ->
             navController.navigate(BecalmRoute.SourceDetail(sourceType).path)
         },
+        onRecoveryAction = viewModel::onRecoveryAction,
         onConfirmAudioItem = viewModel::onConfirmAudioItem,
         onSkipAudioItem = viewModel::onSkipAudioItem,
     )
+    CollectFlowEffect(viewModel.effects) { effect ->
+        when (effect) {
+            is ProcessingStatusEffect.OpenReconnect ->
+                navController.dispatchSourceDetailEffect(
+                    SourceDetailEffect.OpenReconnect(
+                        destination = effect.destination,
+                        sourceType = effect.sourceType,
+                    ),
+                )
+            ProcessingStatusEffect.OpenConsentSettings ->
+                navController.navigate(BecalmRoute.Settings.path)
+        }
+    }
 }
 
 @Composable
@@ -215,6 +394,7 @@ internal fun ProcessingStatusContent(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenSource: (String) -> Unit = {},
+    onRecoveryAction: (String, ProcessingStatusRecoveryActionType) -> Unit = { _, _ -> },
     onConfirmAudioItem: (String) -> Unit = {},
     onSkipAudioItem: (String) -> Unit = {},
 ) {
@@ -263,6 +443,7 @@ internal fun ProcessingStatusContent(
                     title = activeTitle,
                     rows = activeRows,
                     onOpenSource = onOpenSource,
+                    onRecoveryAction = onRecoveryAction,
                     onConfirmAudioItem = onConfirmAudioItem,
                     onSkipAudioItem = onSkipAudioItem,
                 )
@@ -271,6 +452,7 @@ internal fun ProcessingStatusContent(
                     title = actionTitle,
                     rows = actionRows,
                     onOpenSource = onOpenSource,
+                    onRecoveryAction = onRecoveryAction,
                     onConfirmAudioItem = onConfirmAudioItem,
                     onSkipAudioItem = onSkipAudioItem,
                 )
@@ -279,6 +461,7 @@ internal fun ProcessingStatusContent(
                     title = quietTitle,
                     rows = quietRows,
                     onOpenSource = onOpenSource,
+                    onRecoveryAction = onRecoveryAction,
                     onConfirmAudioItem = onConfirmAudioItem,
                     onSkipAudioItem = onSkipAudioItem,
                 )
@@ -292,6 +475,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.processingGroup(
     title: String,
     rows: List<ProcessingStatusRow>,
     onOpenSource: (String) -> Unit,
+    onRecoveryAction: (String, ProcessingStatusRecoveryActionType) -> Unit,
     onConfirmAudioItem: (String) -> Unit,
     onSkipAudioItem: (String) -> Unit,
 ) {
@@ -310,6 +494,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.processingGroup(
             onClick = {
                 if (row.opensSourceDetail) onOpenSource(row.sourceType)
             },
+            onRecoveryAction = onRecoveryAction,
             onConfirmAudioItem = onConfirmAudioItem,
             onSkipAudioItem = onSkipAudioItem,
         )
@@ -341,6 +526,7 @@ private fun ProcessingSummary(activeCount: Int, actionCount: Int) {
 private fun ProcessingStatusRowCard(
     row: ProcessingStatusRow,
     onClick: () -> Unit,
+    onRecoveryAction: (String, ProcessingStatusRecoveryActionType) -> Unit,
     onConfirmAudioItem: (String) -> Unit,
     onSkipAudioItem: (String) -> Unit,
 ) {
@@ -391,6 +577,10 @@ private fun ProcessingStatusRowCard(
                     onConfirmAudioItem = onConfirmAudioItem,
                     onSkipAudioItem = onSkipAudioItem,
                 )
+                ProcessingRecoveryActionButton(
+                    row = row,
+                    onRecoveryAction = onRecoveryAction,
+                )
             }
             if (row.opensSourceDetail) {
                 Icon(
@@ -402,6 +592,24 @@ private fun ProcessingStatusRowCard(
             }
         }
     }
+}
+
+@Composable
+private fun ProcessingRecoveryActionButton(
+    row: ProcessingStatusRow,
+    onRecoveryAction: (String, ProcessingStatusRecoveryActionType) -> Unit,
+) {
+    val action = row.recoveryAction ?: return
+    Spacer(modifier = Modifier.size(12.dp))
+    BecalmButton(
+        text = stringResource(action.labelRes),
+        onClick = { onRecoveryAction(row.sourceType, action.type) },
+        variant = BecalmButtonVariant.Secondary,
+        loading = row.recoveryInProgress,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("processing-status-recovery-${row.sourceType}"),
+    )
 }
 
 @Composable
@@ -559,7 +767,7 @@ private fun ProcessingStatusRow.userFacingMessage(): String? {
                 ?: stringResource(R.string.processing_status_audio_confirmation_required)
         phase == ProcessingPhase.BLOCKED || phase == ProcessingPhase.ERROR ->
             message?.takeIf { it.isNotBlank() }
-            ?: stringResource(R.string.processing_status_error_reconnect_needed)
+                ?: stringResource(R.string.processing_status_error_reconnect_needed)
         else -> message?.takeIf { it.isNotBlank() }
     }
 }
@@ -612,3 +820,38 @@ private fun formatTimeHHmm(at: Instant): String {
     val mm = local.minute.toString().padStart(2, '0')
     return "$hh:$mm"
 }
+
+private fun String?.normalizedRecoveryMessage(): String =
+    this.orEmpty().trim().lowercase()
+
+private fun String.isConsentRequiredMessage(): Boolean =
+    contains("pipa consent") ||
+        contains("consent required") ||
+        contains("음성 처리 동의") ||
+        contains("동의가 필요")
+
+private fun String.isRecordingSetupMessage(): Boolean =
+    contains("audio permission missing") ||
+        contains("recording path selection missing") ||
+        contains("permission missing") ||
+        contains("path selection missing") ||
+        contains("권한") ||
+        contains("폴더")
+
+private fun String.isCredentialOrAuthMessage(): Boolean =
+    contains("needs_reauth") ||
+        contains("unauthorized") ||
+        contains("credential") ||
+        contains("credentials missing") ||
+        contains("token") ||
+        contains("imap credentials") ||
+        contains("인증") ||
+        contains("다시 연결")
+
+private fun String.isSyncRetryableSource(): Boolean =
+    this == SourceType.GMAIL ||
+        this == SourceType.OUTLOOK_MAIL ||
+        this == SourceType.NAVER_IMAP ||
+        this == SourceType.DAUM_IMAP ||
+        this == SourceType.GOOGLE_CALENDAR ||
+        this == SourceType.OUTLOOK_CALENDAR

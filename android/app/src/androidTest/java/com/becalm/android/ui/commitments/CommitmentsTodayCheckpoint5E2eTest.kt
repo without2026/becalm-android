@@ -264,6 +264,8 @@ class CommitmentsTodayCheckpoint5E2eTest {
                     scheduleStatus = null,
                     rowTreatment = TodayCommitmentRowTreatment.ACTION,
                     counterpartyDisplayName = "Alice Kim",
+                    sourceTitle = "업무 메일",
+                    quote = "10시까지 제안서를 보내겠습니다.",
                     dueAt = Instant.parse("2026-05-07T01:00:00Z"),
                     dueIsApproximate = false,
                     dueHint = null,
@@ -279,6 +281,8 @@ class CommitmentsTodayCheckpoint5E2eTest {
                     scheduleStatus = null,
                     rowTreatment = TodayCommitmentRowTreatment.ACTION,
                     counterpartyDisplayName = "Bob Lee",
+                    sourceTitle = "업무 메일",
+                    quote = "시간 정해서 회신하겠습니다.",
                     dueAt = null,
                     dueIsApproximate = false,
                     dueHint = null,
@@ -294,6 +298,8 @@ class CommitmentsTodayCheckpoint5E2eTest {
                     scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
                     rowTreatment = TodayCommitmentRowTreatment.SCHEDULE,
                     counterpartyDisplayName = "Carol Park",
+                    sourceTitle = "캘린더",
+                    quote = "오후 리뷰 미팅",
                     dueAt = Instant.parse("2026-05-07T06:00:00Z"),
                     dueIsApproximate = false,
                     dueHint = null,
@@ -304,7 +310,7 @@ class CommitmentsTodayCheckpoint5E2eTest {
             ),
         )
 
-        composeTestRule.onNodeWithText(string(R.string.schedule_range_upcoming)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.schedule_range_next_7_days)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.schedule_section_today)).assertIsDisplayed()
         composeTestRule.onNodeWithText("10시까지 제안서 보내기").assertIsDisplayed()
         composeTestRule.onNodeWithText("오후 리뷰 미팅").assertIsDisplayed()
@@ -325,6 +331,8 @@ class CommitmentsTodayCheckpoint5E2eTest {
                     scheduleStatus = null,
                     rowTreatment = TodayCommitmentRowTreatment.ACTION,
                     counterpartyDisplayName = "Alice Kim",
+                    sourceTitle = "업무 메일",
+                    quote = "시간 없는 회신",
                     dueAt = null,
                     dueIsApproximate = false,
                     dueHint = null,

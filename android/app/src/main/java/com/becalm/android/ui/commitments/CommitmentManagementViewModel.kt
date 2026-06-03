@@ -16,14 +16,21 @@ import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.NoopUserCorrectionRepository
+import com.becalm.android.data.repository.PersonActionRepository
+import com.becalm.android.data.repository.PersonActionRefreshStats
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.SourceParticipantRefreshScope
@@ -41,6 +48,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -119,6 +127,7 @@ public data class CommitmentRow(
     val isManual: Boolean = false,
     val deEmphasized: Boolean = false,
     val scheduleTimelineTiming: ScheduleTimelineTiming? = null,
+    val agendaIntent: String? = null,
 )
 
 /**
@@ -231,6 +240,7 @@ public sealed interface CommitmentUndoSnapshot {
 // spec: CMT-001, CMT-010
 public data class CommitmentUiState(
     val items: List<CommitmentRow> = emptyList(),
+    val topActions: List<PersonActionItemUi> = emptyList(),
     val activeItems: List<CommitmentRow> = emptyList(),
     val scheduleUpcomingItems: List<CommitmentRow> = emptyList(),
     val schedulePastSection: CommitmentSectionUiState = CommitmentSectionUiState(expanded = false, dimmed = true),
@@ -267,6 +277,7 @@ public sealed interface CommitmentManagementNavigation {
 
 private const val TAG = "CommitmentMgmtVM"
 private const val PULL_REFRESH_SOURCE = "commitments_pull_refresh"
+private const val COMMITMENT_ACTION_LIMIT = 100
 
 /**
  * ViewModel for CommitmentManagementScreen.
@@ -294,6 +305,8 @@ public class CommitmentManagementViewModel @Inject constructor(
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    private val userCorrectionRepository: UserCorrectionRepository = NoopUserCorrectionRepository,
+    private val personActionRepository: PersonActionRepository = NoopPersonActionRepository,
     private val workScheduler: WorkScheduler,
     private val reminderScheduler: ReminderScheduler,
     private val userPrefsStore: UserPrefsStore,
@@ -344,8 +357,8 @@ public class CommitmentManagementViewModel @Inject constructor(
      * [onFilterChange] can re-apply a different filter without re-querying Room.
      */
     private val allRows: MutableStateFlow<List<CommitmentManagementRow>> = MutableStateFlow(emptyList())
-    private val allScheduleLinks: MutableStateFlow<List<com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity>> =
-        MutableStateFlow(emptyList())
+    private val allScheduleLinks: MutableStateFlow<List<ScheduleEventLinkEntity>> = MutableStateFlow(emptyList())
+    private val allActionRows: MutableStateFlow<List<PersonActionItemCacheEntity>> = MutableStateFlow(emptyList())
     private val inFlightActionIds: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
 
     init {
@@ -368,22 +381,31 @@ public class CommitmentManagementViewModel @Inject constructor(
             userPrefsStore.observeCurrentUserId()
                 .flatMapLatest { userId ->
                     if (userId == null) return@flatMapLatest flowOf(
-                        CommitmentRowsWithLinks(rows = emptyList(), scheduleLinks = emptyList()),
+                        CommitmentRowsWithLinks(rows = emptyList(), scheduleLinks = emptyList(), actionRows = emptyList()),
                     )
+                    refreshCommitmentActions(userId)
                     commitmentRepository.observeManagementRowsForUser(userId)
                         .flatMapLatest { rows ->
                             val repository = scheduleEventLinkRepository
-                            if (repository == null) {
-                                flowOf(CommitmentRowsWithLinks(rows = rows, scheduleLinks = emptyList()))
+                            val linksFlow = if (repository == null) {
+                                flowOf(emptyList())
                             } else {
                                 repository.observeForProjectionRefs(
                                     userId = userId,
                                     commitmentIds = rows.map { it.id },
                                     rawEventIds = emptyList(),
                                     calendarEventIds = emptyList(),
-                                ).map { links ->
-                                    CommitmentRowsWithLinks(rows = rows, scheduleLinks = links)
-                                }
+                                )
+                            }
+                            combine(
+                                linksFlow,
+                                personActionRepository.observeActiveForSurface(
+                                    userId = userId,
+                                    surface = "commitment",
+                                    limit = COMMITMENT_ACTION_LIMIT,
+                                ),
+                            ) { links, actionRows ->
+                                CommitmentRowsWithLinks(rows = rows, scheduleLinks = links, actionRows = actionRows)
                             }
                         }
                 }
@@ -396,11 +418,14 @@ public class CommitmentManagementViewModel @Inject constructor(
                     val rows = snapshot.rows
                     allRows.value = rows
                     allScheduleLinks.value = snapshot.scheduleLinks
+                    allActionRows.value = snapshot.actionRows
+                    reconcileDefaultReminders(rows)
                     val projectedState = withContext(ioDispatcher) {
                         CommitmentManagementProjector.buildUiState(
                             current = _uiState.value,
                             rows = rows,
                             scheduleLinks = snapshot.scheduleLinks,
+                            actionRows = snapshot.actionRows,
                             loading = false,
                             now = clock.nowInstant(),
                         )
@@ -412,7 +437,8 @@ public class CommitmentManagementViewModel @Inject constructor(
 
     private data class CommitmentRowsWithLinks(
         val rows: List<CommitmentManagementRow>,
-        val scheduleLinks: List<com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity>,
+        val scheduleLinks: List<ScheduleEventLinkEntity>,
+        val actionRows: List<PersonActionItemCacheEntity>,
     )
 
     // ─── Actions ──────────────────────────────────────────────────────────────
@@ -437,6 +463,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                     current = _uiState.value,
                     rows = allRows.value,
                     scheduleLinks = allScheduleLinks.value,
+                    actionRows = allActionRows.value,
                     filter = filter,
                     now = clock.nowInstant(),
                 )
@@ -525,6 +552,10 @@ public class CommitmentManagementViewModel @Inject constructor(
                     _uiState.update { it.copy(refreshing = false) }
                     return@launch
                 }
+                when (val result = personActionRepository.refresh(userId = userId, surface = "commitment")) {
+                    is BecalmResult.Success -> Unit
+                    is BecalmResult.Failure -> logger.w(TAG, "commitment action refresh failed: ${result.error}")
+                }
                 when (
                     val result = relationRefreshCoordinator().refresh(
                         userId = userId,
@@ -559,9 +590,19 @@ public class CommitmentManagementViewModel @Inject constructor(
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
             scheduleEventLinkRepository = scheduleEventLinkRepository,
+            userCorrectionRepository = userCorrectionRepository,
             workScheduler = workScheduler,
             logger = logger,
         )
+
+    private fun refreshCommitmentActions(userId: String) {
+        viewModelScope.launch(ioDispatcher) {
+            when (val result = personActionRepository.refresh(userId = userId, surface = "commitment")) {
+                is BecalmResult.Success -> Unit
+                is BecalmResult.Failure -> logger.w(TAG, "commitment action refresh failed: ${result.error}")
+            }
+        }
+    }
 
     /**
      * Records that the user pressed [리마인드] on the commitment (CMT-005).
@@ -575,15 +616,40 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-005
     public fun onRemind(id: String) {
-        launchAction(
-            name = "onRemind",
-            id = id,
-            effect = {
-                val dueAt: Instant? = allRows.value.firstOrNull { it.id == id }?.dueAt
+        onToggleReminder(id = id, enabled = true)
+    }
+
+    public fun onToggleReminder(id: String, enabled: Boolean) {
+        viewModelScope.launch(ioDispatcher) {
+            val dueAt: Instant? = allRows.value.firstOrNull { it.id == id }?.dueAt
+            userPrefsStore.setCommitmentReminderDisabled(id, disabled = !enabled)
+            if (enabled) {
                 reminderScheduler.schedule(id, dueAt)
-            },
-        ) {
-            commitmentRepository.transitionState(id, CommitmentEvent.Remind)
+            } else {
+                reminderScheduler.cancel(id)
+            }
+        }
+    }
+
+    private fun reconcileDefaultReminders(rows: List<CommitmentManagementRow>) {
+        if (rows.isEmpty()) return
+        viewModelScope.launch(ioDispatcher) {
+            val disabledIds = userPrefsStore.observeDisabledCommitmentReminderIds().firstOrNull().orEmpty()
+            rows
+                .asSequence()
+                .filter(::isReminderEligible)
+                .filterNot { it.id in disabledIds }
+                .forEach { row -> reminderScheduler.schedule(row.id, row.dueAt) }
+        }
+    }
+
+    private fun isReminderEligible(row: CommitmentManagementRow): Boolean {
+        if (row.dueAt == null || row.dueIsApproximate) return false
+        if (row.actionState in setOf("completed", "cancelled")) return false
+        return when (row.itemType) {
+            "action" -> true
+            "schedule" -> row.scheduleStatus !in setOf("tentative", "cancelled", "postponed")
+            else -> false
         }
     }
 
@@ -827,4 +893,26 @@ public class CommitmentManagementViewModel @Inject constructor(
     private companion object {
         private val HIGH_INTENT_ACTIONS = setOf("follow_up", "complete", "edit")
     }
+}
+
+private object NoopPersonActionRepository : PersonActionRepository {
+    override fun observeActiveForSurface(
+        userId: String,
+        surface: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override suspend fun refresh(
+        userId: String,
+        surface: String?,
+    ): BecalmResult<PersonActionRefreshStats> =
+        BecalmResult.Success(
+            PersonActionRefreshStats(
+                fetched = 0,
+                deleted = 0,
+                serverWatermark = null,
+                recomputeState = null,
+            ),
+        )
 }

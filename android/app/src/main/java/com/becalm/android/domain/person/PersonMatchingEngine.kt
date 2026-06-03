@@ -10,6 +10,7 @@ public data class PersonMatchParticipant(
     val title: String? = null,
     val sourceType: String? = null,
     val evidence: String? = null,
+    val outgoingSalutationNames: List<String> = emptyList(),
 )
 
 public data class PersonMatchIdentity(
@@ -174,10 +175,15 @@ public class PersonMatchingEngine(
         }
         return when (matches.size) {
             0 -> null
-            1 -> PersonMatchDecision.AutoMatched(
-                personId = matches.single().personId,
-                confidence = 0.95,
-                reason = "confirmed_alias",
+            1 -> PersonMatchDecision.NeedsUserConfirmation(
+                candidates = listOf(
+                    ScoredPersonMatchCandidate(
+                        personId = matches.single().personId,
+                        confidence = 0.95,
+                        reasons = listOf("confirmed_alias"),
+                    ),
+                ),
+                reason = "confirmed_alias_confirmation_required",
             )
             else -> PersonMatchDecision.NeedsUserConfirmation(
                 candidates = matches.map {
@@ -242,12 +248,20 @@ public class PersonMatchingEngine(
                 reasons += "confirmed_pattern"
             }
         }
+        val outgoingSalutationMatched = matchesAnyName(participant.outgoingSalutationNames, candidate).also {
+            if (it) {
+                confidence = maxOf(confidence, OUTGOING_SALUTATION_CONFIDENCE)
+                reasons += "outgoing_salutation_name"
+            }
+        }
 
         if (!nameMatched && (organizationMatched || titleMatched || workContextMatched || openCommitmentMatched || decisionMatched)) {
             confidence = minOf(confidence, 0.44)
         }
 
-        val strongBundle = (nameMatched && organizationMatched && titleMatched) || confirmedPatternMatched
+        val strongBundle = (nameMatched && organizationMatched && titleMatched) ||
+            confirmedPatternMatched ||
+            outgoingSalutationMatched
         val negativeMatched = matchesPattern(participant, context.rejectedPatterns)
 
         return ScoredSemanticCandidate(
@@ -268,6 +282,9 @@ public class PersonMatchingEngine(
                 identity.value.normalized() == name
         }
     }
+
+    private fun matchesAnyName(names: List<String>, candidate: PersonMatchCandidate): Boolean =
+        names.any { name -> matchesName(name, candidate) }
 
     private fun matchesAny(value: String?, knownValues: Set<String>): Boolean {
         val normalizedValue = value.normalized() ?: return false
@@ -310,6 +327,7 @@ public class PersonMatchingEngine(
     private companion object {
         private const val CONFIRMATION_THRESHOLD = 0.60
         private const val COMPETITION_MARGIN = 0.15
+        private const val OUTGOING_SALUTATION_CONFIDENCE = 0.90
         private val CONFIRMED_ALIAS_TYPES = setOf("alias", "name")
     }
 }
@@ -323,7 +341,7 @@ private fun String?.normalized(): String? =
         ?.takeIf { it.length >= 2 }
 
 private fun PersonMatchParticipant.semanticFingerprint(): String =
-    listOf(displayName, organization, title, evidence)
+    (listOf(displayName, organization, title, evidence) + outgoingSalutationNames)
         .mapNotNull { it.normalized() }
         .joinToString(" ")
 

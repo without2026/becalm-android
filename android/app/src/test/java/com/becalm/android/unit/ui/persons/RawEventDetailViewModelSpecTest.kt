@@ -61,6 +61,8 @@ class RawEventDetailViewModelSpecTest {
         coEvery { projectionPort.loadCommitmentQuotes(any(), any()) } returns emptyList()
         coEvery { projectionPort.loadCommitmentSummaries(any(), any()) } returns emptyList()
         coEvery { projectionPort.loadCalendarAttendeesRaw(any(), any()) } returns null
+        coEvery { projectionPort.loadParticipantCorrections(any(), any()) } returns emptyList()
+        coEvery { projectionPort.loadParticipantCorrectionChoices(any()) } returns emptyList()
         coEvery { sourceArtifactRepository.findMarkdownOriginal(any(), any()) } returns null
     }
 

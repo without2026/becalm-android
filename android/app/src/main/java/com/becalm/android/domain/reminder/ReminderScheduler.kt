@@ -75,6 +75,14 @@ public class ReminderScheduler @Inject constructor(
             )
             return
         }
+        if (userPrefsStore.observeNotificationsEnabled().firstOrNull() == false) {
+            logger.d(
+                TAG,
+                "schedule skipped: notifications disabled for commitment %08x"
+                    .format(commitmentId.hashCode()),
+            )
+            return
+        }
 
         // Capture the currently signed-in user id at schedule time so the receiver can
         // enforce a user-scoped Room lookup on fire. This remains suspend-only so UI

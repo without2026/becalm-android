@@ -61,7 +61,7 @@ internal object PersonsUiProjector {
 
     private fun toPersonRow(projection: PersonListProjection): PersonRow = PersonRow(
         personId = projection.personId,
-        displayName = projection.displayName,
+        displayName = sanitizeDisplayName(projection.displayName),
         nickname = projection.nickname,
         companyName = projection.companyName,
         jobTitle = projection.jobTitle,
@@ -69,21 +69,19 @@ internal object PersonsUiProjector {
         interactionCount = projection.eventCount,
         pendingCommitmentCount = projection.pendingCommitmentCount,
         channelSources = projection.channelSources,
-        lastInteractionSnippet = null,
+        lastInteractionSnippet = projection.topAction?.title,
+        topAction = projection.topAction,
     )
 
     private fun toPersonMatchChoiceRow(projection: PersonListProjection): PersonMatchChoiceRow {
-        val displayName = projection.displayName
-            ?: projection.nickname
-            ?: projection.personId
+        val displayName = listOfNotNull(
+            sanitizeDisplayName(projection.displayName),
+            sanitizeDisplayName(projection.nickname),
+        ).firstOrNull()
+            ?: UNKNOWN_PERSON_DISPLAY_NAME
         val detail = listOfNotNull(
-            projection.nickname
-                ?.takeUnless { it == displayName },
             projection.jobTitle,
             projection.companyName,
-            projection.personId
-                .takeUnless { it == displayName }
-                ?.takeIf(::isDisplayablePersonAnchor),
         )
             .map(String::trim)
             .filter { it.isNotEmpty() }
@@ -102,13 +100,20 @@ internal object PersonsUiProjector {
         )
     }
 
-    private fun isDisplayablePersonAnchor(anchor: String): Boolean =
-        anchor.contains("@") ||
-            anchor.startsWith("+") ||
-            anchor.any(Char::isDigit) &&
-            anchor.none { it == '-' }
-
     private fun isInternalPersonAnchor(value: String): Boolean =
         value.startsWith("qa-person-") ||
             value.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+
+    private fun sanitizeDisplayName(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (value.contains("@")) return null
+        if (value.startsWith("+")) return null
+        return if (value.all { it.isDigit() || it == '-' || it == ' ' }) {
+            null
+        } else {
+            value
+        }
+    }
+
+    private const val UNKNOWN_PERSON_DISPLAY_NAME = "아직 이름을 모르는 연락처"
 }

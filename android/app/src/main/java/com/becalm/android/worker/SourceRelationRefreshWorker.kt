@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
@@ -15,6 +16,7 @@ import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import javax.inject.Provider
@@ -30,6 +32,8 @@ public class SourceRelationRefreshWorker @AssistedInject constructor(
     private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
     private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
     private val scheduleEventLinkRepositoryProvider: Provider<ScheduleEventLinkRepository>,
+    private val userCorrectionRepositoryProvider: Provider<UserCorrectionRepository>,
+    private val syncCursorStore: SyncCursorStore,
     private val workSchedulerProvider: Provider<WorkScheduler>,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -54,11 +58,16 @@ public class SourceRelationRefreshWorker @AssistedInject constructor(
                 sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
                 commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
                 scheduleEventLinkRepository = scheduleEventLinkRepositoryProvider.get(),
+                userCorrectionRepository = userCorrectionRepositoryProvider.get(),
+                syncCursorStore = syncCursorStore,
                 workScheduler = workSchedulerProvider.get(),
                 logger = logger,
             ).refresh(
                 userId = userId,
-                plan = planFor(sourceType),
+                plan = sourceRelationRefreshPlanFor(
+                    sourceType = sourceType,
+                    resetBeforeRefresh = inputData.getBoolean(KEY_RESET_MIRROR_CURSOR, false),
+                ),
             )
         ) {
             is BecalmResult.Success -> Result.success()
@@ -68,23 +77,6 @@ public class SourceRelationRefreshWorker @AssistedInject constructor(
             }
         }
     }
-
-    private fun planFor(sourceType: String): SourceRelationRefreshPlan =
-        when (sourceType) {
-            SourceType.GMAIL,
-            SourceType.OUTLOOK_MAIL,
-            -> SourceRelationRefreshPlan(
-                sourceType = sourceType,
-                rawSourceType = sourceType,
-            )
-            SourceType.GOOGLE_CALENDAR,
-            SourceType.OUTLOOK_CALENDAR,
-            -> SourceRelationRefreshPlan(
-                sourceType = sourceType,
-                calendarRefresh = CalendarRelationRefresh(),
-            )
-            else -> SourceRelationRefreshPlan(sourceType = sourceType)
-        }
 
     private fun BecalmError.isRetryable(): Boolean =
         when (this) {
@@ -105,6 +97,37 @@ public class SourceRelationRefreshWorker @AssistedInject constructor(
 
     public companion object {
         public const val KEY_SOURCE_TYPE: String = "source_type"
+        public const val KEY_RESET_MIRROR_CURSOR: String = "reset_mirror_cursor"
         private const val TAG = "SourceRelationRefreshWorker"
     }
 }
+
+internal fun sourceRelationRefreshPlanFor(
+    sourceType: String,
+    resetBeforeRefresh: Boolean,
+): SourceRelationRefreshPlan =
+    when (sourceType) {
+        SourceType.GMAIL,
+        SourceType.OUTLOOK_MAIL,
+        -> SourceRelationRefreshPlan(
+            sourceType = sourceType,
+            rawSourceType = sourceType,
+            resetMirrorCursorBeforeRefresh = resetBeforeRefresh,
+        )
+        SourceType.GOOGLE_CALENDAR,
+        SourceType.OUTLOOK_CALENDAR,
+        -> SourceRelationRefreshPlan(
+            sourceType = sourceType,
+            calendarRefresh = CalendarRelationRefresh(),
+            resetMirrorCursorBeforeRefresh = resetBeforeRefresh,
+        )
+        UploadWorker.SOURCE_TYPE -> SourceRelationRefreshPlan(
+            sourceType = sourceType,
+            sourceParticipantRefreshScope = SourceParticipantRefreshScope.ALL,
+            resetMirrorCursorBeforeRefresh = resetBeforeRefresh,
+        )
+        else -> SourceRelationRefreshPlan(
+            sourceType = sourceType,
+            resetMirrorCursorBeforeRefresh = resetBeforeRefresh,
+        )
+    }

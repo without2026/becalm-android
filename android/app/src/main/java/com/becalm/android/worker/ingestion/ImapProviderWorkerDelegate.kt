@@ -87,8 +87,12 @@ internal class ImapProviderWorkerDelegate(
             userId = userId,
             lookbackDays = lookbackDays,
         )
+        val hasMore: Boolean
         val fetchedCount = when (syncOutcome) {
-            is ImapProviderSyncOutcome.Success -> syncOutcome.fetchedCount
+            is ImapProviderSyncOutcome.Success -> {
+                hasMore = syncOutcome.hasMore
+                syncOutcome.fetchedCount
+            }
             is ImapProviderSyncOutcome.Terminal -> return syncOutcome.result
         }
 
@@ -98,6 +102,13 @@ internal class ImapProviderWorkerDelegate(
             newItemsMessage = "내용 정리 대기 중",
         )
         sourceStatusRepository.recordSyncSuccess(profile.sourceType, Clock.System.now())
+        if (hasMore) {
+            processingStatusRepository.recordScanning(
+                sourceType = profile.sourceType,
+                message = "더 많은 메일을 이어서 확인하고 있습니다",
+            )
+            workScheduler.enqueueExpedited(profile.sourceType)
+        }
         logger.d(profile.tag, "doWork complete")
         return ListenableWorker.Result.success()
     }
@@ -120,7 +131,6 @@ internal class ImapProviderWorkerDelegate(
             syncCursorStore = syncCursorStore,
             imapClient = imapClient,
             rawIngestionRepository = rawIngestionRepositoryProvider.get(),
-            emailBodyRepository = emailBodyRepositoryProvider.get(),
             messagePersistence = messagePersistence(),
             rawEventMapper = ImapRawEventMapper(
                 config = profile.config,

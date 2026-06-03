@@ -106,17 +106,17 @@ class RawIngestionRepositoryLocalIntegrationTest {
                 data = listOf(
                     RawIngestionEventDto(
                         id = "server-raw-1",
-                        clientEventId = "gmail-client-1",
-                        sourceType = SourceType.GMAIL,
-                        sourceRef = "gmail-message-1",
-                        counterpartyRef = "customer@example.com",
-                        eventTitle = "제안서 요청",
-                        eventSnippet = "내일까지 제안서 보내주세요.",
-                        folder = "inbox",
-                        commitmentsExtractedCount = 1,
-                        timestamp = Instant.parse("2026-04-28T01:00:00Z"),
-                    ),
-                ),
+	                        clientEventId = "gmail-client-1",
+	                        sourceType = SourceType.GMAIL,
+	                        providerEventId = "gmail-message-1",
+	                        counterpartyRef = "customer@example.com",
+	                        sourceEventTitle = "제안서 요청",
+	                        sourceEventSnippet = "내일까지 제안서 보내주세요.",
+	                        folder = "inbox",
+	                        extractedCount = 1,
+	                        timestamp = Instant.parse("2026-04-28T01:00:00Z"),
+	                    ),
+	                ),
                 cursor = "cursor-1",
                 hasMore = false,
             ),
@@ -127,11 +127,14 @@ class RawIngestionRepositoryLocalIntegrationTest {
         assertTrue(result is BecalmResult.Success)
         val row = db.rawIngestionEventDao().findByClientEventId(USER_ID, "gmail-client-1")
         requireNotNull(row)
-        assertEquals("server-raw-1", row.id)
-        assertEquals("synced", row.syncStatus)
-        assertEquals("customer@example.com", row.counterpartyRef)
-        assertEquals(1, row.commitmentsExtractedCount)
-    }
+	        assertEquals("server-raw-1", row.id)
+	        assertEquals("synced", row.syncStatus)
+	        assertEquals("gmail-message-1", row.sourceRef)
+	        assertEquals("제안서 요청", row.eventTitle)
+	        assertEquals("내일까지 제안서 보내주세요.", row.eventSnippet)
+	        assertEquals("customer@example.com", row.counterpartyRef)
+	        assertEquals(1, row.commitmentsExtractedCount)
+	    }
 
     @Test
     // spec: P0-2 keyset resume after WorkManager/process restart
@@ -173,12 +176,18 @@ class RawIngestionRepositoryLocalIntegrationTest {
         assertTrue(firstResult is BecalmResult.Success)
         assertEquals(5, (firstResult as BecalmResult.Success).value.fetched)
         assertTrue(firstResult.value.hasMore)
-        assertEquals("ks1:page-5", cursorStore.observeCursor("raw_ingestion_events:gmail").first())
+        assertEquals(
+            "ks1:page-5",
+            cursorStore.observeCursor("raw_ingestion_events:v4_user:user-1:source_event_anchor:gmail").first(),
+        )
         val resumedResult = resumedRepository.refreshSince(USER_ID, SourceType.GMAIL, since = null)
 
         assertTrue(resumedResult is BecalmResult.Success)
         assertEquals(1, (resumedResult as BecalmResult.Success).value.fetched)
-        assertEquals("ks1:page-6", cursorStore.observeCursor("raw_ingestion_events:gmail").first())
+        assertEquals(
+            "ks1:page-6",
+            cursorStore.observeCursor("raw_ingestion_events:v4_user:user-1:source_event_anchor:gmail").first(),
+        )
         coVerify(exactly = 1) {
             api.getRawIngestionEvents(
                 cursor = "ks1:page-5",

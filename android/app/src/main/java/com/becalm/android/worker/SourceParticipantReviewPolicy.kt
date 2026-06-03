@@ -176,7 +176,7 @@ internal object SourceParticipantReviewPolicy {
         evidence: String?,
     ): Boolean {
         if (sourceType !in setOf(SourceType.CALL_RECORDING, SourceType.MEETING)) return false
-        if (relationToUser.equals("self", ignoreCase = true)) return false
+        if (!relationToUser.equals("counterparty", ignoreCase = true)) return false
         if (role.equals("self", ignoreCase = true)) return false
         return isSourceLocalSpeakerLabel(identityType, normalizedValue, displayName, rawValue, evidence)
     }

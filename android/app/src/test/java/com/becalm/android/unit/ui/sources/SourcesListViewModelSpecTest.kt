@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.becalm.android.R
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.remote.dto.SourceType
@@ -55,6 +56,7 @@ class SourcesListViewModelSpecTest {
     private val processingStatusRepository: ProcessingStatusRepository = mockk()
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk()
     private val contactsPermissionChecker = FakeContactsPermissionChecker()
+    private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
@@ -62,6 +64,7 @@ class SourcesListViewModelSpecTest {
         Dispatchers.setMain(testDispatcher)
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session()))
         every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
+        every { userPrefsStore.observeContactsConsent() } returns flowOf(true)
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
     }
 
@@ -294,6 +297,7 @@ class SourcesListViewModelSpecTest {
         processingStatusRepository = processingStatusRepository,
         personEnrichmentRepository = personEnrichmentRepository,
         contactsPermissionChecker = contactsPermissionChecker,
+        userPrefsStore = userPrefsStore,
         logger = logger,
     )
 

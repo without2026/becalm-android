@@ -9,20 +9,25 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
+import com.becalm.android.data.repository.NoopScheduleRowTombstoneRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.ScheduleRowTombstoneRepository
+import com.becalm.android.data.repository.NoopUserCorrectionRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import javax.inject.Provider
 
 /**
  * Periodic and on-demand [CoroutineWorker] that drains pending rows from
- * [RawIngestionRepository] and [CommitmentRepository] to the Railway backend.
+ * [RawIngestionRepository], [CommitmentRepository], and schedule row tombstones to the
+ * Railway backend.
  *
- * Per-source flush logic lives in dedicated uploaders ([RawEventUploader],
- * [CommitmentUploader]); this worker only resolves the session, dispatches to each
+ * Per-source flush logic lives in dedicated uploaders ([RawEventUploader], [CommitmentUploader],
+ * [ScheduleRowTombstoneUploader]); this worker only resolves the session, dispatches to each
  * uploader, and emits the final [androidx.work.ListenableWorker.Result].
  *
  * The uploaders are constructed internally from the worker's existing collaborators so
@@ -33,7 +38,8 @@ import javax.inject.Provider
  * 1. Resolve [userId] from [AuthRepository.currentSession] — no session → failure.
  * 2. Flush pending raw ingestion events in bounded pages (SYNC-001, SYNC-004).
  * 3. On success, flush pending commitments in the same envelope.
- * 4. Record sync success via [SourceStatusRepository.recordSyncSuccess].
+ * 4. On success, flush pending schedule row tombstones.
+ * 5. Record sync success via [SourceStatusRepository.recordSyncSuccess].
  *
  * Either flush may return [FlushOutcome.RetryNeeded] when the server accepts zero rows on a
  * page and every failure is `retryable=true`; the worker then emits [Result.retry] and calls
@@ -58,9 +64,9 @@ import javax.inject.Provider
  * SYNC-006 requires REPLACE policy so that foreground re-triggers supersede any queued run.
  *
  * ## Idempotency
- * [RawIngestionRepository.markSynced] and [CommitmentRepository.markSynced] are called after
- * each successful batch. Re-running the worker after a partial flush is safe because rows
- * already marked `synced` are excluded by `findPendingSync`.
+ * [RawIngestionRepository.markSynced], [CommitmentRepository.markSynced], and tombstone
+ * acknowledgements are called after each successful batch. Re-running the worker after a
+ * partial flush is safe because rows already marked `synced` are excluded by `findPendingSync`.
  */
 @HiltWorker
 public class UploadWorker @AssistedInject constructor(
@@ -69,6 +75,8 @@ public class UploadWorker @AssistedInject constructor(
     private val authRepositoryProvider: Provider<AuthRepository>,
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
     private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
+    private val scheduleRowTombstoneRepositoryProvider: Provider<ScheduleRowTombstoneRepository>,
+    private val userCorrectionRepositoryProvider: Provider<UserCorrectionRepository>,
     private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
     private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
@@ -91,12 +99,16 @@ public class UploadWorker @AssistedInject constructor(
         processingPauseGate: ProcessingPauseGate,
         logger: Logger,
         processingStatusRepository: ProcessingStatusRepository? = null,
+        scheduleRowTombstoneRepository: ScheduleRowTombstoneRepository = NoopScheduleRowTombstoneRepository,
+        userCorrectionRepository: UserCorrectionRepository = NoopUserCorrectionRepository,
     ) : this(
         appContext = appContext,
         workerParams = workerParams,
         authRepositoryProvider = Provider { authRepository },
         rawIngestionRepositoryProvider = Provider { rawIngestionRepository },
         commitmentRepositoryProvider = Provider { commitmentRepository },
+        scheduleRowTombstoneRepositoryProvider = Provider { scheduleRowTombstoneRepository },
+        userCorrectionRepositoryProvider = Provider { userCorrectionRepository },
         sourceEventParticipantRepositoryProvider = Provider { sourceEventParticipantRepository },
         commitmentParticipantRepositoryProvider = Provider { commitmentParticipantRepository },
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
@@ -131,10 +143,19 @@ public class UploadWorker @AssistedInject constructor(
                 commitmentRepository = commitmentRepositoryProvider.get(),
                 logger = logger,
             ),
+            scheduleRowTombstoneUploader = ScheduleRowTombstoneUploader(
+                repository = scheduleRowTombstoneRepositoryProvider.get(),
+                logger = logger,
+            ),
+            userCorrectionUploader = UserCorrectionUploader(
+                repository = userCorrectionRepositoryProvider.get(),
+                logger = logger,
+            ),
             relationRefreshCoordinator = SourceRelationRefreshCoordinator(
                 commitmentRepository = commitmentRepositoryProvider.get(),
                 sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
                 commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
+                userCorrectionRepository = userCorrectionRepositoryProvider.get(),
                 workScheduler = workSchedulerProvider.get(),
                 logger = logger,
             ),

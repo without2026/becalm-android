@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onStart
 
 internal class PersonsScreenStateSource @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
@@ -20,7 +21,8 @@ internal class PersonsScreenStateSource @Inject constructor(
         queryDebounceMs: Long,
     ): Flow<PersonsUiState> = combine(
         userPrefsStore.observeCurrentUserId(),
-        projectionPort.observeOfflineStatus(),
+        projectionPort.observeOfflineStatus()
+            .onStart { emit(PersonsOfflineStatus(isOffline = false, lastSyncAt = null)) },
         queryFlow.debounce(queryDebounceMs),
     ) { userId, offlineStatus, query ->
         Triple(userId, offlineStatus, query)
@@ -35,9 +37,20 @@ internal class PersonsScreenStateSource @Inject constructor(
             )
         } else {
             combine(
-                projectionPort.observePeople(userId),
-                projectionPort.observeSearchableContacts(userId),
-                projectionPort.observeUnassigned(userId, limit = pageSize),
+                projectionPort.observePeople(userId)
+                    .onStart {
+                        emit(
+                            PersonsListPageProjection(
+                                rows = emptyList(),
+                                hasMorePages = false,
+                                nextCursor = null,
+                            ),
+                        )
+                    },
+                projectionPort.observeSearchableContacts(userId)
+                    .onStart { emit(emptyList()) },
+                projectionPort.observeUnassigned(userId, limit = pageSize)
+                    .onStart { emit(emptyList()) },
             ) { peoplePage, searchableContacts, unassigned ->
                 PersonsUiProjector.authenticatedState(
                     query = query,

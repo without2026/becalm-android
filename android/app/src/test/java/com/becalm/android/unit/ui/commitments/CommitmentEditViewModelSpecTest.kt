@@ -13,6 +13,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.domain.commitment.CommitmentEditValidator
 import com.becalm.android.ui.commitments.CommitmentEditViewModel
 import com.becalm.android.ui.commitments.EditDismissEvent
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -97,6 +98,27 @@ class CommitmentEditViewModelSpecTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.fieldErrors.isNotEmpty())
+        coVerify(exactly = 0) { commitmentRepository.editCommitment(any(), any()) }
+    }
+
+    @Test
+    fun `EDIT load with missing direction opens sheet and validates instead of crashing`() = runTest {
+        every { commitmentRepository.observeByIdForUser("user-1", "c-missing-direction") } returns
+            flowOf(entity(id = "c-missing-direction", direction = null))
+
+        val viewModel = buildViewModel("c-missing-direction")
+        advanceUntilIdle()
+
+        assertEquals(false, viewModel.uiState.value.loading)
+        assertEquals("", viewModel.uiState.value.direction)
+
+        viewModel.onSave()
+        advanceUntilIdle()
+
+        assertEquals(
+            R.string.commitment_edit_error_direction_required,
+            viewModel.uiState.value.fieldErrors[CommitmentEditValidator.Field.DIRECTION]?.resId,
+        )
         coVerify(exactly = 0) { commitmentRepository.editCommitment(any(), any()) }
     }
 
@@ -238,7 +260,7 @@ class CommitmentEditViewModelSpecTest {
 
     private fun entity(
         id: String,
-        direction: String = "give",
+        direction: String? = "give",
         counterpartyRef: String? = "lee@corp.com",
         dueAt: Instant? = null,
         dueHint: String? = null,

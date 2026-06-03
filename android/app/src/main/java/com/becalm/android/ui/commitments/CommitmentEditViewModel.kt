@@ -12,6 +12,8 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.NoopUserCorrectionRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import com.becalm.android.domain.commitment.CommitmentEditDraft
 import com.becalm.android.domain.commitment.CommitmentEditValidator
 import com.becalm.android.domain.commitment.CommitmentEditValidator.Field
@@ -149,6 +151,7 @@ private const val TAG = "CommitmentEditVM"
 public class CommitmentEditViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore,
+    private val userCorrectionRepository: UserCorrectionRepository = NoopUserCorrectionRepository,
     savedStateHandle: SavedStateHandle,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     private val logger: Logger,
@@ -295,11 +298,22 @@ public class CommitmentEditViewModel @Inject constructor(
         }
     }
 
-    /** EDIT-006: soft-delete via [CommitmentRepository.softDelete] after user confirms. */
+    /** EDIT-006: records a correction command that materializes as a soft-delete. */
     public fun onConfirmDelete() {
         viewModelScope.launch {
             _uiState.update { it.copy(saving = true, saveError = null) }
-            val result = commitmentRepository.softDelete(id)
+            val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+            val result = if (userId.isNullOrBlank()) {
+                BecalmResult.Failure(BecalmError.Unauthorized)
+            } else {
+                userCorrectionRepository.submitCommitmentNotAction(
+                    userId = userId,
+                    commitmentId = id,
+                    sourceEventId = null,
+                    title = _uiState.value.title,
+                    quote = _uiState.value.readOnly?.quote,
+                )
+            }
             _uiState.update { it.copy(saving = false) }
             when (result) {
                 is BecalmResult.Success -> {

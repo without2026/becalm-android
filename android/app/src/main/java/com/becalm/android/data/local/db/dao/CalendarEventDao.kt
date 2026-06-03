@@ -51,6 +51,18 @@ public interface CalendarEventDao {
         WHERE user_id  = :userId
           AND start_at < :rangeEnd
           AND end_at > :rangeStart
+          AND NOT EXISTS (
+              SELECT 1 FROM schedule_row_tombstones tombstone
+              WHERE tombstone.user_id = calendar_events.user_id
+                AND (
+                    tombstone.source_event_id = calendar_events.id
+                    OR (
+                        tombstone.source_ref IS NOT NULL
+                        AND tombstone.source_ref = calendar_events.source_ref
+                        AND tombstone.source_type = calendar_events.source_type
+                    )
+                )
+          )
         ORDER BY start_at ASC
         """,
     )

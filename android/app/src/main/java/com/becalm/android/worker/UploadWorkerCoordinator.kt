@@ -12,6 +12,8 @@ internal class UploadWorkerCoordinator(
     private val authRepository: AuthRepository,
     private val rawEventUploader: RawEventUploader,
     private val commitmentUploader: CommitmentUploader,
+    private val scheduleRowTombstoneUploader: ScheduleRowTombstoneUploader,
+    private val userCorrectionUploader: UserCorrectionUploader? = null,
     private val relationRefreshCoordinator: SourceRelationRefreshCoordinator,
     private val sourceStatusRepository: SourceStatusRepository,
     private val logger: Logger,
@@ -54,13 +56,34 @@ internal class UploadWorkerCoordinator(
             is FlushOutcome.PermanentFailure -> return commitResult.result
         }
 
+        val tombstoneCount = when (val tombstoneResult = scheduleRowTombstoneUploader.flushTombstones(userId, attempt)) {
+            is FlushOutcome.Success -> tombstoneResult.count
+            is FlushOutcome.TransportRetry -> {
+                sourceStatusRepository.recordSyncError(UploadWorker.SOURCE_TYPE, "schedule tombstone upload retry", now)
+                return tombstoneResult.result
+            }
+            is FlushOutcome.RetryNeeded -> return handleBatchAllRetryable("scheduleRowTombstone", now)
+            is FlushOutcome.PermanentFailure -> return tombstoneResult.result
+        }
+
+        val correctionCount = when (val correctionResult = userCorrectionUploader?.flushCorrections(userId, attempt)) {
+            null -> 0
+            is FlushOutcome.Success -> correctionResult.count
+            is FlushOutcome.TransportRetry -> {
+                sourceStatusRepository.recordSyncError(UploadWorker.SOURCE_TYPE, "user correction upload retry", now)
+                return correctionResult.result
+            }
+            is FlushOutcome.RetryNeeded -> return handleBatchAllRetryable("userCorrection", now)
+            is FlushOutcome.PermanentFailure -> return correctionResult.result
+        }
+
         when (
             val refresh = relationRefreshCoordinator.refresh(
                 userId = userId,
                 plan = SourceRelationRefreshPlan(
                     sourceType = UploadWorker.SOURCE_TYPE,
                     sourceParticipantRefreshScope = SourceParticipantRefreshScope.ALL,
-                    localWriteCount = rawCount + commitmentCount,
+                    localWriteCount = rawCount + commitmentCount + tombstoneCount + correctionCount,
                 ),
             )
         ) {
@@ -75,7 +98,8 @@ internal class UploadWorkerCoordinator(
         sourceStatusRepository.recordSyncSuccess(UploadWorker.SOURCE_TYPE, now)
         logger.i(
             TAG,
-            "doWork complete rawUploaded=$rawCount commitUploaded=$commitmentCount attempt=$attempt",
+            "doWork complete rawUploaded=$rawCount commitUploaded=$commitmentCount " +
+                "scheduleTombstoneUploaded=$tombstoneCount userCorrectionUploaded=$correctionCount attempt=$attempt",
         )
         return Result.success()
     }

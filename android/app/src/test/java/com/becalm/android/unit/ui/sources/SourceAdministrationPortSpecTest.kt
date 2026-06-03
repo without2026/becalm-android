@@ -11,9 +11,11 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.sources.DefaultSourceAdministrationPort
 import com.becalm.android.worker.ingestion.ImapNaverWorker
 import com.becalm.android.worker.ingestion.MediaStoreWorker
+import io.mockk.every
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -25,6 +27,10 @@ class SourceAdministrationPortSpecTest {
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val imapCredentialStore: ImapCredentialStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
+
+    init {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+    }
 
     @Test
     fun `disconnecting IMAP source clears provider and mirror cursors`() = runTest {

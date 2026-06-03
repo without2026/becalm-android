@@ -34,10 +34,13 @@ class Checkpoint5ReminderContractSpecTest {
         val context: Context = mockk(relaxed = true)
         val commitmentDao: CommitmentDao = mockk()
         val logger: Logger = mockk(relaxed = true)
+        val userPrefsStore: UserPrefsStore = mockk()
         val receiver = spyk(ReminderBroadcastReceiver())
         val specs = mutableListOf<com.becalm.android.receiver.ReminderNotificationSpec>()
         receiver.commitmentDao = commitmentDao
         receiver.logger = logger
+        receiver.userPrefsStore = userPrefsStore
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(true)
         every { context.getString(R.string.commitment_alarm_title) } returns "곧 마감되는 약속 (1시간 뒤)"
         every { context.getString(R.string.commitment_alarm_body_give_fmt, *anyVararg()) } returns "[내가 할 일] 제안서 보내기"
         every { receiver["postNotification"](context, any<com.becalm.android.receiver.ReminderNotificationSpec>()) } answers {
@@ -62,6 +65,7 @@ class Checkpoint5ReminderContractSpecTest {
         val logger: Logger = mockk(relaxed = true)
         every { context.getSystemService(Context.ALARM_SERVICE) } returns alarmManager
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(true)
         val scheduler = ReminderScheduler(
             context = context,
             clock = FakeClock(Instant.parse("2026-05-07T00:00:00Z")),
@@ -78,6 +82,7 @@ class Checkpoint5ReminderContractSpecTest {
         val commitmentDao: CommitmentDao = mockk()
         receiver.commitmentDao = commitmentDao
         receiver.logger = logger
+        receiver.userPrefsStore = userPrefsStore
         every {
             receiver["postNotification"](any<Context>(), any<com.becalm.android.receiver.ReminderNotificationSpec>())
         } answers { Unit }

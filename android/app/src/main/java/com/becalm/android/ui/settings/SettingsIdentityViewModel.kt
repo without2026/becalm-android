@@ -36,7 +36,6 @@ public data class SettingsIdentityUiState(
     val savingProfile: Boolean = false,
     val addingAnchor: Boolean = false,
     val archivingAnchorIds: Set<String> = emptySet(),
-    val updatingConnectionId: String? = null,
     val disconnectingConnectionIds: Set<String> = emptySet(),
     val deletingConnectionIds: Set<String> = emptySet(),
     val confirmingDeleteConnectionId: String? = null,
@@ -57,7 +56,6 @@ public data class SourceConnectionOwnershipUi(
     val id: String,
     val title: String,
     val accountLabel: String,
-    val ownership: String,
     val status: String,
 )
 
@@ -347,36 +345,6 @@ public class SettingsIdentityViewModel @Inject constructor(
         }
     }
 
-    public fun onSetConnectionOwnership(connectionId: String, ownership: String) {
-        val userId = _uiState.value.userId ?: return
-        if (ownership !in SOURCE_OWNERSHIP_VALUES) return
-        if (connectionId in _uiState.value.disconnectingConnectionIds || connectionId in _uiState.value.deletingConnectionIds) return
-        viewModelScope.launch {
-            _uiState.update { it.copy(updatingConnectionId = connectionId, error = null) }
-            when (sourceConnectionRepository.setOwnership(userId, connectionId, ownership)) {
-                is BecalmResult.Success -> {
-                    selfIdentityRepository.refresh(userId)
-                    val connections = sourceConnectionRepository.observeAll(userId).first()
-                    val anchors = selfIdentityRepository.observeAll(userId).first()
-                    _uiState.update {
-                        it.copy(
-                            connections = connections.map(SourceConnectionEntity::toUi),
-                            anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
-                            updatingConnectionId = null,
-                            error = null,
-                        )
-                    }
-                }
-                is BecalmResult.Failure -> _uiState.update {
-                    it.copy(
-                        updatingConnectionId = null,
-                        error = UiMessage.resource(R.string.settings_identity_error_update_connection),
-                    )
-                }
-            }
-        }
-    }
-
     public fun onDisconnectConnection(connectionId: String) {
         val userId = _uiState.value.userId ?: return
         val state = _uiState.value
@@ -477,9 +445,7 @@ private fun SourceConnectionEntity.toUi(): SourceConnectionOwnershipUi =
         id = id,
         title = sourceConnectionTitle(provider = provider, capability = capability),
         accountLabel = accountDisplayName ?: accountIdentifier ?: provider,
-        ownership = ownership,
         status = status,
     )
 
-private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")
 private val SELF_ANCHOR_TYPES = setOf("email", "phone", "alias")

@@ -162,12 +162,63 @@ class VoiceMediaStoreProbeMeetingSpecTest {
             addRow(arrayOf<Any?>(44L, 1_777_766_600L, 30_000L, "foreign.m4a", "Recordings/Other Recorder/", 0))
         }
 
-        val inserted = buildProbe().ingestVoiceRecordings(Instant.parse("2026-05-03T00:00:00Z"))
+        val outcome = buildProbe().ingestVoiceRecordings(Instant.parse("2026-05-03T00:00:00Z"))
 
-        assertEquals(0, inserted)
+        assertEquals(0, outcome.insertedCount)
         coVerify(exactly = 0) { rawIngestionEventDao.insert(any()) }
         coVerify(exactly = 1) {
             syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE, 1_777_766_600_000L)
+        }
+    }
+
+    @Test
+    fun `meeting audio scanner reports has more after soft batch cap`() = runTest {
+        stubCommon()
+        every {
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                any<Array<String>>(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns MatrixCursor(
+            arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.DISPLAY_NAME,
+                MediaStore.Audio.Media.RELATIVE_PATH,
+                MediaStore.Audio.Media.SIZE,
+            ),
+        ).apply {
+            repeat(MediaStoreWorker.MEDIASTORE_SCAN_BATCH_SIZE + 1) { index ->
+                addRow(
+                    arrayOf<Any?>(
+                        1_000L + index,
+                        1_777_766_400L + index,
+                        120_000L,
+                        "meeting-$index.m4a",
+                        "Recordings/BeCalm Meetings/Audio/",
+                        100_000L + index,
+                    ),
+                )
+            }
+        }
+        coEvery { rawIngestionEventDao.findByClientEventId("user-1", any()) } returns null
+        coEvery { rawIngestionEventDao.insert(any()) } returns 1L
+
+        val outcome = buildProbe().ingestMeetingAudio(Instant.parse("2026-05-03T00:00:00Z"))
+
+        val success = outcome as com.becalm.android.worker.ingestion.MeetingIngestOutcome.Success
+        assertEquals(MediaStoreWorker.MEDIASTORE_SCAN_BATCH_SIZE, success.insertedCount)
+        assertTrue(success.hasMore)
+        coVerify(exactly = MediaStoreWorker.MEDIASTORE_SCAN_BATCH_SIZE) { rawIngestionEventDao.insert(any()) }
+        coVerify(exactly = 1) {
+            syncCursorStore.setMediaStoreLastSeen(
+                MediaStoreWorker.KIND_MEETING,
+                (1_777_766_400L + MediaStoreWorker.MEDIASTORE_SCAN_BATCH_SIZE - 1) * 1_000L,
+            )
         }
     }
 
@@ -246,6 +297,7 @@ class VoiceMediaStoreProbeMeetingSpecTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
         every { userPrefsStore.observeCallLogMatchingConsent() } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabledAt(any()) } returns flowOf(null)
         every { syncCursorStore.observeMediaStoreLastSeen(any()) } returns flowOf(null)
     }
 

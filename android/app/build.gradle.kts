@@ -428,6 +428,10 @@ dependencies {
 }
 
 tasks.withType<Test>().configureEach {
+    maxHeapSize = "3072m"
+    forkEvery = 250
+    jvmArgs("-XX:+UseParallelGC")
+
     if (name == "testReleaseUnitTest") {
         // Compose UI tests need androidx.compose.ui:ui-test-manifest, which must stay out of
         // release artifacts. Run those UI suites on debug/benchmark variants and keep release

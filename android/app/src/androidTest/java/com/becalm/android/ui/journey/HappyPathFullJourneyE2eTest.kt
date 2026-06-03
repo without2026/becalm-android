@@ -321,6 +321,8 @@ class HappyPathFullJourneyE2eTest {
             scheduleStatus = null,
             rowTreatment = TodayCommitmentRowTreatment.ACTION,
             counterpartyDisplayName = counterparty,
+            sourceTitle = "업무 메일",
+            quote = title,
             dueAt = NOW,
             dueIsApproximate = false,
             dueHint = "오늘",

@@ -60,6 +60,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     )
     private val projectionPort = EnrichmentBackedPersonsScreenProjectionPort(
         personEnrichmentRepository = enrichmentRepository,
+        personActionDao = db.personActionDao(),
         personIndexDao = db.personIndexDao(),
         selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
         sourceStatusRepository = sourceStatusRepository,
@@ -212,7 +213,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             assertEquals(null, first.lastInteractionSnippet)
 
             val second = updated.people.last()
-            assertEquals("unknown@corp.com", second.displayLabel)
+            assertEquals("아직 이름을 모르는 연락처", second.displayLabel)
             assertEquals(0, second.pendingCommitmentCount)
             assertEquals(null, second.lastInteractionSnippet)
 
@@ -261,8 +262,8 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             assertEquals(21, state.people.size)
             assertFalse(state.hasMorePages)
             assertTrue(state.nextCursor.isNullOrBlank())
-            assertEquals("person-21@corp.com", state.people.first().displayLabel)
-            assertTrue(state.people.any { it.displayLabel == "person-1@corp.com" })
+            assertEquals("아직 이름을 모르는 연락처", state.people.first().displayLabel)
+            assertTrue(state.people.any { it.displayLabel == "아직 이름을 모르는 연락처" })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -708,7 +709,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             }
 
             val candidate = state.unassignedEvents.single().candidates.single()
-            assertEquals("Jake", candidate.anchor)
+            assertEquals("jake", candidate.anchor)
             assertFalse(candidate.recommended)
             assertTrue(candidate.isSelfSuggestion)
             cancelAndIgnoreRemainingEvents()

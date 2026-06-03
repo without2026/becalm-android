@@ -12,7 +12,9 @@ public interface WorkSchedulerCompat {
      * Enqueues a one-shot [MediaStoreWorker] with EXPEDITED priority.
      *
      * WorkManager deduplicates concurrent enqueues; calling this method multiple times
-     * before the worker starts is safe.
+     * before the worker starts is safe. A null lookback uses the MediaStore worker's bounded
+     * automatic discovery window, and detected audio still waits for explicit per-file
+     * processing approval.
      */
     public fun enqueueMediaStoreOneShotNow(lookbackDays: Int? = null)
 }

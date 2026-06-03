@@ -202,6 +202,7 @@ internal object WorkSchedulerRequests {
         UniqueWorkKeys.sourceRelationRefresh(SourceType.OUTLOOK_MAIL),
         UniqueWorkKeys.sourceRelationRefresh(SourceType.GOOGLE_CALENDAR),
         UniqueWorkKeys.sourceRelationRefresh(SourceType.OUTLOOK_CALENDAR),
+        UniqueWorkKeys.sourceRelationRefresh(UploadWorker.SOURCE_TYPE),
         UniqueWorkKeys.ENRICHMENT,
         UniqueWorkKeys.UPLOAD,
         UniqueWorkKeys.UPLOAD_PERIODIC,
@@ -295,7 +296,11 @@ internal object WorkSchedulerRequests {
             logMessage = "enqueueSourceParticipantMirrorRetry key=${UniqueWorkKeys.SOURCE_PARTICIPANT_MIRROR} delaySec=$initialDelaySeconds",
         )
 
-    fun sourceRelationRefreshRequest(sourceType: String, initialDelaySeconds: Long): OneTimeWorkRequest {
+    fun sourceRelationRefreshRequest(
+        sourceType: String,
+        initialDelaySeconds: Long,
+        resetBeforeRefresh: Boolean,
+    ): OneTimeWorkRequest {
         val builder = OneTimeWorkRequest.Builder(SourceRelationRefreshWorker::class.java)
             .setConstraints(
                 Constraints.Builder()
@@ -303,19 +308,28 @@ internal object WorkSchedulerRequests {
                     .build(),
             )
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
-            .setInputData(workDataOf(SourceRelationRefreshWorker.KEY_SOURCE_TYPE to sourceType))
+            .setInputData(
+                workDataOf(
+                    SourceRelationRefreshWorker.KEY_SOURCE_TYPE to sourceType,
+                    SourceRelationRefreshWorker.KEY_RESET_MIRROR_CURSOR to resetBeforeRefresh,
+                ),
+            )
         if (initialDelaySeconds > 0L) {
             builder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
         }
         return builder.build()
     }
 
-    fun sourceRelationRefreshPlan(sourceType: String, initialDelaySeconds: Long): UniqueOneTimeWorkPlan =
+    fun sourceRelationRefreshPlan(
+        sourceType: String,
+        initialDelaySeconds: Long,
+        resetBeforeRefresh: Boolean = false,
+    ): UniqueOneTimeWorkPlan =
         UniqueOneTimeWorkPlan(
             uniqueKey = UniqueWorkKeys.sourceRelationRefresh(sourceType),
             policy = ExistingWorkPolicy.REPLACE,
-            request = sourceRelationRefreshRequest(sourceType, initialDelaySeconds.coerceAtLeast(0L)),
-            logMessage = "enqueueSourceRelationRefresh source=$sourceType key=${UniqueWorkKeys.sourceRelationRefresh(sourceType)} delaySec=$initialDelaySeconds",
+            request = sourceRelationRefreshRequest(sourceType, initialDelaySeconds.coerceAtLeast(0L), resetBeforeRefresh),
+            logMessage = "enqueueSourceRelationRefresh source=$sourceType key=${UniqueWorkKeys.sourceRelationRefresh(sourceType)} delaySec=$initialDelaySeconds reset=$resetBeforeRefresh",
         )
 
     fun profileMemoryRequest(personId: String, initialDelaySeconds: Long): OneTimeWorkRequest {
@@ -449,5 +463,16 @@ internal object WorkSchedulerRequests {
         CancelUniqueWorkPlan(
             uniqueKey = UniqueWorkKeys.COLD_SYNC_STAGE2,
             logMessage = "cancelColdSyncStage2 key=${UniqueWorkKeys.COLD_SYNC_STAGE2}",
+        )
+
+    fun mediaStoreContinuationPlan(lookbackDays: Int?): UniqueOneTimeWorkPlan =
+        UniqueOneTimeWorkPlan(
+            uniqueKey = UniqueWorkKeys.MEDIA_STORE,
+            policy = ExistingWorkPolicy.APPEND_OR_REPLACE,
+            request = oneTimeExpedited(
+                workerClass = MediaStoreWorker::class.java,
+                lookbackDays = lookbackDays,
+            ),
+            logMessage = "enqueueMediaStoreContinuation key=${UniqueWorkKeys.MEDIA_STORE} lookbackDays=${lookbackDays ?: "default"}",
         )
 }

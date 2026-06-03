@@ -509,7 +509,7 @@ class BackendMailSourceEventParticipantPipelineLocalIntegrationTest {
     @Test
     fun `incremental commitment participant refresh keeps existing mirror when server returns empty page`() = runTest {
         val cursorStore = InMemorySyncCursorStore(
-            initialCursors = mapOf("commitment_participants" to "cursor-existing"),
+            initialCursors = mapOf("commitment_participants:v2_user:user-1" to "cursor-existing"),
         )
         db.personIndexDao().upsertCommitmentParticipants(
             listOf(
@@ -547,7 +547,7 @@ class BackendMailSourceEventParticipantPipelineLocalIntegrationTest {
             "/v1/commitment_participants?cursor=cursor-existing&limit=100",
             server.takeRequest().path,
         )
-        assertEquals("cursor-next", cursorStore.cursor("commitment_participants"))
+        assertEquals("cursor-next", cursorStore.cursor("commitment_participants:v2_user:user-1"))
         val stored = db.personIndexDao().findCommitmentParticipantsForUser(USER_ID)
         assertEquals(listOf("cp-existing"), stored.map { it.id })
         assertTrue(db.personIndexDao().findDirtySourcesForUser(USER_ID, limit = 10).isEmpty())

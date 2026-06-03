@@ -12,12 +12,16 @@ import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
+import com.becalm.android.data.local.db.dao.PersonActionDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.ScheduleEventLinkDao
+import com.becalm.android.data.local.db.dao.ScheduleRowTombstoneDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.dao.SourceConnectionDao
+import com.becalm.android.data.local.db.dao.SourceEventAnchorDao
 import com.becalm.android.data.local.db.dao.SourceArtifactDao
+import com.becalm.android.data.local.db.dao.UserCorrectionDao
 import com.becalm.android.data.local.db.dao.UserProfileDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
@@ -27,6 +31,9 @@ import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.MeetingSpeakerAliasEntity
 import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
+import com.becalm.android.data.local.db.entity.PersonActionMutationQueueEntity
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
 import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
@@ -35,11 +42,14 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.local.db.entity.ScheduleRowTombstoneEntity
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.local.db.entity.SourceArtifactEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
+import com.becalm.android.data.local.db.entity.UserCorrectionEntity
 import com.becalm.android.data.local.db.entity.UserProfileEntity
 import com.becalm.android.data.local.db.migration.MIGRATIONS
 
@@ -90,6 +100,21 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  *   `commitment_progress_events` for high-confidence completion evidence.
  * - v30: mirrors server `user_profiles.onboarding_completed_at` and the display-name source
  *   so auth routing treats the server profile as authoritative while preserving local fallback.
+ * - v32: mirrors server `commitments.agenda_intent` so schedule-coordination action rows can
+ *   live in the Schedule tab instead of the ordinary promise feed.
+ * - v33: adds `schedule_row_tombstones` so user-deleted calendar/meeting projection rows stay
+ *   hidden locally and after backend refresh.
+ * - v35: adds `source_event_anchors` so backend-origin and Android-origin source ids share
+ *   one local join surface for titles, snippets, and person review actions.
+ * - v36: adds `user_corrections`, the local command log for user-owned person,
+ *   commitment, and schedule corrections that must survive refresh/reprocess.
+ * - v37: adds backend-owned `person_action_item_cache` plus local
+ *   `person_action_mutation_queue`; Android renders cached Railway action rows and
+ *   queues user mutations but never generates or ranks action items locally.
+ * - v38: adds `person_action_sync_state` so action feed watermarks advance only
+ *   after every page in a backend snapshot has been applied transactionally.
+ * - v39: preserves the primary action evidence pointer locally so action cards can
+ *   open the original source/detail without re-fetching the whole feed item.
  *
  * ## Type converters
  * [Converters] is applied at the database level so that every DAO and entity
@@ -148,8 +173,14 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         MeetingSpeakerPreviewEntity::class,
         MeetingSpeakerAliasEntity::class,
         CommitmentProgressEventEntity::class,
+        ScheduleRowTombstoneEntity::class,
+        SourceEventAnchorEntity::class,
+        UserCorrectionEntity::class,
+        PersonActionItemCacheEntity::class,
+        PersonActionMutationQueueEntity::class,
+        PersonActionSyncStateEntity::class,
     ],
-    version = 31,
+    version = 39,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -159,8 +190,8 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
         // annotation site (ksp#2439), so both sites must be bumped together on every schema
         // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
-        require(DATABASE_VERSION == 31) {
-            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 31) literal"
+        require(DATABASE_VERSION == 39) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 39) literal"
         }
     }
 
@@ -201,6 +232,9 @@ public abstract class BeCalmDatabase : RoomDatabase() {
     /** Returns the DAO for schedule/event evidence and review proposal links. */
     public abstract fun scheduleEventLinkDao(): ScheduleEventLinkDao
 
+    /** Returns user-owned tombstones for calendar/meeting schedule rows. */
+    public abstract fun scheduleRowTombstoneDao(): ScheduleRowTombstoneDao
+
     /** Returns the DAO for backend-owned self identity anchors. */
     public abstract fun selfIdentityAnchorDao(): SelfIdentityAnchorDao
 
@@ -215,6 +249,15 @@ public abstract class BeCalmDatabase : RoomDatabase() {
 
     /** Returns completion evidence rows consumed by ProcessDoneWorker. */
     public abstract fun commitmentProgressEventDao(): CommitmentProgressEventDao
+
+    /** Returns normalized source-event anchors for source/raw/commitment joins. */
+    public abstract fun sourceEventAnchorDao(): SourceEventAnchorDao
+
+    /** Returns durable user correction commands and upload state. */
+    public abstract fun userCorrectionDao(): UserCorrectionDao
+
+    /** Returns backend-computed person action cache and mutation queue rows. */
+    public abstract fun personActionDao(): PersonActionDao
 
     public companion object {
 
@@ -256,7 +299,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 31
+        public const val DATABASE_VERSION: Int = 39
 
         /**
          * Returns the per-user SQLite filename for the given [userIdHash].

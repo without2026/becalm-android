@@ -111,6 +111,7 @@ class SourcesLocalIntegrationTest {
     fun setUp() = runTest {
         Dispatchers.setMain(dispatcher)
         userPrefsStore.setCurrentUserId(USER_ID)
+        userPrefsStore.setContactsConsent(true)
         every { authRepository.observeAuthState() } returns flowOf(
             AuthState.Authenticated(
                 SupabaseSession(
@@ -167,6 +168,7 @@ class SourcesLocalIntegrationTest {
             processingStatusRepository = processingStatusRepository,
             personEnrichmentRepository = enrichmentRepository,
             contactsPermissionChecker = contactsPermissionChecker,
+            userPrefsStore = userPrefsStore,
             logger = logger,
         )
 

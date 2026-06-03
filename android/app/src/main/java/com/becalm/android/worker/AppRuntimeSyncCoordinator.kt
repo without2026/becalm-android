@@ -80,6 +80,21 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         }
     }
 
+    public fun resetForAuthBoundary() {
+        startupRefreshJob?.cancel()
+        startupRefreshJob = null
+        scheduledPeriodicSources = emptySet()
+        backendMailScheduled = false
+        commonRecurringWorkScheduled = false
+        sourceParticipantMirrorRetryScheduledForUser = null
+        staleLinkedSourceProjectionRepairScheduledForUser = null
+        staleRawSourceProjectionRepairScheduledForUser = null
+        staleLocalProcessingStateRepairScheduledForUser = null
+        contactsEnrichmentScheduledForUser = null
+        contentObserverBootstrap.stop()
+        logger.d(TAG, "runtime sync process-local state reset for auth boundary")
+    }
+
     private fun registerForegroundCatchUp() {
         scope.launch(mainDispatcher) {
             if (!lifecycleRegistered) {
@@ -284,7 +299,8 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
             )
         }
 
-        if (contactsPermissionChecker.isGranted()) {
+        val contactsConsented = userPrefsStore.observeContactsConsent().first()
+        if (contactsPermissionChecker.isGranted() && contactsConsented) {
             workScheduler.scheduleEnrichmentSweep()
             if (contactsEnrichmentScheduledForUser != currentUserId) {
                 workScheduler.enqueueEnrichment()
@@ -294,7 +310,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         } else {
             workScheduler.cancelEnrichmentSweep()
             contactsEnrichmentScheduledForUser = null
-            logger.d(TAG, "contacts enrichment periodic sweep disabled")
+            logger.d(TAG, "contacts enrichment periodic sweep disabled permission=${contactsPermissionChecker.isGranted()} consent=$contactsConsented")
         }
     }
 

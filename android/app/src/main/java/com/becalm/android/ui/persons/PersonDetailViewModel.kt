@@ -6,12 +6,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.actions.toPersonActionItemUi
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -93,6 +100,7 @@ public data class PersonDetailUiState(
     val meetingCount: Int = 0,
     val pendingCommitmentCount: Int = 0,
     val channelSources: Set<String> = emptySet(),
+    val topActions: List<PersonActionItemUi> = emptyList(),
     val sourceEventCards: List<SourceEventCardProjection> = emptyList(),
     val canLoadMoreTimeline: Boolean = false,
     val loading: Boolean = true,
@@ -121,7 +129,9 @@ private const val PERSON_INTERACTIONS_PAGE_SIZE = 150
 public class PersonDetailViewModel @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val personIndexDao: PersonIndexDao,
+    private val rawIngestionEventDao: RawIngestionEventDao,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    private val personActionRepository: PersonActionRepository = NoopPersonDetailActionRepository,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
@@ -184,33 +194,50 @@ public class PersonDetailViewModel @Inject constructor(
                     if (userId == null) {
                         flowOf(PersonDetailUiState(personId = personId, loading = false))
                     } else {
+                        refreshPersonActions(userId)
                         combine(
                             personIndexDao.observeIdentitiesForPerson(userId, personId),
                             personEnrichmentRepository.observeAll(),
                             personIndexDao.observeInteractionsForPerson(userId, personId, limit),
-                        ) { identities, enrichmentRows, interactions ->
-                            Triple(identities, enrichmentRows, interactions)
-                        }.flatMapLatest { (identities, enrichmentRows, interactions) ->
+                            personActionRepository.observeActiveForSurface(userId, surface = "person", limit = PERSON_ACTION_DETAIL_LIMIT),
+                        ) { identities, enrichmentRows, interactions, actionRows ->
+                            DetailInputs(identities, enrichmentRows, interactions, actionRows)
+                        }.flatMapLatest { inputs ->
+                            val interactions = inputs.interactions
                             val linksFlow = scheduleEventLinkRepository?.observeForProjectionRefs(
                                 userId = userId,
                                 commitmentIds = interactions.mapNotNull { it.commitmentId },
                                 rawEventIds = interactions.mapNotNull { it.sourceEventId },
                                 calendarEventIds = emptyList(),
                             ) ?: flowOf(emptyList<ScheduleEventLinkEntity>())
-                            linksFlow.combine(flowOf(Triple(identities, enrichmentRows, interactions))) { links, triple ->
-                                Quad(triple.first, triple.second, triple.third, links)
+                            linksFlow.combine(flowOf(inputs)) { links, currentInputs ->
+                                DetailInputsWithLinks(currentInputs, links)
                             }
-                        }.flatMapLatest { (identities, enrichmentRows, interactions, scheduleLinks) ->
+                        }.flatMapLatest { detail ->
+                            val inputs = detail.inputs
                             flowOf(
                                 withContext(ioDispatcher) {
+                                    val rawEvents = loadRawEventsForInteractions(userId, inputs.interactions)
                                     PersonDetailProjector.buildIndexedState(
                                         personId = personId,
-                                        identities = identities,
-                                        enrichmentRows = enrichmentRows,
-                                        interactions = interactions,
-                                        rawEvents = emptyList(),
-                                        scheduleLinks = scheduleLinks,
-                                    ).copy(canLoadMoreTimeline = interactions.size >= limit)
+                                        identities = inputs.identities,
+                                        enrichmentRows = inputs.enrichmentRows,
+                                        interactions = inputs.interactions,
+                                        rawEvents = rawEvents,
+                                        scheduleLinks = detail.scheduleLinks,
+                                    ).copy(
+                                        topActions = inputs.actionRows
+                                            .asSequence()
+                                            .filter { it.personId == personId }
+                                            .sortedWith(
+                                                compareByDescending<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity> { it.urgencyScore }
+                                                    .thenByDescending { it.updatedAt },
+                                            )
+                                            .take(PERSON_ACTION_DETAIL_VISIBLE_LIMIT)
+                                            .map { it.toPersonActionItemUi() }
+                                            .toList(),
+                                        canLoadMoreTimeline = inputs.interactions.size >= limit,
+                                    )
                                 },
                             )
                         }.catch { e ->
@@ -231,10 +258,75 @@ public class PersonDetailViewModel @Inject constructor(
         }
     }
 
-    private data class Quad<A, B, C, D>(
-        val first: A,
-        val second: B,
-        val third: C,
-        val fourth: D,
+    private suspend fun loadRawEventsForInteractions(
+        userId: String,
+        interactions: List<com.becalm.android.data.local.db.entity.PersonInteractionEntity>,
+    ): List<RawIngestionEventEntity> {
+        val rawIds = interactions.mapNotNull { interaction ->
+            interaction.sourceEventId
+                ?: interaction.sourceRef.takeIf { it.startsWith("raw:") }?.removePrefix("raw:")
+        }.map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        val sourceRefs = interactions.map { it.sourceRef.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("commitment:") }
+            .distinct()
+        val byId = if (rawIds.isEmpty()) {
+            emptyList()
+        } else {
+            rawIngestionEventDao.findByIdsForUser(userId = userId, ids = rawIds)
+        }
+        val bySourceRef = if (sourceRefs.isEmpty()) {
+            emptyList()
+        } else {
+            rawIngestionEventDao.findBySourceRefsForUser(userId = userId, sourceRefs = sourceRefs)
+        }
+        return (byId + bySourceRef).distinctBy { it.id }
+    }
+
+    private fun refreshPersonActions(userId: String) {
+        viewModelScope.launch(ioDispatcher) {
+            when (val result = personActionRepository.refresh(userId = userId, surface = "person")) {
+                is BecalmResult.Success -> Unit
+                is BecalmResult.Failure -> logger.w(TAG, "person action refresh failed: ${result.error}")
+            }
+        }
+    }
+
+    private data class DetailInputs(
+        val identities: List<com.becalm.android.data.local.db.entity.PersonIdentityEntity>,
+        val enrichmentRows: List<com.becalm.android.data.local.db.entity.PersonEnrichmentEntity>,
+        val interactions: List<com.becalm.android.data.local.db.entity.PersonInteractionEntity>,
+        val actionRows: List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>,
     )
+
+    private data class DetailInputsWithLinks(
+        val inputs: DetailInputs,
+        val scheduleLinks: List<ScheduleEventLinkEntity>,
+    )
+}
+
+private const val PERSON_ACTION_DETAIL_LIMIT = 100
+private const val PERSON_ACTION_DETAIL_VISIBLE_LIMIT = 3
+
+private object NoopPersonDetailActionRepository : PersonActionRepository {
+    override fun observeActiveForSurface(
+        userId: String,
+        surface: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override suspend fun refresh(
+        userId: String,
+        surface: String?,
+    ): BecalmResult<PersonActionRefreshStats> =
+        BecalmResult.Success(
+            PersonActionRefreshStats(
+                fetched = 0,
+                deleted = 0,
+                serverWatermark = null,
+                recomputeState = null,
+            ),
+        )
 }

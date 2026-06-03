@@ -120,7 +120,9 @@ class PersonDetailSupplementUiTest {
             }
         }
 
-        composeRule.onNodeWithText("김지훈").assertIsDisplayed()
+        composeRule.onNodeWithText("김지훈")
+            .performScrollTo()
+            .assertIsDisplayed()
         composeRule.onNodeWithTag("unassigned-match-confirm-event-candidate")
             .performScrollTo()
             .performClick()
@@ -252,6 +254,46 @@ class PersonDetailSupplementUiTest {
             assertEquals("event-1", matchedEventId)
             assertEquals("noreply@navercorp.com", matchedAnchor)
             assertEquals("네이버 예약팀", matchedNickname)
+        }
+    }
+
+    @Test
+    fun `unassigned events manual match name only input routes as new person anchor`() {
+        var matchedEventId: String? = null
+        var matchedAnchor: String? = null
+        var matchedNickname: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-name-only",
+                            sourceType = SourceType.GMAIL,
+                            title = "회의 요청",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        ),
+                    ),
+                    onManualMatch = { event, anchor, nickname ->
+                        matchedEventId = event.id
+                        matchedAnchor = anchor
+                        matchedNickname = nickname
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-nickname-event-name-only")
+            .performTextInput("김민지")
+        composeRule.onNodeWithText(string(R.string.persons_manual_add_person_action))
+            .performScrollTo()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("event-name-only", matchedEventId)
+            assertEquals("김민지", matchedAnchor)
+            assertEquals("김민지", matchedNickname)
         }
     }
 

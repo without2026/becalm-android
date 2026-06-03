@@ -95,8 +95,18 @@ public class WorkSchedulerImpl @Inject constructor(
         planRunner.run(WorkSchedulerRequests.sourceParticipantMirrorPlan(initialDelaySeconds))
     }
 
-    override fun enqueueSourceRelationRefresh(sourceType: String, initialDelaySeconds: Long) {
-        planRunner.run(WorkSchedulerRequests.sourceRelationRefreshPlan(sourceType, initialDelaySeconds))
+    override fun enqueueSourceRelationRefresh(
+        sourceType: String,
+        initialDelaySeconds: Long,
+        resetBeforeRefresh: Boolean,
+    ) {
+        planRunner.run(
+            WorkSchedulerRequests.sourceRelationRefreshPlan(
+                sourceType = sourceType,
+                initialDelaySeconds = initialDelaySeconds,
+                resetBeforeRefresh = resetBeforeRefresh,
+            ),
+        )
     }
 
     override fun enqueueProfileMemory(personId: String, initialDelaySeconds: Long) {
@@ -278,6 +288,10 @@ public class WorkSchedulerImpl @Inject constructor(
             "enqueueMediaStoreOneShotNow",
             lookbackDays = lookbackDays,
         )
+    }
+
+    override fun enqueueMediaStoreContinuation(lookbackDays: Int?) {
+        planRunner.run(WorkSchedulerRequests.mediaStoreContinuationPlan(lookbackDays))
     }
 
     override fun enqueueImapNaverOneShotNow(lookbackDays: Int?) {

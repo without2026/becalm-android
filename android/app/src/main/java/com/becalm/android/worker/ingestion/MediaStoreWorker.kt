@@ -33,11 +33,12 @@ import kotlinx.datetime.Clock
  * Periodic CoroutineWorker that enumerates new voice **and call** recordings since the
  * last successful run, advancing the shared [SyncCursorStore.KIND_VOICE] watermark.
  *
- * Both ingestion paths are owned by [VoiceMediaStoreProbe]; this worker only
- * orchestrates the audio permission check, dispatches to the probe's two sibling
+ * All local-audio ingestion paths are owned by [VoiceMediaStoreProbe]; this worker only
+ * orchestrates the audio permission check, dispatches to the probe's sibling
  * methods ([VoiceMediaStoreProbe.ingestVoiceRecordings] and
- * [VoiceMediaStoreProbe.ingestCallRecordings]), and surfaces the
- * [androidx.work.ListenableWorker.Result]. The two branches scan disjoint path
+ * [VoiceMediaStoreProbe.ingestCallRecordings] and
+ * [VoiceMediaStoreProbe.ingestMeetingAudio]), and surfaces the
+ * [androidx.work.ListenableWorker.Result]. The branches scan disjoint path
  * subtrees (voice excludes `Recordings/Call/%`; call_recording is `Recordings/Call/%`
  * only) so no file is counted twice.
  *
@@ -47,7 +48,10 @@ import kotlinx.datetime.Clock
  * ## ING-001 / ING-003 — Voice + Call recording capture (VOI-001, VOI-005, VOI-007) ([VoiceMediaStoreProbe])
  * Reads `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for audio files added since the
  * last watermark. For each newly-discovered recording:
- * 1. A [RawIngestionEventEntity] row is inserted via `RawIngestionEventDao.insert` with
+ * 1. Automatic discovery is bounded to a recent window by default. If no explicit
+ *    lookback is supplied, scans use [DEFAULT_AUTO_DETECTION_LOOKBACK_DAYS] so a fresh
+ *    install or cursor reset does not backfill years of local recordings.
+ * 2. A [RawIngestionEventEntity] row is inserted via `RawIngestionEventDao.insert` with
  *    `OnConflictStrategy.IGNORE`. `source_type` is `"voice"` for files under
  *    `Recordings/Voice Recorder/` / `Recordings/` / legacy `VoiceRecorder/`, and
  *    `"call_recording"` for files under `Recordings/Call/`. For call_recording rows,
@@ -58,10 +62,10 @@ import kotlinx.datetime.Clock
  *    `"mediastore:call_recording:<mediaId>"`) so
  *    re-running the worker against the same file is idempotent — the DB unique index
  *    on (user_id, client_event_id) silently drops duplicates.
-     * 2. A freshly inserted row stays at `detected_pending_confirmation`. No STT,
-     *    diarization, or upload work is enqueued until the user confirms that exact file
-     *    from processing status. Both source_types still use the same upload pipeline after
-     *    that confirmation.
+ * 3. A freshly inserted row stays at `detected_pending_confirmation`. No STT,
+ *    diarization, speaker preview, or upload work is enqueued until the user confirms
+ *    that exact file from processing status. All three audio source types still use the
+ *    same downstream processing pipeline after that confirmation.
  *
  * The audio content URI is built via
  * `ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, _ID)`.
@@ -155,6 +159,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         val audioMissing = isMissing(audioPermission)
         val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, NO_LOOKBACK)
             .takeIf { it > 0 }
+            ?: DEFAULT_AUTO_DETECTION_LOOKBACK_DAYS
 
         val voiceEnabled = userPrefsStore.observeSourceEnabled(SourceType.VOICE).first()
         val callRecordingEnabled = userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING).first()
@@ -230,7 +235,10 @@ public class MediaStoreWorker @AssistedInject constructor(
                 sourceType = SourceType.VOICE,
                 enabled = voiceEnabled && !audioMissing,
                 scanMessage = ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
-                onScan = { LocalFileScanOutcome.Success(voiceProbe.ingestVoiceRecordings(now, lookbackDays)) },
+                onScan = {
+                    val outcome = voiceProbe.ingestVoiceRecordings(now, lookbackDays)
+                    LocalFileScanOutcome.Success(outcome.insertedCount, outcome.hasMore)
+                },
             ),
             LocalFileScanTask(
                 sourceType = SourceType.CALL_RECORDING,
@@ -238,7 +246,7 @@ public class MediaStoreWorker @AssistedInject constructor(
                 scanMessage = ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
                 onScan = {
                     when (val outcome = voiceProbe.ingestCallRecordings(now, lookbackDays)) {
-                        is CallRecordingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
+                        is CallRecordingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount, outcome.hasMore)
                         CallRecordingIngestOutcome.ScanFailed -> LocalFileScanOutcome.Failed("MediaStore scan failed")
                     }
                 },
@@ -249,7 +257,7 @@ public class MediaStoreWorker @AssistedInject constructor(
                 scanMessage = ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED,
                 onScan = {
                     when (val outcome = voiceProbe.ingestMeetingAudio(now, lookbackDays)) {
-                        is MeetingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
+                        is MeetingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount, outcome.hasMore)
                         MeetingIngestOutcome.ScanFailed -> LocalFileScanOutcome.Failed("Meeting scan failed")
                     }
                 },
@@ -262,6 +270,7 @@ public class MediaStoreWorker @AssistedInject constructor(
             SourceType.MEETING to 0,
         )
         var shouldRetry = false
+        var hasMore = false
         val enabledTasks = tasks.filter { it.enabled }
         enabledTasks
             .map { it.sourceType }
@@ -271,6 +280,7 @@ public class MediaStoreWorker @AssistedInject constructor(
             when (val outcome = task.onScan()) {
                 is LocalFileScanOutcome.Success -> {
                     insertedBySource[task.sourceType] = insertedBySource.getValue(task.sourceType) + outcome.insertedCount
+                    hasMore = hasMore || outcome.hasMore
                 }
                 is LocalFileScanOutcome.Failed -> {
                     logger.w(TAG, "doWork ${task.sourceType} scan failed — requesting retry")
@@ -296,11 +306,16 @@ public class MediaStoreWorker @AssistedInject constructor(
                     )
                 }
         }
+        if (!shouldRetry && hasMore) {
+            logger.d(TAG, "MediaStore scan hit batch cap — appending continuation")
+            workSchedulerProvider.get().enqueueMediaStoreContinuation(lookbackDays)
+        }
         return LocalFileScanResult(
             voiceInserted = insertedBySource.getValue(SourceType.VOICE),
             callInserted = insertedBySource.getValue(SourceType.CALL_RECORDING),
             meetingInserted = insertedBySource.getValue(SourceType.MEETING),
             shouldRetry = shouldRetry,
+            hasMore = hasMore,
         )
     }
 
@@ -326,6 +341,20 @@ public class MediaStoreWorker @AssistedInject constructor(
 
         /** Maximum WorkManager attempts before permanently failing (R4-02). */
         public const val MAX_RETRIES: Int = 5
+
+        /**
+         * Default automatic MediaStore discovery window for voice, call_recording, and
+         * meeting sources. User-selected manual imports remain explicit imports; automatic
+         * recording detection should only surface recent candidates for per-file approval.
+         */
+        public const val DEFAULT_AUTO_DETECTION_LOOKBACK_DAYS: Int = 30
+
+        /**
+         * Soft per-source MediaStore scan cap. The probe may process extra rows that share
+         * the same DATE_ADDED second as the boundary row so timestamp-only cursors do not
+         * livelock on dense recorder batches.
+         */
+        public const val MEDIASTORE_SCAN_BATCH_SIZE: Int = 100
 
         /** [SyncCursorStore] MediaStore kind key for voice recordings (`Recordings/Voice Recorder/`). */
         public const val KIND_VOICE: String = "voice"
@@ -397,7 +426,7 @@ private data class LocalFileScanTask(
 )
 
 private sealed interface LocalFileScanOutcome {
-    data class Success(val insertedCount: Int) : LocalFileScanOutcome
+    data class Success(val insertedCount: Int, val hasMore: Boolean) : LocalFileScanOutcome
     data class Failed(val message: String) : LocalFileScanOutcome
 }
 
@@ -406,4 +435,5 @@ private data class LocalFileScanResult(
     val callInserted: Int,
     val meetingInserted: Int,
     val shouldRetry: Boolean,
+    val hasMore: Boolean,
 )

@@ -174,6 +174,9 @@ public interface ImapClient {
      *                     passes. Default 30 days per ING-013
      *                     (`.spec/data-ingestion.spec.yml:105-110`). Unused on the normal
      *                     incremental path (UID-based).
+     * @param maxMessages  Optional upper bound for a single worker pass. When supplied, the
+     *                     implementation returns the lowest UIDs first so callers can advance
+     *                     their cursor only to the last durably written UID and resume later.
      *
      * @return [BecalmResult.Success] with an [ImapFetchResult], or:
      *   - [BecalmResult.Failure] with [BecalmError.Unauthorized] on authentication failure.
@@ -188,7 +191,8 @@ public interface ImapClient {
         mailbox: String,
         uidValidity: Long?,
         uidNext: Long?,
-        sinceDays: Int = 30,
+        sinceDays: Int = 90,
+        maxMessages: Int? = null,
     ): BecalmResult<ImapFetchResult>
 }
 
@@ -250,6 +254,7 @@ public class ImapClientImpl @Inject constructor(
         uidValidity: Long?,
         uidNext: Long?,
         sinceDays: Int,
+        maxMessages: Int?,
     ): BecalmResult<ImapFetchResult> = withContext(ioDispatcher) {
         val props = buildImapsProperties(host, port)
         val session = Session.getInstance(props)
@@ -269,10 +274,10 @@ public class ImapClientImpl @Inject constructor(
             val serverUidNext = uidFolder.uidNext
 
             // Branch between normal incremental (UID-based) and cold/rebuild (date-based).
-            // The rebuild path uses SEARCH SINCE to enforce the ING-013 30-day bound
+            // The rebuild path uses SEARCH SINCE to enforce the ING-013 90-day bound.
             // instead of a blanket getMessagesByUID(1, *) scan.
             val needsRebuild = uidValidity == null || uidValidity != serverUidValidity
-            val capped: Array<jakarta.mail.Message> = if (needsRebuild) {
+            val candidates: Array<jakarta.mail.Message> = if (needsRebuild) {
                 val sinceDate = Date(System.currentTimeMillis() - sinceDays * MILLIS_PER_DAY)
                 val term = ReceivedDateTerm(ComparisonTerm.GE, sinceDate)
                 folder.search(term) ?: emptyArray()
@@ -280,6 +285,11 @@ public class ImapClientImpl @Inject constructor(
                 val fetchFromUid = uidNext ?: 1L
                 uidFolder.getMessagesByUID(fetchFromUid, UIDFolder.LASTUID) ?: emptyArray()
             }
+            val boundedMax = maxMessages?.takeIf { it > 0 }
+            val capped = candidates
+                .sortedBy { msg -> runCatching { uidFolder.getUID(msg) }.getOrDefault(Long.MAX_VALUE) }
+                .let { sorted -> boundedMax?.let(sorted::take) ?: sorted }
+                .toTypedArray()
 
             if (capped.isNotEmpty()) {
                 val fp = FetchProfile().apply {
@@ -626,4 +636,3 @@ public class ImapClientImpl @Inject constructor(
         private const val MILLIS_PER_DAY = 86_400_000L
     }
 }
-

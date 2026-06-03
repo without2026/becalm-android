@@ -447,25 +447,27 @@ private fun PersonRowItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val displayLabel = person.displayLabel.ifBlank { stringResource(R.string.persons_unidentified) }
     ContactRow(
-        headline = buildDisplayHeadline(person),
+        headline = displayLabel,
         metadata = person.interactionCount
             .takeIf { it > 0 }
             ?.let { stringResource(R.string.persons_interactions_count, it) },
-        supportingText = person.lastInteractionSnippet?.takeIf { it.isNotBlank() },
-        attentionLabel = person.pendingCommitmentCount
+        supportingText = person.topAction?.title?.takeIf { it.isNotBlank() }
+            ?: person.lastInteractionSnippet?.takeIf { it.isNotBlank() },
+        attentionLabel = person.topAction?.primaryVerb?.takeIf { it.isNotBlank() }
+            ?: person.pendingCommitmentCount
             .takeIf { it > 0 }
             ?.let { stringResource(R.string.persons_pending_commitments_fmt, it) },
         onClick = onClick,
         modifier = modifier,
     ) {
-        PersonAvatar(person = person)
+        PersonAvatar(seed = displayLabel)
     }
 }
 
 @Composable
-private fun PersonAvatar(person: PersonRow) {
-    val seed = person.displayLabel.ifBlank { person.personId }
+private fun PersonAvatar(seed: String) {
     val colors = listOf(
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
         MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.64f),
@@ -542,10 +544,6 @@ private fun OfflineBadge(lastSyncAt: Instant?) {
 
 private fun avatarInitial(seed: String): String =
     seed.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
-
-private fun buildDisplayHeadline(person: PersonRow): String {
-    return person.displayLabel
-}
 
 private fun Instant.toHourMinuteLabel(): String {
     val local = toLocalDateTime(TimeZone.currentSystemDefault())

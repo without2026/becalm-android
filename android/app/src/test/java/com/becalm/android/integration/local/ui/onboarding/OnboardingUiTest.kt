@@ -975,8 +975,8 @@ class OnboardingUiTest {
     }
 
     @Test
-    fun `compact setup shows source ownership controls after self identity is confirmed`() {
-        var ownershipUpdate: Pair<String, String>? = null
+    fun `compact setup shows connected accounts without ownership gate after self identity is confirmed`() {
+        var continueClicks = 0
 
         composeRule.setContent {
             BecalmTheme {
@@ -995,45 +995,36 @@ class OnboardingUiTest {
                         confirmed = true,
                         saving = false,
                     ),
-                    sourceOwnerships = listOf(
+                    connectedAccounts = listOf(
                         OnboardingSourceOwnershipUi(
                             id = "conn-gmail",
                             title = "Gmail",
                             accountLabel = "work@example.com",
-                            ownership = "unknown",
                             status = "connected",
                         ),
                     ),
-                    onSourceOwnership = { id, ownership -> ownershipUpdate = id to ownership },
-                    onContinue = {},
+                    onContinue = { continueClicks += 1 },
                 )
             }
         }
 
         composeRule.onNodeWithTag("source-connections-list")
-            .performScrollToNode(hasTestTag("source-ownership-conn-gmail-self"))
+            .performScrollToNode(hasTestTag("source-connected-account-conn-gmail"))
         composeRule.onNodeWithText("Gmail").assertIsDisplayed()
         composeRule.onNodeWithText("work@example.com").assertIsDisplayed()
-        composeRule.onNodeWithTag("source-connections-list")
-            .performScrollToNode(hasText(string(R.string.onb_setup_source_ownership_required)))
-        composeRule.onAllNodesWithText(string(R.string.onb_setup_source_ownership_required)).assertCountEquals(2)
-        composeRule.onAllNodesWithTag("source-ownership-conn-gmail-unknown").assertCountEquals(0)
+        composeRule.onAllNodesWithTag("source-ownership-conn-gmail-self").assertCountEquals(0)
         composeRule.onNodeWithTag("source-connections-list")
             .performScrollToNode(hasTestTag("source-connections-continue"))
-        composeRule.onNodeWithTag("source-connections-continue").assertIsNotEnabled()
-        composeRule.onNodeWithTag("source-connections-list")
-            .performScrollToNode(hasTestTag("source-ownership-conn-gmail-self"))
-        composeRule.onNodeWithTag("source-ownership-conn-gmail-self").performClick()
+        composeRule.onNodeWithTag("source-connections-continue").assertIsEnabled()
+        composeRule.onNodeWithTag("source-connections-continue").performClick()
 
         composeRule.runOnIdle {
-            assertEquals("conn-gmail" to "self", ownershipUpdate)
+            assertEquals(1, continueClicks)
         }
     }
 
     @Test
     fun `settings gmail connection screen shows existing gmail accounts and add another action`() {
-        var ownershipUpdate: Pair<String, String>? = null
-
         composeRule.setContent {
             BecalmTheme {
                 SettingsSourceConnectionsScreen(
@@ -1047,7 +1038,6 @@ class OnboardingUiTest {
                                 id = "conn-gmail-1",
                                 title = "Gmail",
                                 accountLabel = "work@example.com",
-                                ownership = "unknown",
                                 status = "connected",
                                 provider = "google",
                                 capability = "mail",
@@ -1056,7 +1046,6 @@ class OnboardingUiTest {
                                 id = "conn-google-calendar-1",
                                 title = "Google Calendar",
                                 accountLabel = "calendar@example.com",
-                                ownership = "self",
                                 status = "connected",
                                 provider = "google",
                                 capability = "calendar",
@@ -1067,7 +1056,6 @@ class OnboardingUiTest {
                     onConnectSource = { _, _ -> },
                     onPersistEmailConsent = { true },
                     onRefreshSource = {},
-                    onSourceOwnership = { id, ownership -> ownershipUpdate = id to ownership },
                     onNavigateDone = {},
                     onLaunchPendingIntent = {},
                 )
@@ -1077,15 +1065,10 @@ class OnboardingUiTest {
         composeRule.onNodeWithText(string(R.string.settings_source_connections_add_another_account))
             .assertIsDisplayed()
         composeRule.onNodeWithTag("source-connections-list")
-            .performScrollToNode(hasTestTag("source-ownership-conn-gmail-1-self"))
+            .performScrollToNode(hasTestTag("source-connected-account-conn-gmail-1"))
         composeRule.onNodeWithText("work@example.com").assertIsDisplayed()
-        composeRule.onAllNodesWithText(string(R.string.settings_identity_connection_ownership_warning)).assertCountEquals(2)
         composeRule.onAllNodesWithText("Google Calendar").assertCountEquals(0)
-        composeRule.onNodeWithTag("source-ownership-conn-gmail-1-self").performClick()
-
-        composeRule.runOnIdle {
-            assertEquals("conn-gmail-1" to "self", ownershipUpdate)
-        }
+        composeRule.onAllNodesWithTag("source-ownership-conn-gmail-1-self").assertCountEquals(0)
     }
 
     @Test

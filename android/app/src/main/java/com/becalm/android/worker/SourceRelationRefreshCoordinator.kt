@@ -3,12 +3,15 @@ package com.becalm.android.worker
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
+import com.becalm.android.data.repository.SourceMirrorCursorReset
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import kotlinx.datetime.Instant
 
 /**
@@ -27,6 +30,8 @@ internal class SourceRelationRefreshCoordinator(
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    private val userCorrectionRepository: UserCorrectionRepository? = null,
+    private val syncCursorStore: SyncCursorStore? = null,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
 ) {
@@ -41,7 +46,16 @@ internal class SourceRelationRefreshCoordinator(
         var commitmentUpserted = 0
         var commitmentParticipantUpserted = 0
         var scheduleEventLinkUpserted = 0
+        var userCorrectionUpserted = 0
+        var userCorrectionApplied = 0
         var hasMore = false
+
+        if (plan.resetMirrorCursorBeforeRefresh) {
+            val cursorStore = syncCursorStore
+                ?: return missingRepository("SyncCursorStore")
+            SourceMirrorCursorReset.clearForSourceType(cursorStore, userId, plan.sourceType)
+            logger.d(TAG, "mirror cursors reset source=${plan.sourceType}")
+        }
 
         plan.rawSourceType?.let { sourceType ->
             val repository = rawIngestionRepository
@@ -155,6 +169,33 @@ internal class SourceRelationRefreshCoordinator(
             }
         }
 
+        userCorrectionRepository?.let { repository ->
+            when (val result = repository.refreshSince(userId = userId, since = null)) {
+                is BecalmResult.Success -> {
+                    userCorrectionUpserted = result.value.upserted
+                    hasMore = hasMore || result.value.hasMore
+                    logger.d(
+                        TAG,
+                        "user correction refresh fetched=${result.value.fetched} upserted=${result.value.upserted}",
+                    )
+                }
+                is BecalmResult.Failure -> logger.w(
+                    TAG,
+                    "user correction refresh failed source=${plan.sourceType} error=${result.error::class.simpleName}",
+                )
+            }
+            when (val result = repository.applyActiveCorrections(userId)) {
+                is BecalmResult.Success -> {
+                    userCorrectionApplied = result.value
+                    logger.d(TAG, "user correction reapplied count=${result.value}")
+                }
+                is BecalmResult.Failure -> logger.w(
+                    TAG,
+                    "user correction reapply failed source=${plan.sourceType} error=${result.error::class.simpleName}",
+                )
+            }
+        }
+
         val stats = SourceRelationRefreshStats(
             rawUpserted = rawUpserted,
             calendarUpserted = calendarUpserted,
@@ -162,6 +203,8 @@ internal class SourceRelationRefreshCoordinator(
             commitmentUpserted = commitmentUpserted,
             commitmentParticipantUpserted = commitmentParticipantUpserted,
             scheduleEventLinkUpserted = scheduleEventLinkUpserted,
+            userCorrectionUpserted = userCorrectionUpserted,
+            userCorrectionApplied = userCorrectionApplied,
             localWriteCount = plan.localWriteCount,
             hasMore = hasMore,
         )
@@ -187,6 +230,7 @@ internal data class SourceRelationRefreshPlan(
     val rawSourceType: String? = null,
     val calendarRefresh: CalendarRelationRefresh? = null,
     val sourceParticipantRefreshScope: SourceParticipantRefreshScope = SourceParticipantRefreshScope.SOURCE,
+    val resetMirrorCursorBeforeRefresh: Boolean = false,
     val localWriteCount: Int = 0,
 )
 
@@ -207,6 +251,8 @@ internal data class SourceRelationRefreshStats(
     val commitmentUpserted: Int,
     val commitmentParticipantUpserted: Int,
     val scheduleEventLinkUpserted: Int,
+    val userCorrectionUpserted: Int = 0,
+    val userCorrectionApplied: Int = 0,
     val localWriteCount: Int,
     val hasMore: Boolean = false,
 ) {
@@ -217,5 +263,7 @@ internal data class SourceRelationRefreshStats(
             commitmentUpserted +
             commitmentParticipantUpserted +
             scheduleEventLinkUpserted +
+            userCorrectionUpserted +
+            userCorrectionApplied +
             localWriteCount
 }

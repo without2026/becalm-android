@@ -189,6 +189,7 @@ public fun CommitmentCard(
         CommitmentItemType.ACTION -> stringResource(commitmentActionLabelRes(normalizedDirection))
         CommitmentItemType.SCHEDULE -> when (normalizedScheduleStatus) {
             CommitmentScheduleStatus.CONFIRMED -> stringResource(R.string.commitment_subtype_schedule_confirmed)
+            CommitmentScheduleStatus.TENTATIVE -> stringResource(R.string.commitment_subtype_schedule_tentative)
             CommitmentScheduleStatus.CHANGED -> stringResource(R.string.commitment_subtype_schedule_changed)
             CommitmentScheduleStatus.POSTPONED -> stringResource(R.string.commitment_subtype_schedule_postponed)
             CommitmentScheduleStatus.CANCELLED -> stringResource(R.string.commitment_subtype_schedule_cancelled)
@@ -429,7 +430,15 @@ public fun CommitmentCard(
                 ) {
                     PillBadge(
                         label = stringResource(itemTypeLabel),
-                        stateColors = colors.actionStatePending,
+                        stateColors = if (normalizedDirection == CommitmentWire.DIRECTION_TAKE) {
+                            BecalmStateColors(
+                                fill = colors.directionTake.fill,
+                                border = colors.directionTake.border,
+                                text = MaterialTheme.colorScheme.onSurface,
+                            )
+                        } else {
+                            colors.actionStatePending
+                        },
                         horizontalPadding = 6.dp,
                         verticalPadding = 2.dp,
                     )

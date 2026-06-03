@@ -100,7 +100,10 @@ public class DeviceKeyStore @Inject constructor(
     public suspend fun clear(): Unit = withContext(ioDispatcher) {
         // Editor.clear() drops every entry atomically. When future key material (signing keys,
         // WebAuthn handles) is added, there is no "remember to mirror into clear()" footgun.
-        prefs.edit().clear().apply()
+        val committed = prefs.edit().clear().commit()
+        if (!committed) {
+            Timber.w("DeviceKeyStore: device key material clear commit returned false")
+        }
         Timber.d("DeviceKeyStore: device key material cleared")
     }
 }

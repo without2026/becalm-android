@@ -91,9 +91,14 @@ internal data class NormalizedSourceEvent(
             userId = rawEvent.userId,
             sourceType = rawEvent.sourceType,
             sourceRef = rawEvent.sourceRef,
+            sourceAccountKeyHash = rawEvent.sourceAccountKeyHash(),
             messageIdHeader = emailHeaders?.messageIdHeader,
             inReplyToHeader = emailHeaders?.inReplyToHeader,
             referencesHeader = emailHeaders?.referencesHeader,
+            senderHeader = emailHeaders?.senderHeader,
+            toHeader = emailHeaders?.toHeader?.takeIf { it.isNotEmpty() },
+            ccHeader = emailHeaders?.ccHeader?.takeIf { it.isNotEmpty() },
+            bccHeader = emailHeaders?.bccHeader?.takeIf { it.isNotEmpty() },
             conversationRef = rawEvent.conversationRef,
             counterpartyRef = rawEvent.counterpartyRef,
             participants = participants.takeIf { it.isNotEmpty() },
@@ -138,7 +143,11 @@ internal data class NormalizedSourceEvent(
                 rawEvent = rawEvent,
                 bodyPlainForExtraction = emailBody.bodyTextForExtraction(),
                 participants = participants,
-                emailHeaders = rawEvent.emailHeaderContext(),
+                emailHeaders = rawEvent.emailHeaderContext(
+                    rawHeaders = emailBody.rawHeaders,
+                    fallbackFromAddress = emailBody.fromAddress,
+                    fallbackToAddressesJson = emailBody.toAddresses,
+                ),
                 emailHeaderHints = headerHints,
             )
         }
@@ -161,7 +170,11 @@ internal data class NormalizedSourceEvent(
                 ?.takeIf { it.isNotBlank() }
                 ?.take(MAX_EMAIL_BODY_CHARS)
 
-        private fun RawIngestionEventEntity.emailHeaderContext(): NormalizedEmailHeaders? {
+        private fun RawIngestionEventEntity.emailHeaderContext(
+            rawHeaders: String? = null,
+            fallbackFromAddress: String? = null,
+            fallbackToAddressesJson: String? = null,
+        ): NormalizedEmailHeaders? {
             val raw = sourceRef?.takeIf { it.isNotBlank() } ?: return null
             val parsed = runCatching {
                 val json = JSONObject(raw)
@@ -169,18 +182,35 @@ internal data class NormalizedSourceEvent(
                     messageIdHeader = json.optNonBlankString("message_id"),
                     inReplyToHeader = json.optNonBlankString("in_reply_to"),
                     referencesHeader = json.optNonBlankString("references"),
+                    senderHeader = rawHeaders.emailSenderHeader(fallbackFromAddress),
+                    toHeader = rawHeaders.emailHeaderAddresses("to").ifEmpty {
+                        parseEmailArray(fallbackToAddressesJson)
+                    },
+                    ccHeader = rawHeaders.emailHeaderAddresses("cc"),
+                    bccHeader = rawHeaders.emailHeaderAddresses("bcc"),
                 )
             }.getOrNull()
             return parsed?.takeIf {
-                it.messageIdHeader != null || it.inReplyToHeader != null || it.referencesHeader != null
+                it.hasAnyHeader()
             } ?: NormalizedEmailHeaders(
                 messageIdHeader = raw.jsonStringValue("message_id"),
                 inReplyToHeader = raw.jsonStringValue("in_reply_to"),
                 referencesHeader = raw.jsonStringValue("references"),
+                senderHeader = rawHeaders.emailSenderHeader(fallbackFromAddress),
+                toHeader = rawHeaders.emailHeaderAddresses("to").ifEmpty {
+                    parseEmailArray(fallbackToAddressesJson)
+                },
+                ccHeader = rawHeaders.emailHeaderAddresses("cc"),
+                bccHeader = rawHeaders.emailHeaderAddresses("bcc"),
             ).takeIf {
-                it.messageIdHeader != null || it.inReplyToHeader != null || it.referencesHeader != null
+                it.hasAnyHeader()
             }
         }
+
+        private fun RawIngestionEventEntity.sourceAccountKeyHash(): String? =
+            sourceRef
+                ?.jsonStringValue("source_account_key_hash")
+                ?.takeIf { HASH_ISH.matches(it) }
 
         private fun emailParticipants(
             folder: String?,
@@ -238,6 +268,29 @@ internal data class NormalizedSourceEvent(
                 ?.groupValues
                 ?.getOrNull(1)
                 ?.takeIf { it.isNotBlank() }
+
+        private fun String?.emailHeaderValue(name: String): String? {
+            if (isNullOrBlank()) return null
+            val parsed = runCatching {
+                JSONObject(this).optString(name.lowercase(), "").takeIf { it.isNotBlank() }
+            }.getOrNull()
+            return parsed ?: Regex(""""${Regex.escape(name.lowercase())}"\s*:\s*"([^"]*)"""")
+                .find(this.lowercase())
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.takeIf { it.isNotBlank() }
+        }
+
+        private fun String?.emailHeaderAddresses(name: String): List<String> {
+            val value = emailHeaderValue(name) ?: return emptyList()
+            return EMAIL_REGEX.findAll(value)
+                .mapNotNull { match -> canonicalEmail(match.value) }
+                .distinct()
+                .toList()
+        }
+
+        private fun String?.emailSenderHeader(fallbackFromAddress: String?): String? =
+            canonicalEmail(emailHeaderValue("from")) ?: canonicalEmail(fallbackFromAddress)
 
         private fun String?.emailHeaderHints(): NormalizedEmailHeaderHints {
             if (isNullOrBlank()) return NormalizedEmailHeaderHints.EMPTY
@@ -314,6 +367,7 @@ internal data class NormalizedSourceEvent(
         }
 
         private val EMAIL_REGEX = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE)
+        private val HASH_ISH = Regex("[a-fA-F0-9]{16,128}")
         private val WHITESPACE_RUN = Regex("\\s+")
         private const val MAX_EMAIL_BODY_CHARS = 16_000
     }
@@ -323,7 +377,21 @@ internal data class NormalizedEmailHeaders(
     val messageIdHeader: String?,
     val inReplyToHeader: String?,
     val referencesHeader: String?,
-)
+    val senderHeader: String? = null,
+    val toHeader: List<String> = emptyList(),
+    val ccHeader: List<String> = emptyList(),
+    val bccHeader: List<String> = emptyList(),
+) {
+
+    fun hasAnyHeader(): Boolean =
+        messageIdHeader != null ||
+            inReplyToHeader != null ||
+            referencesHeader != null ||
+            senderHeader != null ||
+            toHeader.isNotEmpty() ||
+            ccHeader.isNotEmpty() ||
+            bccHeader.isNotEmpty()
+}
 
 internal data class NormalizedEmailHeaderHints(
     val hasListUnsubscribe: Boolean = false,
@@ -342,15 +410,15 @@ internal fun RawIngestionEventDto.toRawIngestionEventEntity(userId: String): Raw
         userId = userId,
         clientEventId = clientEventId,
         sourceType = sourceType,
-        sourceRef = sourceRef,
+        sourceRef = sourceRef ?: providerEventId,
         conversationRef = conversationRef,
         counterpartyRef = counterpartyRef,
-        eventTitle = eventTitle,
-        eventSnippet = eventSnippet,
+        eventTitle = eventTitle ?: sourceEventTitle,
+        eventSnippet = eventSnippet ?: sourceEventSnippet,
         durationSeconds = durationSeconds,
         location = location,
         folder = folder,
-        commitmentsExtractedCount = commitmentsExtractedCount ?: 0,
+        commitmentsExtractedCount = commitmentsExtractedCount ?: extractedCount ?: 0,
         timestamp = timestamp,
         syncStatus = "synced",
     )

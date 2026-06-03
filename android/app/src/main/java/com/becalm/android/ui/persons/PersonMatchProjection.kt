@@ -7,6 +7,7 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonMemorySemanticIndexEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
+import com.becalm.android.domain.email.OutgoingEmailSalutationExtractor
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.PersonMatchCandidate
 import com.becalm.android.domain.person.PersonMatchDecision
@@ -45,7 +46,14 @@ private class MutableMatchCandidateProjection(
     val rejectedPatterns: MutableSet<String> = linkedSetOf()
 
     fun build(): MatchCandidateProjection {
-        val name = displayName ?: nickname ?: identities.firstOrNull()?.value ?: personId
+        val name = listOfNotNull(
+            pickDisplayName(displayName),
+            pickDisplayName(nickname),
+            identities
+                .mapNotNull { pickDisplayName(it.value) }
+                .firstOrNull(),
+        ).firstOrNull()
+            ?: UNKNOWN_PERSON_DISPLAY_NAME
         val detail = listOfNotNull(
             jobTitle?.takeIf { it.isNotBlank() },
             companyName?.takeIf { it.isNotBlank() },
@@ -70,6 +78,12 @@ private class MutableMatchCandidateProjection(
             ),
         )
     }
+}
+
+private fun pickDisplayName(raw: String?): String? {
+    val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    if (isTechnicalDisplayName(value)) return null
+    return value
 }
 
 internal fun buildMatchingContext(
@@ -161,6 +175,8 @@ internal fun buildMatchingContext(
 internal fun SourceEventParticipantEntity.toRecommendedCandidateSummaries(
     event: UnmatchedPersonInteractionEntity,
     matchingContext: MatchingProjectionContext,
+    emailFolder: String? = null,
+    emailBodyPlain: String? = null,
 ): List<PersonMatchCandidateSummary> {
     if (resolutionStatus == "suggested_self") return emptyList()
     if (matchingContext.candidates.isEmpty()) return emptyList()
@@ -174,6 +190,10 @@ internal fun SourceEventParticipantEntity.toRecommendedCandidateSummaries(
         evidence = listOfNotNull(evidence, event.snippet, event.title)
             .joinToString(" ")
             .takeIf { it.isNotBlank() },
+        outgoingSalutationNames = OutgoingEmailSalutationExtractor.extractNames(
+            folder = emailFolder,
+            bodyText = emailBodyPlain ?: event.snippet,
+        ),
     )
     val decision = PersonMatchingEngine(ProjectionSemanticContextProvider(matchingContext.candidates)).decide(
         participant = participant,
@@ -240,14 +260,21 @@ private fun localizedReason(reason: String): String =
         "open_commitment" -> "진행 중인 약속과 관련"
         "decision_context" -> "이전 결정과 관련"
         "confirmed_pattern" -> "이전 확인 패턴"
+        "outgoing_salutation_name" -> "보낸 메일 첫 인사말"
         else -> reason
     }
 
 private fun preferredDisplayName(current: String?, incoming: String?): String? {
     val next = incoming?.trim()?.takeIf { it.isNotEmpty() } ?: return current
     val existing = current?.trim()?.takeIf { it.isNotEmpty() } ?: return next
-    return if (isTechnicalAnchor(existing) && !isTechnicalAnchor(next)) next else existing
+    return if (isTechnicalDisplayName(existing) && !isTechnicalDisplayName(next)) next else existing
 }
 
-private fun isTechnicalAnchor(value: String): Boolean =
-    value.contains("@") || value.startsWith("+") || value.all { it.isDigit() || it == '-' || it == ' ' }
+private const val UNKNOWN_PERSON_DISPLAY_NAME = "아직 이름을 모르는 연락처"
+
+private fun isTechnicalDisplayName(value: String): Boolean {
+    if (PersonIdentityResolver.isSpeakerLabelValue(value)) return true
+    if (PersonIdentityResolver.normalizeEmailAnchor(value) != null) return true
+    if (PersonIdentityResolver.normalizePhoneAnchor(value) != null) return true
+    return value.all { it.isDigit() || it == '-' || it == ' ' }
+}

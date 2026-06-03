@@ -54,6 +54,7 @@ class EnrichmentWorkerLocalIntegrationTest {
     private val authRepository = mockk<AuthRepository>()
     private val sourceStatusRepository = mockk<SourceStatusRepository>()
     private val workScheduler = mockk<WorkScheduler>(relaxed = true)
+    private val userPrefsStore = UserPrefsStoreImpl(LocalIntegrationSupport.prefsDataStore("enrichment-worker-user"))
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val processingPauseGate = ProcessingPauseGate(
         userPrefsStore = UserPrefsStoreImpl(LocalIntegrationSupport.prefsDataStore("enrichment-worker-pause")),
@@ -78,6 +79,7 @@ class EnrichmentWorkerLocalIntegrationTest {
             authRepository = authRepository,
             personEnrichmentRepositoryProvider = enrichmentRepositoryProvider,
             sourceStatusRepositoryProvider = sourceStatusRepositoryProvider,
+            userPrefsStore = userPrefsStore,
             processingPauseGate = processingPauseGate,
             workScheduler = workScheduler,
             logger = logger,
@@ -118,6 +120,8 @@ class EnrichmentWorkerLocalIntegrationTest {
     fun `ENR-006 worker replaces app-generated enrichment cache and records local sync success`() = runTest {
         val context = LocalIntegrationSupport.appContext()
         shadowOf(context as Application).grantPermissions(Manifest.permission.READ_CONTACTS)
+        userPrefsStore.setCurrentUserId(USER_ID)
+        userPrefsStore.setContactsConsent(true)
         coEvery { authRepository.currentSession() } returns LocalIntegrationSupport.authenticatedSession(userId = USER_ID)
         coEvery {
             sourceStatusRepository.recordSyncSuccess(EnrichmentWorker.SOURCE_TYPE_ENRICHMENT, any())
@@ -140,6 +144,7 @@ class EnrichmentWorkerLocalIntegrationTest {
             authRepository = authRepository,
             personEnrichmentRepositoryProvider = enrichmentRepositoryProvider,
             sourceStatusRepositoryProvider = sourceStatusRepositoryProvider,
+            userPrefsStore = userPrefsStore,
             processingPauseGate = processingPauseGate,
             workScheduler = workScheduler,
             logger = logger,
@@ -167,6 +172,7 @@ class EnrichmentWorkerLocalIntegrationTest {
             authRepository = authRepository,
             personEnrichmentRepositoryProvider = enrichmentRepositoryProvider,
             sourceStatusRepositoryProvider = sourceStatusRepositoryProvider,
+            userPrefsStore = userPrefsStore,
             processingPauseGate = processingPauseGate,
             workScheduler = workScheduler,
             logger = logger,

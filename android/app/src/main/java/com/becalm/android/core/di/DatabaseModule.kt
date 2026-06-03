@@ -8,13 +8,17 @@ import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
+import com.becalm.android.data.local.db.dao.PersonActionDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.ScheduleEventLinkDao
+import com.becalm.android.data.local.db.dao.ScheduleRowTombstoneDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.dao.SourceConnectionDao
+import com.becalm.android.data.local.db.dao.SourceEventAnchorDao
 import com.becalm.android.data.local.db.dao.SourceArtifactDao
+import com.becalm.android.data.local.db.dao.UserCorrectionDao
 import com.becalm.android.data.local.db.dao.UserProfileDao
 import dagger.Module
 import dagger.Provides
@@ -132,6 +136,12 @@ public object DatabaseModule {
         lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::scheduleEventLinkDao)
 
     @Provides
+    public fun provideScheduleRowTombstoneDao(
+        provider: BeCalmDatabaseProvider,
+    ): ScheduleRowTombstoneDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::scheduleRowTombstoneDao)
+
+    @Provides
     public fun provideSelfIdentityAnchorDao(
         provider: BeCalmDatabaseProvider,
     ): SelfIdentityAnchorDao =
@@ -160,6 +170,24 @@ public object DatabaseModule {
         provider: BeCalmDatabaseProvider,
     ): CommitmentProgressEventDao =
         lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::commitmentProgressEventDao)
+
+    @Provides
+    public fun provideSourceEventAnchorDao(
+        provider: BeCalmDatabaseProvider,
+    ): SourceEventAnchorDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::sourceEventAnchorDao)
+
+    @Provides
+    public fun provideUserCorrectionDao(
+        provider: BeCalmDatabaseProvider,
+    ): UserCorrectionDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::userCorrectionDao)
+
+    @Provides
+    public fun providePersonActionDao(
+        provider: BeCalmDatabaseProvider,
+    ): PersonActionDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::personActionDao)
 
     private inline fun <reified T : Any> lazyDaoProxy(
         dbProvider: BeCalmDatabaseProvider?,

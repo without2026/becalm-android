@@ -113,6 +113,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
             clock = clock,
             logger = logger,
             ioDispatcher = StandardTestDispatcher(testScheduler),
+            todayPollDispatcher = StandardTestDispatcher(testScheduler),
         )
         val refreshing = MutableStateFlow(false)
         val userIdFlow = stateSource.userIdFlow(this.backgroundScope)
@@ -263,6 +264,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
             clock = clock,
             logger = logger,
             ioDispatcher = StandardTestDispatcher(testScheduler),
+            todayPollDispatcher = StandardTestDispatcher(testScheduler),
         )
         val refreshing = MutableStateFlow(false)
         val userIdFlow = stateSource.userIdFlow(this.backgroundScope)

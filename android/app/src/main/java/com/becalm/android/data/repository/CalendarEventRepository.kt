@@ -95,7 +95,10 @@ public interface CalendarEventRepository {
      * @return [BecalmResult.Success] with [CalendarSyncResponse], or a typed failure
      *   (including [BecalmError.RateLimited] when HTTP 429 is returned).
      */
-    public suspend fun triggerServerSync(): BecalmResult<CalendarSyncResponse>
+    public suspend fun triggerServerSync(
+        sourceType: String? = null,
+        mode: String? = null,
+    ): BecalmResult<CalendarSyncResponse>
 
     /**
      * Deletes all cached events owned by [userId].
@@ -123,7 +126,6 @@ public interface CalendarEventRepository {
 // ─── Implementation ──────────────────────────────────────────────────────────
 
 private const val TAG = "CalendarEventRepository"
-private const val CURSOR_KEY = "calendar_events"
 private val EPOCH_START: Instant = Instant.fromEpochMilliseconds(0)
 private val EPOCH_END: Instant = Instant.fromEpochMilliseconds(Long.MAX_VALUE)
 
@@ -181,7 +183,8 @@ public class CalendarEventRepositoryImpl @Inject constructor(
     ) {
         // Resume from the persisted cursor only for the full mirror path.
         val useStoredCursor = since == null && rangeStart == null && rangeEnd == null
-        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(CURSOR_KEY).first() else null
+        val cursorKey = MirrorCursorKeys.calendarEvents(userId)
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
         val sinceStr: String? = since?.toString()
 
         var totalFetched = 0
@@ -190,7 +193,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         var lastCursor: String? = cursor
 
         for (page in 1..REFRESH_PAGE_CAP) {
-            val outcome = when (val r = fetchAndPersistPage(userId, cursor, sinceStr, page, rangeStart, rangeEnd, useStoredCursor)) {
+            val outcome = when (val r = fetchAndPersistPage(userId, cursorKey, cursor, sinceStr, page, rangeStart, rangeEnd, useStoredCursor)) {
                 is BecalmResult.Success -> r.value
                 is BecalmResult.Failure -> return@safeApi BecalmResult.Failure(r.error)
             }
@@ -225,6 +228,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
      */
     private suspend fun fetchAndPersistPage(
         userId: String,
+        cursorKey: String,
         cursor: String?,
         sinceStr: String?,
         page: Int,
@@ -257,7 +261,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             // Persist the cursor immediately after each page is durably written.
             // If the process is killed mid-refresh, the next run resumes from the
             // last successfully upserted page instead of re-fetching from scratch.
-            cursorStore.setCursor(CURSOR_KEY, body.cursor)
+            cursorStore.setCursor(cursorKey, body.cursor)
         }
 
         return BecalmResult.Success(
@@ -287,11 +291,14 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun triggerServerSync(): BecalmResult<CalendarSyncResponse> = safeApi(
+    override suspend fun triggerServerSync(
+        sourceType: String?,
+        mode: String?,
+    ): BecalmResult<CalendarSyncResponse> = safeApi(
         ioLogMessage = "triggerServerSync network error",
         unexpectedLogMessage = "triggerServerSync unexpected error",
     ) {
-        val response = api.syncCalendarEvents()
+        val response = api.syncCalendarEvents(provider = sourceType, mode = mode)
         if (!response.isSuccessful) {
             logger.w(TAG, "triggerServerSync HTTP ${response.code()}")
             return@safeApi BecalmResult.Failure(response.toError())
@@ -317,6 +324,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
                         status = body.status ?: "pending",
                         accepted = true,
                         retryAfterSeconds = pollResult.retryAfterSeconds ?: body.retryAfterSeconds,
+                        synced = pollResult.synced,
                         errorCode = pollResult.reasonCode ?: body.errorCode,
                         errorMessage = if (pollResult.reasonCode != null) {
                             pollResult.message

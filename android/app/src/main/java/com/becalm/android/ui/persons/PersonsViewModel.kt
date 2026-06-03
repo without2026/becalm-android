@@ -12,6 +12,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.FirstMemoryRepository
 import com.becalm.android.data.repository.PersonManualMatchRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.domain.onboarding.FirstMemoryDraft
 import com.becalm.android.domain.onboarding.FirstMemoryInput
 import com.becalm.android.domain.onboarding.FirstMemoryKind
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -60,16 +62,29 @@ public data class PersonRow(
     val pendingCommitmentCount: Int = 0,
     val channelSources: Set<String> = emptySet(),
     val lastInteractionSnippet: String? = null,
+    val topAction: PersonActionSummary? = null,
 ) {
     /**
-     * User-facing label. Falls back to the canonical [personId] when no
-     * display name or nickname is available (SRC-001, ENR-006).
+     * User-facing label for row rendering.
+     *
+     * The actual fallback text is resolved at UI layer to keep localization
+     * in one place.
      */
     val displayLabel: String
         get() = displayName
             ?: nickname
-            ?: personId
+            ?: ""
 }
+
+public data class PersonActionSummary(
+    val id: String,
+    val title: String,
+    val primaryVerb: String,
+    val shortReason: String,
+    val actionKind: String,
+    val dueAt: Instant?,
+    val urgencyScore: Double,
+)
 
 public data class PersonMatchChoiceRow(
     val anchor: String,
@@ -99,7 +114,7 @@ public fun buildPersonSections(people: List<PersonRow>): List<PersonSection> {
     val pending = ArrayList<PersonRow>()
     val recent = ArrayList<PersonRow>()
     people.forEach { person ->
-        if (person.pendingCommitmentCount > 0) {
+        if (person.topAction != null || person.pendingCommitmentCount > 0) {
             pending += person
         } else {
             recent += person
@@ -134,7 +149,7 @@ public data class PersonsUiState(
     val showOfflineBadge: Boolean = false,
     val offlineLastSyncAt: Instant? = null,
     val sortOrder: PersonsSortOrder = PersonsSortOrder.MOST_RECENT_EVENT_DESC,
-    val pageSize: Int = 20,
+    val pageSize: Int = 120,
     val hasMorePages: Boolean = false,
     val nextCursor: String? = null,
     val refreshing: Boolean = false,
@@ -181,6 +196,7 @@ public class PersonsViewModel @Inject constructor(
     private val refreshCoordinator: PersonsRefreshCoordinator,
     private val manualMatchRepository: PersonManualMatchRepository,
     private val firstMemoryRepository: FirstMemoryRepository,
+    private val personActionRepository: PersonActionRepository = NoopPersonActionRepository,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
@@ -200,6 +216,7 @@ public class PersonsViewModel @Inject constructor(
 
     init {
         observePeople()
+        refreshActionCache()
     }
 
     // ─── Actions ──────────────────────────────────────────────────────────────
@@ -339,6 +356,7 @@ public class PersonsViewModel @Inject constructor(
         viewModelScope.launch(ioDispatcher) {
             try {
                 val snapshot = refreshCoordinator.refresh()
+                refreshActionCacheForCurrentUser()
                 _uiState.update {
                     it.copy(
                         refreshing = false,
@@ -356,6 +374,18 @@ public class PersonsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun refreshActionCache() {
+        viewModelScope.launch(ioDispatcher) {
+            refreshActionCacheForCurrentUser()
+        }
+    }
+
+    private suspend fun refreshActionCacheForCurrentUser() {
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId.isNullOrBlank()) return
+        personActionRepository.refresh(userId = userId, surface = "person")
     }
 
     public fun onManualMatch(
@@ -572,6 +602,28 @@ public class PersonsViewModel @Inject constructor(
     }
 
     private companion object {
-        const val PERSONS_PAGE_SIZE: Int = 20
+        const val PERSONS_PAGE_SIZE: Int = 120
     }
+}
+
+private object NoopPersonActionRepository : PersonActionRepository {
+    override fun observeActiveForSurface(
+        userId: String,
+        surface: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override suspend fun refresh(
+        userId: String,
+        surface: String?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionRefreshStats> =
+        BecalmResult.Success(
+            com.becalm.android.data.repository.PersonActionRefreshStats(
+                fetched = 0,
+                deleted = 0,
+                serverWatermark = null,
+                recomputeState = null,
+            ),
+        )
 }

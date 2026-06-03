@@ -12,7 +12,6 @@ import com.becalm.android.data.remote.imap.ImapClient
 import com.becalm.android.data.remote.imap.ImapFolder
 import com.becalm.android.data.remote.imap.ImapMessage
 import com.becalm.android.data.remote.imap.ImapSpecialUse
-import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.domain.email.EmailPersonRef
 import kotlinx.coroutines.flow.first
@@ -30,7 +29,10 @@ internal data class ImapProviderConfig(
 )
 
 internal sealed interface ImapProviderSyncOutcome {
-    data class Success(val fetchedCount: Int) : ImapProviderSyncOutcome
+    data class Success(
+        val fetchedCount: Int,
+        val hasMore: Boolean = false,
+    ) : ImapProviderSyncOutcome
     data class Terminal(val result: ListenableWorker.Result) : ImapProviderSyncOutcome
 }
 
@@ -39,7 +41,6 @@ internal class ImapProviderSyncRunner(
     private val syncCursorStore: SyncCursorStore,
     private val imapClient: ImapClient,
     private val rawIngestionRepository: RawIngestionRepository,
-    private val emailBodyRepository: EmailBodyRepository,
     private val messagePersistence: ImapMessagePersistence,
     private val rawEventMapper: ImapRawEventMapper,
     private val logger: Logger,
@@ -64,6 +65,7 @@ internal class ImapProviderSyncRunner(
         val folders = (listResult as BecalmResult.Success).value
 
         var fetchedCount = 0
+        var hasMore = false
         folderPassPlans(folders).forEach { pass ->
             val folder = pass.folderName
             if (folder == null) {
@@ -80,12 +82,15 @@ internal class ImapProviderSyncRunner(
                     lookbackDays = lookbackDays,
                 )
             ) {
-                is ImapProviderSyncOutcome.Success -> fetchedCount += outcome.fetchedCount
+                is ImapProviderSyncOutcome.Success -> {
+                    fetchedCount += outcome.fetchedCount
+                    hasMore = hasMore || outcome.hasMore
+                }
                 is ImapProviderSyncOutcome.Terminal -> return outcome
             }
         }
 
-        return ImapProviderSyncOutcome.Success(fetchedCount)
+        return ImapProviderSyncOutcome.Success(fetchedCount, hasMore = hasMore)
     }
 
     private fun resolveFolder(
@@ -137,6 +142,7 @@ internal class ImapProviderSyncRunner(
             uidValidity = storedUidValidity,
             uidNext = fetchFromUid,
             sinceDays = lookbackDays,
+            maxMessages = IMAP_FETCH_BATCH_SIZE,
         )
         if (fetchResult is BecalmResult.Failure) {
             return ImapProviderSyncOutcome.Terminal(onFetchFailure(fetchResult.error))
@@ -157,15 +163,15 @@ internal class ImapProviderSyncRunner(
                 sourceType = config.sourceType,
                 provider = config.provider,
                 folderLabel = folderLabel,
-                emailBodyRepository = emailBodyRepository,
                 rawIngestionRepository = rawIngestionRepository,
                 toEntity = { message ->
-                    rawEventMapper.toEntity(
-                        message = message,
-                        userId = userId,
-                        mailboxKey = mailboxKey,
-                        folderLabel = folderLabel,
-                    )
+                        rawEventMapper.toEntity(
+                            message = message,
+                            userId = userId,
+                            accountIdentifier = imapEmail,
+                            mailboxKey = mailboxKey,
+                            folderLabel = folderLabel,
+                        )
                 },
             )
             if (resolutionResult is BecalmResult.Failure) {
@@ -195,7 +201,9 @@ internal class ImapProviderSyncRunner(
             }
         }
 
-        val newLastSeenUid = maxOf(fetched.newUidNext - 1L, 0L)
+        val maxFetchedUid = fetched.messages.maxOfOrNull { it.uid }
+        val hasMore = fetched.messages.size >= IMAP_FETCH_BATCH_SIZE
+        val newLastSeenUid = maxOf(maxFetchedUid ?: (fetched.newUidNext - 1L), 0L)
         syncCursorStore.setImapState(
             mailbox = mailboxKey,
             state = ImapCursorState(
@@ -205,14 +213,17 @@ internal class ImapProviderSyncRunner(
         )
         logger.d(
             tag,
-            "cursor advanced mailbox=$mailboxKey uidValidity=${fetched.newUidValidity} lastSeenUid=$newLastSeenUid",
+            "cursor advanced mailbox=$mailboxKey uidValidity=${fetched.newUidValidity} " +
+                "lastSeenUid=$newLastSeenUid hasMore=$hasMore",
         )
-        return ImapProviderSyncOutcome.Success(fetched.messages.size)
+        return ImapProviderSyncOutcome.Success(fetched.messages.size, hasMore = hasMore)
     }
 
     private fun folderLabelFor(mailboxKey: String): String =
         if (mailboxKey == config.sentMailboxKey) FOLDER_SENT else FOLDER_INBOX
 }
+
+internal const val IMAP_FETCH_BATCH_SIZE: Int = 100
 
 private data class FolderPassPlan(
     val mailboxKey: String,

@@ -80,6 +80,7 @@ class MediaStoreWorkerSpecTest {
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
         every { userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING) } returns flowOf(false)
         every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabledAt(any()) } returns flowOf(null)
         every { userPrefsStore.observeRecordingFolderTreeUri(any()) } returns flowOf(null)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf(null)
     }

@@ -73,11 +73,11 @@ public class ImapDaumWorker @AssistedInject constructor(
         public const val MAX_RETRIES: Int = 5
         public const val DAUM_IMAP_HOST: String = "imap.daum.net"
         public const val DAUM_IMAP_PORT: Int = 993
-        public const val MAILBOX_DAUM_INBOX: String = "daum_inbox"
-        public const val MAILBOX_DAUM_SENT: String = "daum_sent"
+        public const val MAILBOX_DAUM_INBOX: String = "daum_inbox_v2_90d"
+        public const val MAILBOX_DAUM_SENT: String = "daum_sent_v2_90d"
         internal const val FALLBACK_INBOX_NAME: String = "INBOX"
         internal const val FALLBACK_SENT_NAME: String = "보낸편지함"
-        internal const val SINCE_DAYS: Int = 30
+        internal const val SINCE_DAYS: Int = 90
 
         private const val TAG = "ImapDaumWorker"
         private const val PROVIDER_DAUM = "daum"

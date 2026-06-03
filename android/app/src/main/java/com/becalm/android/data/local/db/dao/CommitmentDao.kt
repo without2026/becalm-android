@@ -15,14 +15,17 @@ public data class TodayCommitmentRow(
     val title: String,
     val direction: String?,
     val scheduleStatus: String?,
+    val agendaIntent: String? = null,
     val counterpartyDisplayName: String?,
     val sourceType: String?,
     val sourceRef: String?,
     val sourceTitle: String?,
+    val quote: String?,
     val dueAt: Instant?,
     val dueIsApproximate: Boolean,
     val dueHint: String?,
     val sortKey: Instant,
+    val sourceEventId: String? = null,
 )
 
 public data class CommitmentManagementRow(
@@ -32,6 +35,7 @@ public data class CommitmentManagementRow(
     val direction: String?,
     val scheduleStatus: String?,
     val decisionStatus: String?,
+    val agendaIntent: String? = null,
     val actionState: String,
     val dueAt: Instant?,
     val dueIsApproximate: Boolean,
@@ -40,6 +44,7 @@ public data class CommitmentManagementRow(
     val sourceTitle: String?,
     val sourceOccurredAt: Instant?,
     val dueHint: String?,
+    val sourceEventId: String? = null,
 )
 
 public data class RawEventCommitmentRow(
@@ -487,7 +492,11 @@ public interface CommitmentDao {
         SELECT * FROM commitments
         WHERE user_id = :userId
           AND source_type = :sourceType
-          AND source_ref IN (:sourceRefs)
+          AND (
+              source_ref IN (:sourceRefs)
+              OR source_event_id IN (:sourceRefs)
+              OR ('raw:' || source_event_id) IN (:sourceRefs)
+          )
           AND item_type IN ('action', 'decision')
           AND deleted_at IS NULL
         ORDER BY source_event_occurred_at DESC, created_at DESC
@@ -498,6 +507,21 @@ public interface CommitmentDao {
         sourceType: String,
         sourceRefs: List<String>,
     ): List<CommitmentEntity>
+
+    @Query(
+        """
+        SELECT * FROM commitments
+        WHERE user_id = :userId
+          AND item_type IN ('action', 'decision')
+          AND deleted_at IS NULL
+          AND (
+              (source_ref IS NOT NULL AND source_ref != '')
+              OR (source_event_id IS NOT NULL AND source_event_id != '')
+          )
+        ORDER BY source_event_occurred_at DESC, created_at DESC
+        """,
+    )
+    public suspend fun findLiveReviewableCommitmentsForUser(userId: String): List<CommitmentEntity>
 
     @Query(
         """
@@ -596,6 +620,7 @@ public interface CommitmentDao {
                c.direction AS direction,
                c.schedule_status AS scheduleStatus,
                c.decision_status AS decisionStatus,
+               c.agenda_intent AS agendaIntent,
                c.action_state AS actionState,
                c.due_at AS dueAt,
                c.due_is_approximate AS dueIsApproximate,
@@ -614,8 +639,50 @@ public interface CommitmentDao {
                        WHERE cp.user_id = c.user_id
                          AND cp.commitment_id = c.id
                        ORDER BY cp.confidence DESC, cp.created_at ASC
-                       LIMIT 1
+	                       LIMIT 1
 	                   ),
+                       (
+                           SELECT COALESCE(
+                               NULLIF(person.display_name, ''),
+                               NULLIF(person.primary_email, ''),
+                               NULLIF(person.primary_phone, ''),
+                               NULLIF(sep.display_name_raw, ''),
+                               NULLIF(sep.email_raw, ''),
+                               NULLIF(sep.phone_raw, ''),
+                               NULLIF(sep.normalized_value, '')
+                           )
+                           FROM source_event_participants AS sep
+                           LEFT JOIN persons AS person
+                             ON person.user_id = sep.user_id
+                            AND person.id = sep.person_id
+                            AND person.archived_at IS NULL
+                           WHERE sep.user_id = c.user_id
+                             AND sep.source_type = c.source_type
+                             AND sep.person_id IS NOT NULL
+                             AND sep.relation_to_user IN ('counterparty', 'participant')
+                             AND sep.resolution_status IN ('person_resolved', 'resolved')
+                             AND (
+                                 (
+                                     c.source_event_id IS NOT NULL
+                                     AND c.source_event_id != ''
+                                     AND sep.source_event_id = c.source_event_id
+                                 )
+                                 OR (
+                                     c.source_ref IS NOT NULL
+                                     AND c.source_ref != ''
+                                     AND sep.source_ref = c.source_ref
+                                 )
+                             )
+                           ORDER BY
+                               CASE sep.resolution_status
+                                   WHEN 'person_resolved' THEN 0
+                                   WHEN 'resolved' THEN 0
+                                   ELSE 1
+                               END ASC,
+                               sep.confidence DESC,
+                               sep.created_at ASC
+                           LIMIT 1
+                       ),
 	                   CASE
 	                       WHEN c.source_type NOT IN (
 	                           'voice',
@@ -643,8 +710,9 @@ public interface CommitmentDao {
 	                       ) THEN SUBSTR(c.counterparty_raw, 1, 30)
 	                       ELSE NULL
 	                   END
-	               ) AS counterpartyDisplayName,
+               ) AS counterpartyDisplayName,
                c.source_type AS sourceType,
+               c.source_event_id AS sourceEventId,
                c.source_event_title AS sourceTitle,
                c.source_event_occurred_at AS sourceOccurredAt,
                c.due_hint AS dueHint
@@ -653,6 +721,70 @@ public interface CommitmentDao {
 		        WHERE c.user_id = :userId
 		          AND c.deleted_at IS NULL
 		          AND c.item_type != 'schedule'
+		          AND NOT EXISTS (
+		              SELECT 1
+		              FROM commitments AS newer
+		              WHERE newer.user_id = c.user_id
+		                AND newer.supersedes_commitment_id = c.id
+		                AND newer.deleted_at IS NULL
+		          )
+		          AND NOT EXISTS (
+		              SELECT 1
+		              FROM commitments AS newer_thread_agenda
+		              JOIN raw_ingestion_events AS current_raw
+		                ON current_raw.user_id = c.user_id
+		               AND (
+		                   (
+		                       c.source_event_id IS NOT NULL
+		                       AND current_raw.id = c.source_event_id
+		                   )
+		                   OR (
+		                       c.source_event_id IS NULL
+		                       AND current_raw.source_type = c.source_type
+		                       AND current_raw.source_ref = c.source_ref
+		                   )
+		               )
+		              JOIN raw_ingestion_events AS newer_raw
+		                ON newer_raw.user_id = newer_thread_agenda.user_id
+		               AND (
+		                   (
+		                       newer_thread_agenda.source_event_id IS NOT NULL
+		                       AND newer_raw.id = newer_thread_agenda.source_event_id
+		                   )
+		                   OR (
+		                       newer_thread_agenda.source_event_id IS NULL
+		                       AND newer_raw.source_type = newer_thread_agenda.source_type
+		                       AND newer_raw.source_ref = newer_thread_agenda.source_ref
+		                   )
+		               )
+		              WHERE c.agenda_intent = 'schedule_coordination'
+		                AND newer_thread_agenda.user_id = c.user_id
+		                AND newer_thread_agenda.id != c.id
+		                AND newer_thread_agenda.deleted_at IS NULL
+		                AND newer_thread_agenda.source_type IN ('gmail', 'outlook_mail', 'naver_imap', 'daum_imap')
+		                AND (
+		                    newer_thread_agenda.item_type = 'schedule'
+		                    OR (
+		                        newer_thread_agenda.item_type = 'action'
+		                        AND newer_thread_agenda.agenda_intent = 'schedule_coordination'
+		                        AND newer_thread_agenda.action_state IN ('pending', 'reminded', 'followed_up', 'overdue')
+		                    )
+		                )
+		                AND current_raw.conversation_ref IS NOT NULL
+		                AND current_raw.conversation_ref != ''
+		                AND newer_raw.conversation_ref = current_raw.conversation_ref
+		                AND (
+		                    newer_thread_agenda.source_event_occurred_at > c.source_event_occurred_at
+		                    OR (
+		                        newer_thread_agenda.source_event_occurred_at = c.source_event_occurred_at
+		                        AND newer_thread_agenda.item_type = 'schedule'
+		                    )
+		                    OR (
+		                        newer_thread_agenda.source_event_occurred_at = c.source_event_occurred_at
+		                        AND newer_thread_agenda.created_at > c.created_at
+		                    )
+		                )
+		          )
 		          AND (
 		              c.source_type NOT IN (
 		                  'voice',
@@ -671,6 +803,27 @@ public interface CommitmentDao {
 	                  FROM commitment_participants AS cp_guard
 	                  WHERE cp_guard.user_id = c.user_id
 	                    AND cp_guard.commitment_id = c.id
+	              )
+	              OR EXISTS (
+	                  SELECT 1
+	                  FROM source_event_participants AS sep_guard
+	                  WHERE sep_guard.user_id = c.user_id
+	                    AND sep_guard.source_type = c.source_type
+	                    AND sep_guard.person_id IS NOT NULL
+	                    AND sep_guard.relation_to_user IN ('counterparty', 'participant')
+	                    AND sep_guard.resolution_status IN ('person_resolved', 'resolved')
+	                    AND (
+	                        (
+	                            c.source_event_id IS NOT NULL
+	                            AND c.source_event_id != ''
+	                            AND sep_guard.source_event_id = c.source_event_id
+	                        )
+	                        OR (
+	                            c.source_ref IS NOT NULL
+	                            AND c.source_ref != ''
+	                            AND sep_guard.source_ref = c.source_ref
+	                        )
+	                    )
 	              )
 	          )
 	        ORDER BY
@@ -767,6 +920,7 @@ public interface CommitmentDao {
                c.title AS title,
                c.direction AS direction,
                c.schedule_status AS scheduleStatus,
+               c.agenda_intent AS agendaIntent,
                COALESCE(
                    (
                        SELECT COALESCE(
@@ -811,10 +965,12 @@ public interface CommitmentDao {
 	                       ) THEN SUBSTR(c.counterparty_raw, 1, 30)
 	                       ELSE NULL
 	                   END
-	               ) AS counterpartyDisplayName,
+               ) AS counterpartyDisplayName,
                c.source_type AS sourceType,
                c.source_ref AS sourceRef,
+               c.source_event_id AS sourceEventId,
                c.source_event_title AS sourceTitle,
+               c.quote AS quote,
                c.due_at AS dueAt,
                c.due_is_approximate AS dueIsApproximate,
                c.due_hint AS dueHint,
@@ -822,13 +978,77 @@ public interface CommitmentDao {
         FROM commitments AS c
         LEFT JOIN persons_enrichment AS p ON p.person_ref = c.counterparty_ref
         WHERE c.user_id      = :userId
-          AND c.item_type    = 'schedule'
-          AND c.due_at >= :startOfTodayEpochMs
-          AND c.due_at <= :endOfTodayEpochMs
-          AND c.deleted_at IS NULL
-        ORDER BY c.due_at IS NULL ASC, c.due_at ASC, c.created_at DESC
-        """
-    )
+          AND (
+              (
+                  c.item_type = 'schedule'
+                  AND (
+                      (
+                          c.due_at >= :startOfTodayEpochMs
+                          AND c.due_at <= :endOfTodayEpochMs
+                      )
+                      OR (
+                          c.schedule_status = 'tentative'
+                          AND c.due_at IS NULL
+                      )
+                  )
+	              )
+	          )
+	          AND c.deleted_at IS NULL
+	          AND NOT EXISTS (
+	              SELECT 1
+	              FROM commitments AS newer
+	              WHERE newer.user_id = c.user_id
+	                AND newer.supersedes_commitment_id = c.id
+	                AND newer.deleted_at IS NULL
+	          )
+	          AND NOT EXISTS (
+	              SELECT 1
+	              FROM commitments AS newer_thread_schedule
+	              JOIN raw_ingestion_events AS current_raw
+	                ON current_raw.user_id = c.user_id
+	               AND (
+	                   (
+	                       c.source_event_id IS NOT NULL
+	                       AND current_raw.id = c.source_event_id
+	                   )
+	                   OR (
+	                       c.source_event_id IS NULL
+	                       AND current_raw.source_type = c.source_type
+	                       AND current_raw.source_ref = c.source_ref
+	                   )
+	               )
+	              JOIN raw_ingestion_events AS newer_raw
+	                ON newer_raw.user_id = newer_thread_schedule.user_id
+	               AND (
+	                   (
+	                       newer_thread_schedule.source_event_id IS NOT NULL
+	                       AND newer_raw.id = newer_thread_schedule.source_event_id
+	                   )
+	                   OR (
+	                       newer_thread_schedule.source_event_id IS NULL
+	                       AND newer_raw.source_type = newer_thread_schedule.source_type
+	                       AND newer_raw.source_ref = newer_thread_schedule.source_ref
+	                   )
+	               )
+	              WHERE newer_thread_schedule.user_id = c.user_id
+	                AND newer_thread_schedule.id != c.id
+	                AND newer_thread_schedule.item_type = 'schedule'
+	                AND newer_thread_schedule.deleted_at IS NULL
+	                AND newer_thread_schedule.source_type IN ('gmail', 'outlook_mail', 'naver_imap', 'daum_imap')
+	                AND current_raw.conversation_ref IS NOT NULL
+	                AND current_raw.conversation_ref != ''
+	                AND newer_raw.conversation_ref = current_raw.conversation_ref
+	                AND (
+	                    newer_thread_schedule.source_event_occurred_at > c.source_event_occurred_at
+	                    OR (
+	                        newer_thread_schedule.source_event_occurred_at = c.source_event_occurred_at
+	                        AND newer_thread_schedule.created_at > c.created_at
+	                    )
+	                )
+	          )
+	        ORDER BY c.due_at IS NULL ASC, c.due_at ASC, c.created_at DESC
+	        """
+	    )
     public fun observeTimelineForToday(
         userId: String,
         endOfTodayEpochMs: Long,
@@ -859,7 +1079,8 @@ public interface CommitmentDao {
     public fun observeAllForPerson(userId: String, counterpartyRef: String): Flow<List<CommitmentEntity>>
 
     /**
-     * Returns all live commitment quotes whose originating source event matches [sourceRef].
+     * Returns all live commitment quotes whose originating source event matches [sourceEventId],
+     * falling back to [sourceRef] for legacy rows that predate durable source-event anchors.
      *
      * Used by the raw-event detail projection owner to render the evidence quotes extracted
      * from a specific source event.
@@ -868,14 +1089,22 @@ public interface CommitmentDao {
         """
         SELECT quote FROM commitments
         WHERE user_id = :userId
-          AND source_ref = :sourceRef
+          AND (
+              (:sourceEventId IS NOT NULL AND source_event_id = :sourceEventId)
+              OR (
+                  source_event_id IS NULL
+                  AND :sourceRef IS NOT NULL
+                  AND source_ref = :sourceRef
+              )
+          )
           AND deleted_at IS NULL
         ORDER BY source_event_occurred_at DESC, created_at DESC
         """
     )
-    public suspend fun findQuotesBySourceRefForUser(
+    public suspend fun findQuotesBySourceEventForUser(
         userId: String,
-        sourceRef: String,
+        sourceEventId: String?,
+        sourceRef: String?,
     ): List<String>
 
     @Query(
@@ -892,13 +1121,20 @@ public interface CommitmentDao {
                quote AS quote
         FROM commitments
         WHERE user_id = :userId
-          AND source_ref IN (:sourceRefs)
+          AND (
+              (:sourceEventId IS NOT NULL AND source_event_id = :sourceEventId)
+              OR (
+                  source_event_id IS NULL
+                  AND source_ref IN (:sourceRefs)
+              )
+          )
           AND deleted_at IS NULL
         ORDER BY source_event_occurred_at DESC, created_at DESC
         """
     )
-    public suspend fun findRawEventCommitmentsBySourceRefsForUser(
+    public suspend fun findRawEventCommitmentsBySourceEventForUser(
         userId: String,
+        sourceEventId: String?,
         sourceRefs: List<String>,
     ): List<RawEventCommitmentRow>
 
@@ -985,6 +1221,32 @@ public interface CommitmentDao {
     public suspend fun findOverdueCandidates(
         userId: String,
         cutoff: Instant,
+        limit: Int,
+    ): List<CommitmentEntity>
+
+    @Query(
+        """
+        SELECT *
+        FROM commitments
+        WHERE user_id = :userId
+          AND deleted_at IS NULL
+          AND due_at IS NOT NULL
+          AND due_is_approximate = 0
+          AND due_at > :now
+          AND item_type IN ('action', 'schedule')
+          AND action_state IN ('pending', 'reminded', 'followed_up', 'overdue')
+          AND (
+              item_type != 'schedule'
+              OR schedule_status IS NULL
+              OR schedule_status NOT IN ('tentative', 'cancelled', 'postponed')
+          )
+        ORDER BY due_at ASC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findReminderCandidatesForUser(
+        userId: String,
+        now: Instant,
         limit: Int,
     ): List<CommitmentEntity>
 

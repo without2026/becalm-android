@@ -205,6 +205,7 @@ class PersonDetailLocalIntegrationTest {
         val viewModel = PersonDetailViewModel(
             personEnrichmentRepository = enrichmentRepository,
             personIndexDao = db.personIndexDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
             logger = logger,
@@ -275,6 +276,8 @@ class PersonDetailLocalIntegrationTest {
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),
+                personIndexDao = db.personIndexDao(),
+                personEnrichmentRepository = enrichmentRepository,
             ),
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_EVENT_ID to "email-event")),
@@ -349,6 +352,8 @@ class PersonDetailLocalIntegrationTest {
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),
+                personIndexDao = db.personIndexDao(),
+                personEnrichmentRepository = enrichmentRepository,
             ),
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_EVENT_ID to "calendar-event")),

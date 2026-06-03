@@ -14,10 +14,12 @@ import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceEventParticipantPatchRequestDto
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.PersonIdentityResolution
 import com.becalm.android.domain.person.PersonIdentityTypes
@@ -119,35 +121,56 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                 logger.w(TAG, "manual match found no unresolved source participant source=$sourceType ref=$sourceRef")
                 return@withContext noParticipantFailure("manual_match")
             } else {
-                val linkedCommitments = upsertCommitmentParticipantsForResolvedCounterparty(
+                val affectedSourceEventIds = linkedSetOf(sourceEventId)
+                affectedSourceEventIds += cascadeManualMatch(
                     userId = userId,
                     sourceType = sourceType,
-                    sourceRef = sourceRef,
                     sourceEventId = sourceEventId,
+                    interactionKind = interactionKind,
                     resolved = resolved,
-                    now = now,
+                    displayNameHint = displayNameHint,
                 )
-                val dirtySources = listOf(
+                val linkedCommitments = affectedSourceEventIds.flatMap { affectedSourceEventId ->
+                    upsertCommitmentParticipantsForResolvedCounterparty(
+                        userId = userId,
+                        sourceType = sourceType,
+                        sourceRef = "raw:$affectedSourceEventId",
+                        sourceEventId = affectedSourceEventId,
+                        resolved = resolved,
+                        now = now,
+                    )
+                }
+                affectedSourceEventIds.forEach { affectedSourceEventId ->
+                    personIndexDao.deleteUnmatchedInteractionsForSource(
+                        userId = userId,
+                        sourceType = sourceType,
+                        sourceRef = "raw:$affectedSourceEventId",
+                        interactionKind = interactionKind,
+                    )
+                }
+                val dirtySources = affectedSourceEventIds.map { affectedSourceEventId ->
                     PersonIndexDirtySources.rawEvent(
                         userId = userId,
                         sourceType = sourceType,
-                        sourceEventId = sourceEventId,
+                        sourceEventId = affectedSourceEventId,
                         reason = "manual_match",
                         now = now,
-                    ),
-                ) + PersonIndexDirtySources.forCommitments(
-                    commitments = linkedCommitments,
+                    )
+                } + PersonIndexDirtySources.forCommitments(
+                    commitments = linkedCommitments.distinctBy(CommitmentEntity::id),
                     reason = "manual_match",
                     now = now,
                 )
                 personIndexDao.upsertDirtySources(dirtySources)
-                mirrorManualMatch(
-                    userId = userId,
-                    sourceType = sourceType,
-                    sourceEventId = sourceEventId,
-                    resolved = resolved,
-                    displayNameHint = displayNameHint,
-                )
+                affectedSourceEventIds.forEach { affectedSourceEventId ->
+                    mirrorManualMatch(
+                        userId = userId,
+                        sourceType = sourceType,
+                        sourceEventId = affectedSourceEventId,
+                        resolved = resolved,
+                        displayNameHint = displayNameHint,
+                    )
+                }
             }
             workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L)
             logger.d(TAG, "manual match saved source=$sourceType/$interactionKind ref=$sourceRef")
@@ -319,6 +342,95 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             } else {
                 personIndexDao.deletePendingSourceParticipantMirrors(userId, listOf(participant.id))
             }
+        }
+    }
+
+    private suspend fun cascadeManualMatch(
+        userId: String,
+        sourceType: String,
+        sourceEventId: String,
+        interactionKind: String,
+        resolved: ManualMatchResolution,
+        displayNameHint: String?,
+    ): Set<String> {
+        val identityCandidates = findStrongIdentityCascadeParticipants(
+            userId = userId,
+            sourceType = sourceType,
+            sourceEventId = sourceEventId,
+            resolved = resolved,
+        )
+        val threadCandidates = findThreadCascadeParticipants(
+            userId = userId,
+            sourceType = sourceType,
+            sourceEventId = sourceEventId,
+            resolved = resolved,
+        )
+        val candidates = (identityCandidates + threadCandidates)
+            .distinctBy(SourceEventParticipantEntity::id)
+            .filter { it.sourceEventId != sourceEventId }
+        if (candidates.isEmpty()) return emptySet()
+
+        personIndexDao.upsertSourceEventParticipants(
+            candidates.map { participant ->
+                participant.toCascadedResolvedParticipant(
+                    resolved = resolved,
+                    displayNameHint = displayNameHint,
+                )
+            },
+        )
+        candidates.forEach { participant ->
+            personIndexDao.deleteUnmatchedInteractionsForSource(
+                userId = userId,
+                sourceType = participant.sourceType,
+                sourceRef = "raw:${participant.sourceEventId}",
+                interactionKind = interactionKind,
+            )
+        }
+        return candidates.mapTo(linkedSetOf()) { it.sourceEventId }
+    }
+
+    private suspend fun findStrongIdentityCascadeParticipants(
+        userId: String,
+        sourceType: String,
+        sourceEventId: String,
+        resolved: ManualMatchResolution,
+    ): List<SourceEventParticipantEntity> {
+        if (!resolved.hasStrongIdentity()) return emptyList()
+        return personIndexDao.findSourceEventParticipantsForUser(userId)
+            .filter { participant ->
+                participant.sourceType == sourceType &&
+                    participant.sourceEventId != sourceEventId &&
+                    participant.isCascadeReviewable() &&
+                    resolved.matchesStrongIdentity(participant)
+            }
+    }
+
+    private suspend fun findThreadCascadeParticipants(
+        userId: String,
+        sourceType: String,
+        sourceEventId: String,
+        resolved: ManualMatchResolution,
+    ): List<SourceEventParticipantEntity> {
+        if (sourceType !in EMAIL_THREAD_SOURCE_TYPES) return emptyList()
+        val sourceEvent = rawIngestionEventDao.findById(sourceEventId, userId) ?: return emptyList()
+        val conversationRef = sourceEvent.conversationRef?.trim()?.takeIf(String::isNotEmpty) ?: return emptyList()
+        val peerIds = rawIngestionEventDao.findByConversationRefForUser(
+            userId = userId,
+            sourceType = sourceType,
+            conversationRef = conversationRef,
+            limit = THREAD_CASCADE_LIMIT,
+        ).map(RawIngestionEventEntity::id)
+            .filterNot { it == sourceEventId }
+            .distinct()
+        if (peerIds.isEmpty()) return emptyList()
+
+        return personIndexDao.findSourceEventParticipantsForUserAndEventIds(
+            userId = userId,
+            sourceEventIds = peerIds,
+        ).filter { participant ->
+            participant.sourceType == sourceType &&
+                participant.isCascadeReviewable() &&
+                !participant.hasStrongIdentityConflict(resolved)
         }
     }
 
@@ -667,28 +779,36 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             ),
         )
         personIndexDao.upsertIdentities(
-            listOf(
-                PersonIdentityEntity(
-                    id = PersonIdentityResolver.stableIdentityId(userId = userId, identityKey = resolved.identityKey),
+            buildList {
+                add(
+                    PersonIdentityEntity(
+                        id = PersonIdentityResolver.stableIdentityId(userId = userId, identityKey = resolved.identityKey),
+                        userId = userId,
+                        personId = resolved.personId,
+                        identityKey = resolved.identityKey,
+                        identityType = resolved.identityType,
+                        rawValue = resolved.rawValue,
+                        displayNameHint = displayName,
+                        identityValue = resolved.rawValue,
+                        normalizedValue = normalizedValue,
+                        displayName = displayName,
+                        sourceType = "manual_match",
+                        sourceRef = null,
+                        confidence = resolved.confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
+                        isPrimary = true,
+                        verified = true,
+                        lastSeenAt = now,
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                )
+                manualDisplayNameAliasIdentity(
                     userId = userId,
                     personId = resolved.personId,
-                    identityKey = resolved.identityKey,
-                    identityType = resolved.identityType,
-                    rawValue = resolved.rawValue,
-                    displayNameHint = displayName,
-                    identityValue = resolved.rawValue,
-                    normalizedValue = normalizedValue,
                     displayName = displayName,
-                    sourceType = "manual_match",
-                    sourceRef = null,
-                    confidence = resolved.confidence.coerceAtLeast(EXISTING_PERSON_CONFIDENCE),
-                    isPrimary = true,
-                    verified = true,
-                    lastSeenAt = now,
-                    createdAt = now,
-                    updatedAt = now,
-                ),
-            ),
+                    now = now,
+                )?.let(::add)
+            }.distinctBy(PersonIdentityEntity::id),
         )
         return ManualMatchResolution(
             personId = resolved.personId,
@@ -790,6 +910,38 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
     private fun safeNewPersonDisplayName(raw: String?): String? =
         sanitizeDisplayName(raw)
 
+    private fun manualDisplayNameAliasIdentity(
+        userId: String,
+        personId: String,
+        displayName: String,
+        now: kotlinx.datetime.Instant,
+    ): PersonIdentityEntity? {
+        val normalizedAlias = PersonIdentityResolver.normalizeAlias(displayName) ?: return null
+        if (PersonIdentityResolver.normalizeEmailAnchor(displayName) != null) return null
+        if (PersonIdentityResolver.normalizePhoneAnchor(displayName) != null) return null
+        val identityKey = "alias:$normalizedAlias"
+        return PersonIdentityEntity(
+            id = PersonIdentityResolver.stableIdentityId(userId = userId, identityKey = identityKey),
+            userId = userId,
+            personId = personId,
+            identityKey = identityKey,
+            identityType = "alias",
+            rawValue = displayName,
+            displayNameHint = displayName,
+            identityValue = displayName,
+            normalizedValue = normalizedAlias,
+            displayName = displayName,
+            sourceType = "manual_match",
+            sourceRef = null,
+            confidence = EXISTING_PERSON_CONFIDENCE,
+            isPrimary = false,
+            verified = true,
+            lastSeenAt = now,
+            createdAt = now,
+            updatedAt = now,
+        )
+    }
+
     private fun manualMatchValidationFailure(field: String, message: String): BecalmResult.Failure =
         BecalmResult.Failure(BecalmError.Validation(field = field, message = message))
 
@@ -799,13 +951,74 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         private const val UNKNOWN_PERSON_DISPLAY_NAME = "아직 이름을 모르는 연락처"
         private const val SELF_MATCH_CONFIDENCE = 0.98
         private const val NOT_SELF_CONFIDENCE = 1.0
+        private const val THREAD_CASCADE_LIMIT = 200
         private val MATCHABLE_IDENTITY_TYPES = setOf("email", "phone", "alias", "name")
+        private val EMAIL_THREAD_SOURCE_TYPES = setOf(
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.NAVER_IMAP,
+            SourceType.DAUM_IMAP,
+        )
         private val PERSON_ID_LIKE_REGEX = Regex(
             """^(?:person[-_:])?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^(?:person[-_:])?[0-9a-f]{32}$""",
             RegexOption.IGNORE_CASE,
         )
     }
 }
+
+private fun SourceEventParticipantEntity.isCascadeReviewable(): Boolean =
+    resolutionStatus in CASCADE_REVIEWABLE_STATUSES &&
+        !relationToUser.equals("self", ignoreCase = true) &&
+        role.lowercase() !in CASCADE_BLOCKED_ROLES
+
+private val CASCADE_REVIEWABLE_STATUSES = setOf("unresolved", "suggested_self")
+private val CASCADE_BLOCKED_ROLES = setOf("self", "mentioned", "referenced", "observer", "cc", "bcc")
+
+private fun SourceEventParticipantEntity.toCascadedResolvedParticipant(
+    resolved: ManualMatchResolution,
+    displayNameHint: String?,
+): SourceEventParticipantEntity =
+    copy(
+        personId = resolved.personId,
+        identityType = identityType.takeUnless { it.isNullOrBlank() || it == PersonIdentityTypes.SPEAKER_LABEL }
+            ?: resolved.identityType,
+        normalizedValue = normalizedValue.takeUnless { it.isNullOrBlank() || identityType == PersonIdentityTypes.SPEAKER_LABEL }
+            ?: resolved.normalizedValue,
+        displayNameRaw = displayNameRaw
+            ?.takeIf { it.isNotBlank() && !PersonIdentityResolver.isSpeakerLabelValue(it) }
+            ?: displayNameHint
+            ?: resolved.displayNameHint,
+        emailRaw = emailRaw
+            ?: resolved.rawValue.takeIf { resolved.identityType == "email" },
+        phoneRaw = phoneRaw
+            ?: resolved.rawValue.takeIf { resolved.identityType == "phone" },
+        confidence = maxOf(confidence, resolved.confidence),
+        resolutionStatus = "resolved",
+    )
+
+private fun SourceEventParticipantEntity.hasStrongIdentityConflict(resolved: ManualMatchResolution): Boolean {
+    val email = participantEmailIdentity()
+    if (email != null && resolved.identityType == "email") {
+        return email != resolved.normalizedStrongValue()
+    }
+    val phone = participantPhoneIdentity()
+    if (phone != null && resolved.identityType == "phone") {
+        return phone != resolved.normalizedStrongValue()
+    }
+    return false
+}
+
+private fun SourceEventParticipantEntity.participantEmailIdentity(): String? =
+    PersonIdentityResolver.normalizeRelationEmailAnchor(emailRaw)
+        ?: normalizedValue
+            .takeIf { identityType == "email" }
+            ?.let(PersonIdentityResolver::normalizeRelationEmailAnchor)
+
+private fun SourceEventParticipantEntity.participantPhoneIdentity(): String? =
+    PersonIdentityResolver.normalizePhoneAnchor(phoneRaw)
+        ?: normalizedValue
+            .takeIf { identityType == "phone" }
+            ?.let(PersonIdentityResolver::normalizePhoneAnchor)
 
 private fun CommitmentEntity.matchesResolvedCounterparty(resolved: ManualMatchResolution): Boolean =
     listOfNotNull(counterpartyRef, counterpartyRaw)
@@ -858,6 +1071,25 @@ private data class ManualMatchResolution(
     val displayNameHint: String?,
     val confidence: Double,
 ) {
+    fun hasStrongIdentity(): Boolean =
+        identityType == "email" || identityType == "phone"
+
+    fun normalizedStrongValue(): String? =
+        when (identityType) {
+            "email" -> PersonIdentityResolver.normalizeRelationEmailAnchor(normalizedValue)
+                ?: PersonIdentityResolver.normalizeRelationEmailAnchor(rawValue)
+            "phone" -> PersonIdentityResolver.normalizePhoneAnchor(normalizedValue)
+                ?: PersonIdentityResolver.normalizePhoneAnchor(rawValue)
+            else -> null
+        }
+
+    fun matchesStrongIdentity(participant: SourceEventParticipantEntity): Boolean =
+        when (identityType) {
+            "email" -> normalizedStrongValue()?.let { participant.participantEmailIdentity() == it } == true
+            "phone" -> normalizedStrongValue()?.let { participant.participantPhoneIdentity() == it } == true
+            else -> false
+        }
+
     fun matchesAnchor(value: String): Boolean =
         when (identityType) {
             "email" -> {

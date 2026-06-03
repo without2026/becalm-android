@@ -1,6 +1,8 @@
 package com.becalm.android.unit.data.auth
 
 import com.becalm.android.core.analytics.AmplitudeProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsAttributionStore
+import com.becalm.android.core.analytics.ProductAnalyticsEventQueue
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.auth.AuthFailureSessionInvalidatorImpl
@@ -11,6 +13,7 @@ import com.becalm.android.data.local.secure.OAuthCredentialStore
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.worker.ContentObserverBootstrap
+import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -32,6 +35,9 @@ class AuthFailureSessionInvalidatorSpecTest {
     private val deviceKeyStore: DeviceKeyStore = mockk(relaxed = true)
     private val imapCredentialStore: ImapCredentialStore = mockk(relaxed = true)
     private val oauthCredentialStore: OAuthCredentialStore = mockk(relaxed = true)
+    private val runtimeBootstrap: AuthenticatedRuntimeBootstrap = mockk(relaxed = true)
+    private val productAnalyticsEventQueue: ProductAnalyticsEventQueue = mockk(relaxed = true)
+    private val productAnalyticsAttributionStore: ProductAnalyticsAttributionStore = mockk(relaxed = true)
     private val amplitudeAnalytics: AmplitudeProductAnalyticsClient = mockk(relaxed = true)
     private val observability: ObservabilityClient = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
@@ -42,11 +48,14 @@ class AuthFailureSessionInvalidatorSpecTest {
 
         verify(exactly = 1) { workScheduler.cancelAll() }
         verify(exactly = 1) { contentObserverBootstrap.stop() }
+        verify(exactly = 1) { runtimeBootstrap.resetForAuthBoundary() }
         coVerify(exactly = 1) { imapCredentialStore.clearAll() }
         coVerify(exactly = 1) { oauthCredentialStore.clearGoogle() }
         coVerify(exactly = 1) { sessionStore.clear() }
         verify(exactly = 1) { tokenProvider.invalidate() }
         coVerify(exactly = 1) { deviceKeyStore.clear() }
+        coVerify(exactly = 1) { productAnalyticsEventQueue.clearAll() }
+        verify(exactly = 1) { productAnalyticsAttributionStore.clearNotificationOpen() }
         coVerify(exactly = 1) { userPrefsStore.setCurrentUserId(null) }
         verify(exactly = 1) { amplitudeAnalytics.resetUserScope() }
         verify(exactly = 1) { observability.setUserScope(null) }
@@ -77,6 +86,9 @@ class AuthFailureSessionInvalidatorSpecTest {
             deviceKeyStore = deviceKeyStore,
             imapCredentialStore = imapCredentialStore,
             oauthCredentialStore = oauthCredentialStore,
+            runtimeBootstrap = runtimeBootstrap,
+            productAnalyticsEventQueue = productAnalyticsEventQueue,
+            productAnalyticsAttributionStore = productAnalyticsAttributionStore,
             amplitudeAnalytics = amplitudeAnalytics,
             observability = observability,
             ioDispatcher = Dispatchers.Unconfined,

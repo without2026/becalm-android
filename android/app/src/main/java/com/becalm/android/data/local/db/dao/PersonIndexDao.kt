@@ -33,6 +33,35 @@ public data class PersonIndexStaleLinkedSourceRow(
     val sourceEventId: String,
 )
 
+public data class UnmatchedPersonInteractionWithEmailBodyRow(
+    val id: String,
+    val userId: String,
+    val sourceType: String,
+    val sourceRef: String,
+    val interactionKind: String,
+    val title: String?,
+    val snippet: String?,
+    val suggestedLabel: String?,
+    val occurredAt: Instant,
+    val createdAt: Instant,
+    val emailFolder: String?,
+    val emailBodyPlain: String?,
+) {
+    public fun toEntity(): UnmatchedPersonInteractionEntity =
+        UnmatchedPersonInteractionEntity(
+            id = id,
+            userId = userId,
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            interactionKind = interactionKind,
+            title = title,
+            snippet = snippet,
+            suggestedLabel = suggestedLabel,
+            occurredAt = occurredAt,
+            createdAt = createdAt,
+        )
+}
+
 @Dao
 public interface PersonIndexDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -241,6 +270,55 @@ public interface PersonIndexDao {
         """
         SELECT * FROM source_event_participants
         WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND (
+                source_event_id IN (:sourceEventIds)
+             OR source_ref IN (:sourceRefs)
+             OR ('raw:' || source_event_id) IN (:sourceRefs)
+          )
+        """,
+    )
+    public suspend fun findSourceEventParticipantsForUserAndEventRefs(
+        userId: String,
+        sourceType: String,
+        sourceEventIds: List<String>,
+        sourceRefs: List<String>,
+    ): List<SourceEventParticipantEntity>
+
+    @Query(
+        """
+        SELECT * FROM source_event_participants
+        WHERE user_id = :userId
+          AND id = :participantId
+        LIMIT 1
+        """,
+    )
+    public suspend fun findSourceEventParticipantById(
+        userId: String,
+        participantId: String,
+    ): SourceEventParticipantEntity?
+
+    @Query(
+        """
+        SELECT * FROM source_event_participants
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND source_ref IN (:sourceRefs)
+          AND person_id IS NOT NULL
+          AND relation_to_user IN ('counterparty', 'participant')
+          AND resolution_status IN ('resolved', 'person_resolved')
+        """,
+    )
+    public suspend fun findResolvedCounterpartyParticipantsForSourceRefs(
+        userId: String,
+        sourceType: String,
+        sourceRefs: List<String>,
+    ): List<SourceEventParticipantEntity>
+
+    @Query(
+        """
+        SELECT * FROM source_event_participants
+        WHERE user_id = :userId
         """,
     )
     public fun observeSourceEventParticipantsForUser(userId: String): Flow<List<SourceEventParticipantEntity>>
@@ -353,6 +431,99 @@ public interface PersonIndexDao {
         sourceRef: String,
         sourceEventId: String,
         confidence: Double,
+    ): Int
+
+    @Query(
+        """
+        UPDATE source_event_participants
+        SET
+            person_id = :personId,
+            relation_to_user = 'counterparty',
+            identity_type = COALESCE(NULLIF(:identityType, ''), identity_type),
+            normalized_value = COALESCE(NULLIF(:normalizedValue, ''), normalized_value),
+            display_name_raw = COALESCE(NULLIF(:displayNameRaw, ''), display_name_raw),
+            email_raw = CASE
+                WHEN :identityType = 'email' AND :normalizedValue IS NOT NULL AND :normalizedValue != '' THEN :normalizedValue
+                ELSE email_raw
+            END,
+            phone_raw = CASE
+                WHEN :identityType = 'phone' AND :normalizedValue IS NOT NULL AND :normalizedValue != '' THEN :normalizedValue
+                ELSE phone_raw
+            END,
+            resolution_status = 'resolved',
+            confidence = CASE
+                WHEN confidence < :confidence THEN :confidence
+                ELSE confidence
+            END
+        WHERE user_id = :userId
+          AND id = :participantId
+        """,
+    )
+    public suspend fun reassignSourceEventParticipantById(
+        userId: String,
+        participantId: String,
+        personId: String,
+        identityType: String?,
+        normalizedValue: String?,
+        displayNameRaw: String?,
+        confidence: Double,
+    ): Int
+
+    @Query(
+        """
+        UPDATE source_event_participants
+        SET
+            person_id = NULL,
+            relation_to_user = 'counterparty',
+            resolution_status = 'ignored',
+            confidence = CASE
+                WHEN confidence < :confidence THEN :confidence
+                ELSE confidence
+            END
+        WHERE user_id = :userId
+          AND id = :participantId
+        """,
+    )
+    public suspend fun ignoreSourceEventParticipantById(
+        userId: String,
+        participantId: String,
+        confidence: Double,
+    ): Int
+
+    @Query(
+        """
+        DELETE FROM commitment_participants
+        WHERE user_id = :userId
+          AND commitment_id IN (:commitmentIds)
+        """,
+    )
+    public suspend fun deleteCommitmentParticipantsForCommitments(
+        userId: String,
+        commitmentIds: List<String>,
+    ): Int
+
+    @Query(
+        """
+        DELETE FROM person_interactions
+        WHERE user_id = :userId
+          AND source_event_id = :sourceEventId
+        """,
+    )
+    public suspend fun deleteInteractionsForSourceEvent(
+        userId: String,
+        sourceEventId: String,
+    ): Int
+
+    @Query(
+        """
+        DELETE FROM person_interactions
+        WHERE user_id = :userId
+          AND commitment_id = :commitmentId
+        """,
+    )
+    public suspend fun deleteInteractionsForCommitment(
+        userId: String,
+        commitmentId: String,
     ): Int
 
     @Query(
@@ -710,6 +881,142 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        SELECT
+            unmatched.id AS id,
+            unmatched.user_id AS userId,
+            unmatched.source_type AS sourceType,
+            unmatched.source_ref AS sourceRef,
+            unmatched.interaction_kind AS interactionKind,
+            COALESCE(
+                NULLIF(TRIM(unmatched.title), ''),
+                NULLIF(TRIM(raw.event_title), ''),
+                (
+                    SELECT anchor.title
+                    FROM source_event_anchors anchor
+                    WHERE anchor.user_id = unmatched.user_id
+                      AND anchor.source_type = unmatched.source_type
+                      AND NULLIF(TRIM(COALESCE(anchor.title, '')), '') IS NOT NULL
+                      AND (
+                          anchor.source_event_id = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                          OR anchor.local_raw_event_id = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                          OR anchor.source_ref = unmatched.source_ref
+                          OR anchor.source_ref = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                          OR ('raw:' || anchor.source_event_id) = unmatched.source_ref
+                          OR ('raw:' || anchor.local_raw_event_id) = unmatched.source_ref
+                      )
+                    ORDER BY anchor.updated_at DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT COALESCE(c.source_event_title, c.title)
+                    FROM commitments c
+                    WHERE c.user_id = unmatched.user_id
+                      AND c.source_type = unmatched.source_type
+                      AND c.deleted_at IS NULL
+                      AND NULLIF(TRIM(COALESCE(c.source_event_title, c.title, '')), '') IS NOT NULL
+                      AND (
+                          c.source_event_id = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                          OR ('raw:' || c.source_event_id) = unmatched.source_ref
+                          OR c.source_ref = unmatched.source_ref
+                          OR c.source_ref = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                      )
+                    ORDER BY c.source_event_occurred_at DESC, c.created_at DESC
+                    LIMIT 1
+                )
+            ) AS title,
+            COALESCE(
+                NULLIF(TRIM(unmatched.snippet), ''),
+                NULLIF(TRIM(raw.event_snippet), ''),
+                (
+                    SELECT anchor.snippet
+                    FROM source_event_anchors anchor
+                    WHERE anchor.user_id = unmatched.user_id
+                      AND anchor.source_type = unmatched.source_type
+                      AND NULLIF(TRIM(COALESCE(anchor.snippet, '')), '') IS NOT NULL
+                      AND (
+                          anchor.source_event_id = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                          OR anchor.local_raw_event_id = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                          OR anchor.source_ref = unmatched.source_ref
+                          OR anchor.source_ref = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                          OR ('raw:' || anchor.source_event_id) = unmatched.source_ref
+                          OR ('raw:' || anchor.local_raw_event_id) = unmatched.source_ref
+                      )
+                    ORDER BY anchor.updated_at DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT c.quote
+                    FROM commitments c
+                    WHERE c.user_id = unmatched.user_id
+                      AND c.source_type = unmatched.source_type
+                      AND c.deleted_at IS NULL
+                      AND NULLIF(TRIM(COALESCE(c.quote, '')), '') IS NOT NULL
+                      AND (
+                          c.source_event_id = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                          OR ('raw:' || c.source_event_id) = unmatched.source_ref
+                          OR c.source_ref = unmatched.source_ref
+                          OR c.source_ref = CASE
+                              WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+                              ELSE unmatched.source_ref
+                          END
+                      )
+                    ORDER BY c.source_event_occurred_at DESC, c.created_at DESC
+                    LIMIT 1
+                )
+            ) AS snippet,
+            unmatched.suggested_label AS suggestedLabel,
+            unmatched.occurred_at AS occurredAt,
+            unmatched.created_at AS createdAt,
+            raw.folder AS emailFolder,
+            SUBSTR(email_body.body_plain, 1, 4000) AS emailBodyPlain
+        FROM unmatched_person_interactions unmatched
+        LEFT JOIN raw_ingestion_events raw
+          ON raw.user_id = unmatched.user_id
+         AND raw.id = CASE
+             WHEN unmatched.source_ref LIKE 'raw:%' THEN SUBSTR(unmatched.source_ref, 5)
+             ELSE unmatched.source_ref
+         END
+        LEFT JOIN email_body
+          ON email_body.raw_event_id = raw.id
+        WHERE unmatched.user_id = :userId
+        ORDER BY unmatched.occurred_at DESC
+        LIMIT :limit
+        """,
+    )
+    public fun observeUnmatchedInteractionsWithEmailBodies(
+        userId: String,
+        limit: Int,
+    ): Flow<List<UnmatchedPersonInteractionWithEmailBodyRow>>
+
+    @Query(
+        """
         SELECT COUNT(*) FROM unmatched_person_interactions
         WHERE user_id = :userId
         """,
@@ -748,14 +1055,14 @@ public interface PersonIndexDao {
                 MAX(idn.display_name_hint)
             ) AS displayNameHint,
             MIN(idn.identity_key) AS primaryIdentityKey,
-            SUM(CASE WHEN i.interaction_kind != 'commitment' THEN 1 ELSE 0 END) AS eventCount,
-            SUM(
-                CASE
+            COUNT(DISTINCT CASE WHEN i.interaction_kind != 'commitment' THEN i.id ELSE NULL END) AS eventCount,
+            COUNT(
+                DISTINCT CASE
                     WHEN i.interaction_kind = 'commitment'
                      AND COALESCE(LOWER(i.role), '') != 'decision'
                      AND COALESCE(LOWER(i.status), '') NOT IN ('completed', 'cancelled')
-                    THEN 1
-                    ELSE 0
+                    THEN i.id
+                    ELSE NULL
                 END
             ) AS pendingCommitmentCount,
             GROUP_CONCAT(DISTINCT i.source_type) AS channelSources,
@@ -842,6 +1149,26 @@ public interface PersonIndexDao {
         """,
     )
     public suspend fun findPersonForMemory(userId: String, personId: String): PersonEntity?
+
+    @Query(
+        """
+        SELECT p.*
+        FROM persons p
+        JOIN person_identities i
+          ON i.user_id = p.user_id
+         AND i.person_id = p.id
+        WHERE p.user_id = :userId
+          AND p.archived_at IS NULL
+          AND i.identity_type = :identityType
+          AND i.normalized_value = :normalizedValue
+        LIMIT 1
+        """,
+    )
+    public suspend fun findPersonForIdentity(
+        userId: String,
+        identityType: String,
+        normalizedValue: String,
+    ): PersonEntity?
 
     @Query(
         """

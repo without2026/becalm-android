@@ -7,17 +7,25 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.NoopSyncCursorStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.db.dao.NoopSourceEventAnchorDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.dao.SourceEventAnchorDao
+import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorOrigin
+import com.becalm.android.data.local.db.entity.stableSourceEventAnchorId
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
+import com.becalm.android.data.remote.dto.RawIngestionAcknowledgementDto
+import com.becalm.android.data.remote.dto.SourceType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import retrofit2.Response
 import java.io.IOException
@@ -161,6 +169,16 @@ public interface RawIngestionRepository {
         lastError: String? = null,
     ): BecalmResult<Unit>
 
+    /**
+     * Stores backend source-event ids returned by `/raw_ingestion_events:batch` without
+     * changing the local raw-event primary key. UI/detail joins resolve through
+     * source_event_anchors so reinstall/re-detect idempotency does not depend on id equality.
+     */
+    public suspend fun recordServerAcknowledgements(
+        userId: String,
+        acknowledgements: List<RawIngestionAcknowledgementDto>,
+    ): BecalmResult<Unit>
+
     // ── Upload ────────────────────────────────────────────────────────────────
 
     /**
@@ -239,6 +257,12 @@ public interface RawIngestionRepository {
 // ─── Implementation ───────────────────────────────────────────────────────────
 
 private const val TAG = "RawIngestionRepository"
+private val BACKEND_MANAGED_SOURCE_TYPES: Set<String> = setOf(
+    SourceType.GMAIL,
+    SourceType.OUTLOOK_MAIL,
+    SourceType.GOOGLE_CALENDAR,
+    SourceType.OUTLOOK_CALENDAR,
+)
 
 /**
  * Production implementation of [RawIngestionRepository].
@@ -249,6 +273,7 @@ private const val TAG = "RawIngestionRepository"
 @Singleton
 public class RawIngestionRepositoryImpl @Inject constructor(
     private val dao: RawIngestionEventDao,
+    private val sourceEventAnchorDao: SourceEventAnchorDao = NoopSourceEventAnchorDao,
     private val apiProvider: Provider<RailwayApi>,
     private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
     private val cursorStore: SyncCursorStore,
@@ -265,6 +290,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         logger: Logger,
     ) : this(
         dao = dao,
+        sourceEventAnchorDao = NoopSourceEventAnchorDao,
         apiProvider = Provider { api },
         emailBodyRepositoryProvider = Provider { NoopEmailBodyRepository },
         cursorStore = NoopSyncCursorStore,
@@ -278,6 +304,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         logger: Logger,
     ) : this(
         dao = dao,
+        sourceEventAnchorDao = NoopSourceEventAnchorDao,
         apiProvider = apiProvider,
         emailBodyRepositoryProvider = emailBodyRepositoryProvider,
         cursorStore = NoopSyncCursorStore,
@@ -291,11 +318,13 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         // ING-013: polite read-before-write to avoid triggering the UNIQUE constraint
         val existing = dao.findByClientEventId(resolved.userId, resolved.clientEventId)
         if (existing != null) {
+            sourceEventAnchorDao.upsertAll(listOf(existing.toSourceEventAnchorEntity()))
             logger.d(TAG, "insertLocal dedup hit for id=${existing.id}")
             return BecalmResult.Success(existing.id)
         }
         return logger.daoOp(TAG, "insert failed") {
             dao.insert(resolved)
+            sourceEventAnchorDao.upsertAll(listOf(resolved.toSourceEventAnchorEntity()))
             logger.d(TAG, "insertLocal ok id=${resolved.id}")
             resolved.id
         }
@@ -310,6 +339,10 @@ public class RawIngestionRepositoryImpl @Inject constructor(
                 val key = event.userId to event.clientEventId
                 idsByKey[key] ?: insertOrFindExisting(event).also { idsByKey[key] = it }
             }
+            val anchorEvents = resolved.zip(ids).mapNotNull { (event, id) ->
+                if (id == event.id) event else dao.findById(id, event.userId)
+            }
+            sourceEventAnchorDao.upsertAll(anchorEvents.map { it.toSourceEventAnchorEntity() })
             logger.d(TAG, "insertLocalBatch ok count=${resolved.size}")
             ids
         }
@@ -401,6 +434,22 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             logger.d(TAG, "markFailed id=$id reason=$lastError")
         }
 
+    override suspend fun recordServerAcknowledgements(
+        userId: String,
+        acknowledgements: List<RawIngestionAcknowledgementDto>,
+    ): BecalmResult<Unit> {
+        val rows = acknowledgements.mapNotNull { ack ->
+            val serverId = ack.serverRawEventId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val local = dao.findByClientEventId(userId, ack.clientEventId) ?: return@mapNotNull null
+            local.toSourceEventAnchorEntity(serverSourceEventId = serverId)
+        }
+        if (rows.isEmpty()) return BecalmResult.Success(Unit)
+        return logger.daoOp(TAG, "recordServerAcknowledgements failed") {
+            sourceEventAnchorDao.upsertAll(rows)
+            logger.d(TAG, "recordServerAcknowledgements count=${rows.size}")
+        }
+    }
+
     // ── Upload ────────────────────────────────────────────────────────────────
 
     override suspend fun uploadBatch(events: List<RawIngestionEventEntity>): BecalmResult<BatchUploadResponse> {
@@ -427,7 +476,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         sourceType: String?,
         since: Instant?,
     ): BecalmResult<RawIngestionRepository.RefreshStats> = withContext(ioDispatcher) {
-        val cursorKey = rawMirrorCursorKey(sourceType)
+        val cursorKey = MirrorCursorKeys.rawEvents(userId, sourceType)
         val useStoredCursor = since == null
         var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
         var totalFetched = 0
@@ -466,6 +515,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
                 )
             val entities = body.data.map { it.toRawIngestionEventEntity(userId) }
             dao.upsertSyncedFromServer(entities)
+            sourceEventAnchorDao.upsertAll(entities.map { it.toSourceEventAnchorEntity() })
 
             totalFetched += body.data.size
             totalUpserted += entities.size
@@ -485,6 +535,39 @@ public class RawIngestionRepositoryImpl @Inject constructor(
                 hasMore = lastHasMore,
                 nextCursor = lastCursor,
             ),
+        )
+    }
+
+    private fun RawIngestionEventEntity.toSourceEventAnchorEntity(
+        serverSourceEventId: String? = null,
+    ): SourceEventAnchorEntity {
+        val now = Clock.System.now()
+        val backendOrigin = sourceType in BACKEND_MANAGED_SOURCE_TYPES
+        val sourceEventId = serverSourceEventId ?: id.takeIf { backendOrigin }
+        return SourceEventAnchorEntity(
+            id = stableSourceEventAnchorId(
+                userId = userId,
+                sourceType = sourceType,
+                sourceEventId = sourceEventId,
+                localRawEventId = id,
+                sourceRef = sourceRef,
+                providerEventId = sourceRef,
+            ),
+            userId = userId,
+            sourceType = sourceType,
+            sourceOrigin = if (backendOrigin) SourceEventAnchorOrigin.BACKEND else SourceEventAnchorOrigin.ANDROID_LOCAL,
+            sourceEventId = sourceEventId,
+            localRawEventId = id,
+            sourceConnectionId = null,
+            sourceAccountKey = null,
+            providerEventId = sourceRef,
+            conversationRef = conversationRef,
+            sourceRef = sourceRef,
+            title = eventTitle,
+            snippet = eventSnippet,
+            occurredAt = timestamp,
+            createdAt = now,
+            updatedAt = now,
         )
     }
 
@@ -581,8 +664,6 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         private const val MAX_LEGACY_FAILED_MAIL_REPAIR_ATTEMPTS = 3
     }
 }
-
-private fun rawMirrorCursorKey(sourceType: String?): String = "raw_ingestion_events:${sourceType ?: "all"}"
 
 private object NoopEmailBodyRepository : EmailBodyRepository {
     override suspend fun insert(entity: com.becalm.android.data.local.db.entity.EmailBodyEntity) = Unit

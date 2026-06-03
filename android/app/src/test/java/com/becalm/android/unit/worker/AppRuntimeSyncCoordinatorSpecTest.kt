@@ -48,6 +48,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     init {
         every { userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri(any()) } returns flowOf(null)
+        every { userPrefsStore.observeContactsConsent() } returns flowOf(true)
         coEvery { personIndexDao.findPendingSourceParticipantMirrors(any(), any()) } returns emptyList()
         coEvery { personIndexDao.findStaleLinkedSourceProjectionRows(any(), any()) } returns emptyList()
         coEvery { personIndexDao.findStaleRawSourceProjectionRows(any(), any()) } returns emptyList()

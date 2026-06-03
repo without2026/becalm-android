@@ -38,6 +38,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -317,7 +318,11 @@ private fun EvidenceImportLoadingSheet(
     message: String,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -562,6 +567,7 @@ public fun EvidenceImportSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
         ) {
             Row(
@@ -586,6 +592,13 @@ public fun EvidenceImportSheet(
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.evidence_import_sheet_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             EvidenceImportActionRow(
                 icon = { Icon(Icons.Outlined.Image, contentDescription = null) },
                 title = stringResource(R.string.evidence_import_message_screenshot),
@@ -616,7 +629,7 @@ private fun EvidenceImportActionRow(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 8.dp)
+            .padding(top = 10.dp)
             .clip(MaterialTheme.shapes.medium),
         color = MaterialTheme.becalmColors.glassPanelFill,
         shape = MaterialTheme.shapes.medium,
@@ -627,30 +640,31 @@ private fun EvidenceImportActionRow(
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
                 .testTag(testTag)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.Top,
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(52.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.secondaryContainer),
                 contentAlignment = Alignment.Center,
             ) {
                 icon()
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

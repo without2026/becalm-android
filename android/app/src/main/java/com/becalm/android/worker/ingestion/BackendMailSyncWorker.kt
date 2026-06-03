@@ -8,6 +8,7 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
@@ -20,6 +21,7 @@ import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceSyncJobPollResult
 import com.becalm.android.data.repository.SourceSyncJobPoller
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import com.becalm.android.data.repository.toSourceSyncJobSnapshot
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.SourceRelationRefreshPlan
@@ -51,7 +53,9 @@ public class BackendMailSyncWorker @AssistedInject constructor(
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
     private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
     private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
+    private val userCorrectionRepositoryProvider: Provider<UserCorrectionRepository>,
     private val userPrefsStore: UserPrefsStore,
+    private val syncCursorStore: SyncCursorStore,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
     private val processingPauseGate: ProcessingPauseGate,
@@ -106,6 +110,8 @@ public class BackendMailSyncWorker @AssistedInject constructor(
             commitmentRepository = commitmentRepositoryProvider.get(),
             sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
             commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
+            userCorrectionRepository = userCorrectionRepositoryProvider.get(),
+            syncCursorStore = syncCursorStore,
             sourceStatusRepository = sourceStatusRepository,
             processingStatusRepository = processingStatusRepository,
             workScheduler = workScheduler,
@@ -126,6 +132,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
                 refreshPlan = SourceRelationRefreshPlan(
                     sourceType = provider.sourceType,
                     rawSourceType = provider.sourceType,
+                    resetMirrorCursorBeforeRefresh = true,
                 ),
                 trigger = { triggerMailSync(provider) },
             ),
@@ -157,6 +164,8 @@ public class BackendMailSyncWorker @AssistedInject constructor(
                     is SourceSyncJobPollResult.Pending -> ServerBackedTriggerResult.Pending(
                         message = pollResult.message,
                         retryAfterSeconds = pollResult.retryAfterSeconds,
+                        reasonCode = pollResult.reasonCode,
+                        syncedCount = pollResult.synced,
                     )
                     is SourceSyncJobPollResult.Failed -> ServerBackedTriggerResult.Failure(
                         message = pollResult.message,

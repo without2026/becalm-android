@@ -73,11 +73,11 @@ public class ImapNaverWorker @AssistedInject constructor(
         public const val MAX_RETRIES: Int = 5
         public const val NAVER_IMAP_HOST: String = "imap.naver.com"
         public const val NAVER_IMAP_PORT: Int = 993
-        public const val MAILBOX_NAVER_INBOX: String = "naver_inbox"
-        public const val MAILBOX_NAVER_SENT: String = "naver_sent"
+        public const val MAILBOX_NAVER_INBOX: String = "naver_inbox_v2_90d"
+        public const val MAILBOX_NAVER_SENT: String = "naver_sent_v2_90d"
         internal const val FALLBACK_INBOX_NAME: String = "INBOX"
         internal const val FALLBACK_SENT_NAME: String = "보낸메일함"
-        internal const val SINCE_DAYS: Int = 30
+        internal const val SINCE_DAYS: Int = 90
 
         private const val TAG = "ImapNaverWorker"
         private const val PROVIDER_NAVER = "naver"

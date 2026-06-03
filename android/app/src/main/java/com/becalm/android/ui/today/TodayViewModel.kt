@@ -13,14 +13,22 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.NoopUserCorrectionRepository
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.NoopScheduleRowTombstoneRepository
+import com.becalm.android.data.repository.PersonActionRepository
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.data.repository.ScheduleRowTombstoneRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusUi
+import com.becalm.android.domain.schedule.ScheduleRowRef
 import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
@@ -38,6 +46,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -74,6 +83,8 @@ public sealed class TimelineItem {
         val scheduleStatus: String?,
         val rowTreatment: TodayCommitmentRowTreatment,
         val counterpartyDisplayName: String?,
+        val sourceTitle: String?,
+        val quote: String?,
         val dueAt: Instant?,
         val dueIsApproximate: Boolean,
         val dueHint: String?,
@@ -89,6 +100,8 @@ public sealed class TimelineItem {
      */
     public data class CalendarEvent(
         val id: String,
+        val sourceType: String,
+        val sourceRef: String?,
         override val title: String,
         val relatedSourceTypes: List<String> = emptyList(),
         val location: String? = null,
@@ -107,6 +120,8 @@ public sealed class TimelineItem {
      */
     public data class Meeting(
         val id: String,
+        val sourceType: String,
+        val sourceRef: String?,
         override val title: String,
         val attendeesRaw: String?,
         val relatedSourceTypes: List<String> = emptyList(),
@@ -126,8 +141,9 @@ public enum class TodayCommitmentRowTreatment {
 }
 
 public enum class ScheduleRangeFilter {
-    UPCOMING,
-    PAST,
+    TODAY,
+    THIS_WEEK,
+    NEXT_7_DAYS,
     ALL,
 }
 
@@ -207,14 +223,16 @@ public data class TodayUiState(
     val loading: Boolean = true,
     val timeline: List<TimelineItem> = emptyList(),
     val personFocus: List<TodayPersonFocus> = buildTodayPersonFocus(timeline),
-    val scheduleRangeFilter: ScheduleRangeFilter = ScheduleRangeFilter.ALL,
+    val scheduleRangeFilter: ScheduleRangeFilter = ScheduleRangeFilter.NEXT_7_DAYS,
     val today: LocalDate? = null,
+    val scheduleActions: List<PersonActionItemUi> = emptyList(),
     val sourceStatus: Map<String, SourceStatusUi> = emptyMap(),
     val overallSyncing: Boolean = false,
     val overall: OverallSyncState = OverallSyncState.Idle,
     val processingStatus: TodayProcessingStatusUi = TodayProcessingStatusUi(),
     val scheduleConflictReviewItems: List<ScheduleConflictReviewItem> = emptyList(),
     val processingPaused: Boolean = false,
+    val deletingRows: Set<ScheduleRowRef> = emptySet(),
     val refreshing: Boolean = false,
     val message: UiMessage? = null,
     val error: UiMessage? = null,
@@ -252,9 +270,12 @@ private const val TAG = "TodayViewModel"
 public class TodayViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val calendarEventRepository: CalendarEventRepository,
+    private val scheduleRowTombstoneRepository: ScheduleRowTombstoneRepository = NoopScheduleRowTombstoneRepository,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository,
+    private val userCorrectionRepository: UserCorrectionRepository = NoopUserCorrectionRepository,
+    private val personActionRepository: PersonActionRepository = NoopPersonActionRepository,
     private val workScheduler: WorkScheduler,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -275,6 +296,7 @@ public class TodayViewModel @Inject constructor(
         commitmentRepository = commitmentRepository,
         calendarEventRepository = calendarEventRepository,
         scheduleEventLinkRepository = scheduleEventLinkRepository,
+        personActionRepository = personActionRepository,
         sourceStatusRepository = sourceStatusRepository,
         processingStatusRepository = processingStatusRepository,
         authRepository = authRepository,
@@ -292,6 +314,7 @@ public class TodayViewModel @Inject constructor(
     private val scheduleRangeFilterFlow: MutableStateFlow<ScheduleRangeFilter> =
         MutableStateFlow(ScheduleRangeFilter.ALL)
     private val dismissedProcessingKeyFlow: MutableStateFlow<String?> = MutableStateFlow(null)
+    private val deletingRowsFlow: MutableStateFlow<Set<ScheduleRowRef>> = MutableStateFlow(emptySet())
 
     private val baseState: StateFlow<TodayUiState> = stateSource.observeUiState(
         userIdFlow = userIdFlow,
@@ -314,7 +337,8 @@ public class TodayViewModel @Inject constructor(
         baseState,
         refreshMessageFlow,
         dismissedProcessingKeyFlow,
-    ) { state, message, dismissedKey ->
+        deletingRowsFlow,
+    ) { state, message, dismissedKey, deletingRows ->
         val processingStatus = state.processingStatus
         state.copy(
             processingStatus = if (
@@ -326,6 +350,7 @@ public class TodayViewModel @Inject constructor(
                 processingStatus
             },
             message = message,
+            deletingRows = deletingRows,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -343,6 +368,33 @@ public class TodayViewModel @Inject constructor(
 
     public fun onDismissProcessingStatus() {
         dismissedProcessingKeyFlow.value = baseState.value.processingStatus.dismissKey
+    }
+
+    public fun onDeleteScheduleRow(rowRef: ScheduleRowRef) {
+        if (rowRef in deletingRowsFlow.value) return
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userIdFlow.value ?: authRepository.currentSession()?.userId
+            if (userId == null) {
+                refreshMessageFlow.value = UiMessage.resource(R.string.today_error_sign_in_required)
+                return@launch
+            }
+            deletingRowsFlow.value = deletingRowsFlow.value + rowRef
+            refreshMessageFlow.value = null
+            try {
+                val result = userCorrectionRepository.submitScheduleHide(userId, rowRef)
+                when (result) {
+                    is BecalmResult.Success -> {
+                        refreshMessageFlow.value = UiMessage.resource(R.string.schedule_row_delete_success)
+                    }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "schedule row delete failed: ${result.error}")
+                        refreshMessageFlow.value = UiMessage.resource(R.string.schedule_row_delete_failed)
+                    }
+                }
+            } finally {
+                deletingRowsFlow.value = deletingRowsFlow.value - rowRef
+            }
+        }
     }
 
     init {
@@ -395,6 +447,13 @@ public class TodayViewModel @Inject constructor(
                     }
                 }
                 if (userId != null) {
+                    when (val result = personActionRepository.refresh(userId = userId, surface = "schedule")) {
+                        is BecalmResult.Success -> Unit
+                        is BecalmResult.Failure -> {
+                            failed = true
+                            logger.w(TAG, "schedule action refresh failed: ${result.error}")
+                        }
+                    }
                     when (val result = relationRefreshCoordinator().refresh(
                         userId = userId,
                         plan = SourceRelationRefreshPlan(
@@ -429,6 +488,7 @@ public class TodayViewModel @Inject constructor(
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
             scheduleEventLinkRepository = scheduleEventLinkRepository,
+            userCorrectionRepository = userCorrectionRepository,
             workScheduler = workScheduler,
             logger = logger,
         )
@@ -461,4 +521,26 @@ public class TodayViewModel @Inject constructor(
         private const val PULL_REFRESH_SOURCE = "today_pull_refresh"
     }
 
+}
+
+private object NoopPersonActionRepository : PersonActionRepository {
+    override fun observeActiveForSurface(
+        userId: String,
+        surface: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override suspend fun refresh(
+        userId: String,
+        surface: String?,
+    ): BecalmResult<PersonActionRefreshStats> =
+        BecalmResult.Success(
+            PersonActionRefreshStats(
+                fetched = 0,
+                deleted = 0,
+                serverWatermark = null,
+                recomputeState = null,
+            ),
+        )
 }

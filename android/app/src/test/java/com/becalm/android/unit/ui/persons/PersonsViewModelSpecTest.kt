@@ -6,6 +6,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.FirstMemoryRepository
 import com.becalm.android.data.repository.PersonManualMatchRepository
+import com.becalm.android.ui.persons.PersonActionSummary
 import com.becalm.android.ui.persons.PersonListProjection
 import com.becalm.android.ui.persons.PersonRow
 import com.becalm.android.ui.persons.PersonSectionKind
@@ -114,6 +115,52 @@ class PersonsViewModelSpecTest {
     }
 
     @Test
+    fun `NAP-UI person action becomes primary row context and pending section driver`() = runTest {
+        val action = PersonActionSummary(
+            id = "act-1",
+            title = "오늘 16시 전 제안서 확인 요청에 답장",
+            primaryVerb = "답장",
+            shortReason = "김민홍이 제안서 확인을 기다리고 있습니다.",
+            actionKind = "reply",
+            dueAt = Instant.fromEpochMilliseconds(10_000),
+            urgencyScore = 0.92,
+        )
+        projectionPort.people.value = pageOf(
+            person(
+                ref = "person-minhong",
+                displayName = "김민홍",
+                eventCount = 3,
+                pendingCommitmentCount = 0,
+                lastInteractionSnippet = "지난 미팅 요약",
+                topAction = action,
+            ),
+            person(ref = "person-recent", displayName = "최근 연락처"),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        val rows = viewModel.uiState.value.people.associateBy(PersonRow::personId)
+        val actionRow = rows.getValue("person-minhong")
+        assertEquals(action, actionRow.topAction)
+        assertEquals("오늘 16시 전 제안서 확인 요청에 답장", actionRow.lastInteractionSnippet)
+        assertEquals(
+            listOf("person-minhong"),
+            viewModel.uiState.value.personSections
+                .first { it.kind == PersonSectionKind.PENDING_COMMITMENTS }
+                .people
+                .map(PersonRow::personId),
+        )
+        assertEquals(
+            listOf("person-recent"),
+            viewModel.uiState.value.personSections
+                .first { it.kind == PersonSectionKind.RECENT_CONTACTS }
+                .people
+                .map(PersonRow::personId),
+        )
+    }
+
+    @Test
     fun `SRC-001 ENR-006 nickname fallback should surface nickname before redacted raw ref`() = runTest {
         projectionPort.people.value = pageOf(
             person(
@@ -133,7 +180,7 @@ class PersonsViewModelSpecTest {
 
         val rowsByRef = viewModel.uiState.value.people.associateBy(PersonRow::personId)
         assertEquals("Nick Only", rowsByRef.getValue("nick@example.com").displayLabel)
-        assertEquals("+821012345678", rowsByRef.getValue("+821012345678").displayLabel)
+        assertEquals("", rowsByRef.getValue("+821012345678").displayLabel)
     }
 
     @Test
@@ -217,7 +264,7 @@ class PersonsViewModelSpecTest {
     }
 
     @Test
-    fun `SRC-005 exposes unassigned bucket content with twenty-item page contract`() = runTest {
+    fun `SRC-005 exposes unassigned bucket content with expanded review page contract`() = runTest {
         projectionPort.unassigned.value = listOf(
             unassigned(id = "evt-1", sourceType = SourceType.VOICE, title = "Voice note"),
             unassigned(id = "evt-2", sourceType = SourceType.GMAIL, title = "Email subject"),
@@ -228,8 +275,8 @@ class PersonsViewModelSpecTest {
 
         val state = viewModel.uiState.value
         assertEquals("user-1", projectionPort.lastUserId)
-        assertEquals(20, projectionPort.lastUnassignedLimit)
-        assertEquals(20, state.pageSize)
+        assertEquals(120, projectionPort.lastUnassignedLimit)
+        assertEquals(120, state.pageSize)
         assertEquals(PersonsSortOrder.MOST_RECENT_EVENT_DESC, state.sortOrder)
         assertEquals(listOf("evt-1", "evt-2"), state.unassignedEvents.map { it.id })
         assertEquals(listOf("Voice note", "Email subject"), state.unassignedEvents.map { it.title })
@@ -441,6 +488,7 @@ class PersonsViewModelSpecTest {
         pendingCommitmentCount: Int = 0,
         channelSources: Set<String> = emptySet(),
         lastInteractionSnippet: String? = null,
+        topAction: PersonActionSummary? = null,
     ): PersonListProjection = PersonListProjection(
         personId = ref,
         displayName = displayName,
@@ -452,6 +500,7 @@ class PersonsViewModelSpecTest {
         channelSources = channelSources,
         lastInteractionAt = Instant.fromEpochMilliseconds(1_000),
         lastInteractionSnippet = lastInteractionSnippet,
+        topAction = topAction,
     )
 
     private fun pageOf(

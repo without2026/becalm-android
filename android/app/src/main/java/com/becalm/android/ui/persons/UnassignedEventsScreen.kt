@@ -3,6 +3,7 @@ package com.becalm.android.ui.persons
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -64,6 +66,7 @@ import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.IngestionTimestamp
 import com.becalm.android.ui.components.QuietPanel
+import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.theme.BecalmTheme
 
@@ -140,12 +143,26 @@ internal fun UnassignedEventsContent(
     notSelfMatchEventIds: Set<String> = emptySet(),
 ) {
     var filter by remember { mutableStateOf(MatchQueueFilter.RECOMMENDED) }
+    var sourceFilter by remember { mutableStateOf<String?>(null) }
     var laterIds by remember { mutableStateOf(setOf<String>()) }
+    var selectedMatchEventIds by remember { mutableStateOf(setOf<String>()) }
 
     val activeEvents = unassignedEvents.filterNot { it.id in resolvedMatchEventIds }
-    val recommendedCount = activeEvents.count { it.id !in laterIds && it.bestCandidate() != null }
-    val manualCount = activeEvents.count { it.id !in laterIds && it.bestCandidate() == null }
-    val laterCount = activeEvents.count { it.id in laterIds }
+    val sourceCounts = activeEvents
+        .groupingBy { it.sourceType }
+        .eachCount()
+        .entries
+        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        .map { it.key to it.value }
+    val effectiveSourceFilter = sourceFilter.takeIf { selected ->
+        sourceCounts.any { (sourceType, _) -> sourceType == selected }
+    }
+    val sourceScopedEvents = activeEvents.filter { event ->
+        effectiveSourceFilter == null || event.sourceType == effectiveSourceFilter
+    }
+    val recommendedCount = sourceScopedEvents.count { it.id !in laterIds && it.bestCandidate() != null }
+    val manualCount = sourceScopedEvents.count { it.id !in laterIds && it.bestCandidate() == null }
+    val laterCount = sourceScopedEvents.count { it.id in laterIds }
     val effectiveFilter = when {
         filter == MatchQueueFilter.RECOMMENDED && recommendedCount == 0 && manualCount > 0 ->
             MatchQueueFilter.MANUAL
@@ -153,12 +170,45 @@ internal fun UnassignedEventsContent(
             MatchQueueFilter.RECOMMENDED
         else -> filter
     }
-    val visibleEvents = activeEvents.filter { event ->
+    val visibleEvents = sourceScopedEvents.filter { event ->
         when (effectiveFilter) {
             MatchQueueFilter.RECOMMENDED -> event.id !in laterIds && event.bestCandidate() != null
             MatchQueueFilter.MANUAL -> event.id !in laterIds && event.bestCandidate() == null
             MatchQueueFilter.LATER -> event.id in laterIds
         }
+    }
+    val bulkConfirmableIds = sourceScopedEvents
+        .filter { it.id !in laterIds && it.bulkConfirmPayload() != null }
+        .mapTo(mutableSetOf()) { it.id }
+    val visibleConfirmableIds = visibleEvents
+        .filter { it.id in bulkConfirmableIds }
+        .mapTo(mutableSetOf()) { it.id }
+    val selectedVisibleIds = selectedMatchEventIds.intersect(visibleConfirmableIds)
+    val confirmableClusterCount = sourceScopedEvents
+        .filter { it.id in bulkConfirmableIds }
+        .map(UnassignedEventSummary::matchClusterKey)
+        .distinct()
+        .size
+    val visibleClusterSizes = visibleEvents
+        .groupingBy(UnassignedEventSummary::matchClusterKey)
+        .eachCount()
+
+    LaunchedEffect(activeEvents.size, laterIds, resolvedMatchEventIds, savingMatchEventIds, effectiveSourceFilter) {
+        val validIds = activeEvents.mapTo(mutableSetOf()) { it.id }
+        selectedMatchEventIds = selectedMatchEventIds.intersect(validIds)
+    }
+
+    fun confirmSelectedMatches() {
+        val selectedIds = selectedMatchEventIds.intersect(visibleConfirmableIds)
+        visibleEvents
+            .filter { it.id in selectedIds }
+            .forEach { event ->
+                event.bulkConfirmPayload()?.let { payload ->
+                    onManualMatch(event, payload.anchor, payload.displayName)
+                }
+            }
+        laterIds = laterIds - selectedIds
+        selectedMatchEventIds = selectedMatchEventIds - selectedIds
     }
 
     when {
@@ -176,48 +226,100 @@ internal fun UnassignedEventsContent(
         }
 
         else -> {
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                modifier = modifier.fillMaxSize(),
-            ) {
-                item(key = "match-review-header") {
-                    MatchReviewHeader(
-                        remainingCount = activeEvents.size,
-                        recommendedCount = recommendedCount,
-                        manualCount = manualCount,
-                        laterCount = laterCount,
-                        filter = effectiveFilter,
-                        onFilterChange = { filter = it },
-                    )
-                }
-                if (visibleEvents.isEmpty()) {
-                    item(key = "match-review-empty-filter") {
-                        MatchReviewEmptyFilter(filter = effectiveFilter)
+            Box(modifier = modifier.fillMaxSize()) {
+                LazyColumn(
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        top = 8.dp,
+                        end = 16.dp,
+                        bottom = if (selectedVisibleIds.isNotEmpty()) 108.dp else 16.dp,
+                    ),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    item(key = "match-review-header") {
+                        MatchReviewHeader(
+                            remainingCount = activeEvents.size,
+                            recommendedCount = recommendedCount,
+                            manualCount = manualCount,
+                            laterCount = laterCount,
+                            confirmableCount = bulkConfirmableIds.size,
+                            confirmableClusterCount = confirmableClusterCount,
+                            filter = effectiveFilter,
+                            sourceCounts = sourceCounts,
+                            selectedSource = effectiveSourceFilter,
+                            onFilterChange = { filter = it },
+                            onSourceChange = { sourceFilter = it },
+                        )
+                    }
+                    if (effectiveFilter == MatchQueueFilter.RECOMMENDED && visibleConfirmableIds.isNotEmpty()) {
+                        item(key = "match-review-bulk") {
+                            MatchBulkActionPanel(
+                                confirmableCount = visibleConfirmableIds.size,
+                                selectedCount = selectedVisibleIds.size,
+                                onSelectAll = {
+                                    selectedMatchEventIds = selectedMatchEventIds + visibleConfirmableIds
+                                },
+                                onClear = {
+                                    selectedMatchEventIds = selectedMatchEventIds - visibleConfirmableIds
+                                },
+                                onConfirmSelected = ::confirmSelectedMatches,
+                            )
+                        }
+                    }
+                    if (visibleEvents.isEmpty()) {
+                        item(key = "match-review-empty-filter") {
+                            MatchReviewEmptyFilter(filter = effectiveFilter)
+                        }
+                    }
+                    items(items = visibleEvents, key = { it.id }) { event ->
+                        PersonMatchReviewCard(
+                            event = event,
+                            relatedEventCount = visibleClusterSizes[event.matchClusterKey()] ?: 1,
+                            matchChoices = matchChoices,
+                            saving = event.id in savingMatchEventIds,
+                            notSelfRejected = event.id in notSelfMatchEventIds,
+                            selectionEnabled = event.id in visibleConfirmableIds,
+                            selected = event.id in selectedMatchEventIds,
+                            onSelectedChange = { selected ->
+                                selectedMatchEventIds = if (selected) {
+                                    selectedMatchEventIds + event.id
+                                } else {
+                                    selectedMatchEventIds - event.id
+                                }
+                            },
+                            onConfirm = { anchor, nickname ->
+                                onManualMatch(event, anchor, nickname)
+                                laterIds = laterIds - event.id
+                                selectedMatchEventIds = selectedMatchEventIds - event.id
+                            },
+                            onLater = {
+                                laterIds = laterIds + event.id
+                                selectedMatchEventIds = selectedMatchEventIds - event.id
+                                if (filter != MatchQueueFilter.LATER) {
+                                    filter = MatchQueueFilter.RECOMMENDED
+                                }
+                            },
+                            onSelf = {
+                                onSelfMatch(event)
+                                laterIds = laterIds - event.id
+                                selectedMatchEventIds = selectedMatchEventIds - event.id
+                            },
+                            onNotSelf = {
+                                onNotSelfMatch(event)
+                            },
+                        )
                     }
                 }
-                items(items = visibleEvents, key = { it.id }) { event ->
-                    PersonMatchReviewCard(
-                        event = event,
-                        matchChoices = matchChoices,
-                        saving = event.id in savingMatchEventIds,
-                        notSelfRejected = event.id in notSelfMatchEventIds,
-                        onConfirm = { anchor, nickname ->
-                            onManualMatch(event, anchor, nickname)
-                            laterIds = laterIds - event.id
+                if (selectedVisibleIds.isNotEmpty()) {
+                    MatchBulkBottomBar(
+                        selectedCount = selectedVisibleIds.size,
+                        onClear = {
+                            selectedMatchEventIds = selectedMatchEventIds - visibleConfirmableIds
                         },
-                        onLater = {
-                            laterIds = laterIds + event.id
-                            if (filter != MatchQueueFilter.LATER) {
-                                filter = MatchQueueFilter.RECOMMENDED
-                            }
-                        },
-                        onSelf = {
-                            onSelfMatch(event)
-                            laterIds = laterIds - event.id
-                        },
-                        onNotSelf = {
-                            onNotSelfMatch(event)
-                        },
+                        onConfirmSelected = ::confirmSelectedMatches,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 16.dp, vertical = 16.dp),
                     )
                 }
             }
@@ -231,8 +333,13 @@ private fun MatchReviewHeader(
     recommendedCount: Int,
     manualCount: Int,
     laterCount: Int,
+    confirmableCount: Int,
+    confirmableClusterCount: Int,
     filter: MatchQueueFilter,
+    sourceCounts: List<Pair<String, Int>>,
+    selectedSource: String?,
     onFilterChange: (MatchQueueFilter) -> Unit,
+    onSourceChange: (String?) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -250,6 +357,18 @@ private fun MatchReviewHeader(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (confirmableCount > 0) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    R.string.person_match_review_batch_summary,
+                    confirmableCount,
+                    confirmableClusterCount,
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -273,6 +392,28 @@ private fun MatchReviewHeader(
                 onClick = { onFilterChange(MatchQueueFilter.LATER) },
             )
         }
+        if (sourceCounts.size > 1) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+            ) {
+                MatchFilterChip(
+                    selected = selectedSource == null,
+                    label = stringResource(R.string.person_match_source_all, remainingCount),
+                    onClick = { onSourceChange(null) },
+                )
+                sourceCounts.forEach { (sourceType, count) ->
+                    MatchFilterChip(
+                        selected = selectedSource == sourceType,
+                        label = "${stringResource(sourcePresentationFor(sourceType).labelRes)} $count",
+                        onClick = { onSourceChange(sourceType) },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -295,6 +436,93 @@ private fun MatchFilterChip(
 }
 
 @Composable
+private fun MatchBulkActionPanel(
+    confirmableCount: Int,
+    selectedCount: Int,
+    onSelectAll: () -> Unit,
+    onClear: () -> Unit,
+    onConfirmSelected: () -> Unit,
+) {
+    QuietPanel(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 10.dp),
+        contentPadding = PaddingValues(14.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.person_match_bulk_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.person_match_bulk_body),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            TextButton(onClick = if (selectedCount == confirmableCount) onClear else onSelectAll) {
+                Text(
+                    text = stringResource(
+                        if (selectedCount == confirmableCount) {
+                            R.string.person_match_bulk_clear
+                        } else {
+                            R.string.person_match_bulk_select_all
+                        },
+                    ),
+                )
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            BecalmButton(
+                text = stringResource(R.string.person_match_bulk_confirm, selectedCount),
+                enabled = selectedCount > 0,
+                onClick = onConfirmSelected,
+                variant = BecalmButtonVariant.Primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MatchBulkBottomBar(
+    selectedCount: Int,
+    onClear: () -> Unit,
+    onConfirmSelected: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    QuietPanel(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = stringResource(R.string.person_match_batch_selected, selectedCount),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClear) {
+                Text(text = stringResource(R.string.person_match_bulk_clear))
+            }
+            BecalmButton(
+                text = stringResource(R.string.person_match_bulk_confirm, selectedCount),
+                onClick = onConfirmSelected,
+                variant = BecalmButtonVariant.Primary,
+            )
+        }
+    }
+}
+
+@Composable
 private fun MatchReviewEmptyFilter(filter: MatchQueueFilter) {
     val message = when (filter) {
         MatchQueueFilter.RECOMMENDED -> R.string.person_match_empty_recommended
@@ -314,9 +542,13 @@ private fun MatchReviewEmptyFilter(filter: MatchQueueFilter) {
 @Composable
 private fun PersonMatchReviewCard(
     event: UnassignedEventSummary,
+    relatedEventCount: Int,
     matchChoices: List<PersonMatchChoiceRow>,
     saving: Boolean,
     notSelfRejected: Boolean,
+    selectionEnabled: Boolean,
+    selected: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
     onConfirm: (String, String) -> Unit,
     onLater: () -> Unit,
     onSelf: () -> Unit,
@@ -349,6 +581,14 @@ private fun PersonMatchReviewCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
         ) {
+            if (selectionEnabled) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = onSelectedChange,
+                    enabled = !saving,
+                    modifier = Modifier.testTag("unassigned-match-select-${event.id}"),
+                )
+            }
             EventSourceBadge(sourceType = event.sourceType)
             Spacer(modifier = Modifier.weight(1f))
             IngestionTimestamp(timestamp = event.timestamp)
@@ -365,6 +605,22 @@ private fun PersonMatchReviewCard(
                 text = event.snippet,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (event.isSpeakerReviewCandidate) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.person_match_meeting_speaker_candidate_hint),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (relatedEventCount > 1) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.person_match_cluster_hint, relatedEventCount),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
         Spacer(modifier = Modifier.height(12.dp))
@@ -458,9 +714,9 @@ private fun PersonMatchReviewCard(
                 onLater = onLater,
                 onSelf = onSelf,
                 saving = saving,
-                onConfirm = { displayName ->
+                onConfirm = { anchor, displayName ->
                     onConfirm(
-                        personAnchor,
+                        anchor,
                         displayName,
                     )
                 },
@@ -475,10 +731,14 @@ private fun CandidateRecommendation(
     isSelfSuggestion: Boolean,
     onSelect: () -> Unit,
 ) {
-    QuietPanel(
+    Column(
         modifier = Modifier
-            .fillMaxWidth(),
-        contentPadding = PaddingValues(12.dp),
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f), MaterialTheme.shapes.medium)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium)
+            .clickable(onClick = onSelect)
+            .padding(12.dp),
     ) {
         Text(
             text = stringResource(
@@ -491,12 +751,14 @@ private fun CandidateRecommendation(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(modifier = Modifier.height(6.dp))
-        TextButton(
-            onClick = onSelect,
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            MatchChoiceAvatar(seed = candidate.displayName)
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = candidate.displayName,
                     style = MaterialTheme.typography.titleMedium,
@@ -529,6 +791,11 @@ private fun CandidateRecommendation(
     }
 }
 
+private data class BulkConfirmPayload(
+    val anchor: String,
+    val displayName: String,
+)
+
 @Composable
 private fun ManualMatchPanel(
     eventId: String,
@@ -542,7 +809,7 @@ private fun ManualMatchPanel(
     onLater: () -> Unit,
     onSelf: () -> Unit,
     saving: Boolean,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String, String) -> Unit,
 ) {
     val normalizedQuery = personAnchor.trim()
     val candidateChoices = eventCandidates
@@ -590,12 +857,19 @@ private fun ManualMatchPanel(
     val selectedKnownChoice = allChoices.any { it.anchor == personAnchor }
     val newPersonDisplayName = safeManualMatchDisplayName(nickname)
         ?: safeManualMatchDisplayName(personAnchor)
+    val confirmAnchor = if (selectedKnownChoice) {
+        personAnchor
+    } else {
+        normalizedQuery.ifBlank { newPersonDisplayName.orEmpty() }
+    }
     val confirmDisplayName = if (selectedKnownChoice) {
         safeManualMatchDisplayName(nickname).orEmpty()
     } else {
         newPersonDisplayName.orEmpty()
     }
-    val canConfirm = personAnchor.isNotBlank() && !saving && (selectedKnownChoice || newPersonDisplayName != null)
+    val canConfirm = !saving &&
+        confirmAnchor.isNotBlank() &&
+        (selectedKnownChoice || newPersonDisplayName != null)
 
     Text(
         text = stringResource(R.string.person_match_manual_label),
@@ -692,7 +966,7 @@ private fun ManualMatchPanel(
             ),
             enabled = canConfirm,
             loading = saving,
-            onClick = { onConfirm(confirmDisplayName) },
+            onClick = { onConfirm(confirmAnchor, confirmDisplayName) },
             variant = BecalmButtonVariant.Primary,
         )
     }
@@ -807,6 +1081,22 @@ private fun UnassignedEventSummary.bestCandidate(): PersonMatchCandidateSummary?
 
 private fun PersonMatchCandidateSummary.safeDisplayNameCopy(): PersonMatchCandidateSummary =
     copy(displayName = safeManualMatchDisplayName(displayName) ?: UNKNOWN_PERSON_DISPLAY_NAME)
+
+private fun UnassignedEventSummary.bulkConfirmPayload(): BulkConfirmPayload? {
+    val candidate = bestCandidate() ?: return null
+    if (candidate.isSelfSuggestion) return null
+    val displayName = safeManualMatchDisplayName(candidate.displayName) ?: return null
+    return BulkConfirmPayload(anchor = candidate.anchor, displayName = displayName)
+}
+
+private fun UnassignedEventSummary.matchClusterKey(): String =
+    bestCandidate()
+        ?.anchor
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { it.isNotEmpty() }
+        ?: suggestedLabel?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+        ?: "$sourceType:$sourceRef"
 
 private fun safeManualMatchDisplayName(raw: String?): String? {
     val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null

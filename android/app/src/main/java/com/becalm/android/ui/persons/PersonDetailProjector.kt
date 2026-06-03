@@ -1,6 +1,5 @@
 package com.becalm.android.ui.persons
 
-import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
@@ -9,9 +8,7 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
-import com.becalm.android.ui.components.isCallSource
-import com.becalm.android.ui.components.isEmailSource
-import com.becalm.android.ui.components.isMeetingTimelineSource
+import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.ui.components.isTakeDirection
 
 internal object PersonDetailProjector {
@@ -26,9 +23,10 @@ internal object PersonDetailProjector {
         scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
     ): PersonDetailUiState {
         val enrichment = findEnrichment(identities, enrichmentRows)
-        val displayFallback = identities.firstOrNull { !it.displayNameHint.isNullOrBlank() }?.displayNameHint
-            ?: identities.firstOrNull()?.rawValue
-            ?: personId
+        val displayFallback = identities
+            .mapNotNull { sanitizeDisplayName(it.displayNameHint) ?: sanitizeDisplayName(it.rawValue) }
+            .firstOrNull()
+            ?: UNKNOWN_PERSON_DISPLAY_NAME
         val sourceEventCards = buildIndexedSourceEventCards(
             interactions = interactions,
             rawEvents = rawEvents,
@@ -36,7 +34,11 @@ internal object PersonDetailProjector {
         )
         return PersonDetailUiState(
             personId = personId,
-            displayName = enrichment?.displayName ?: enrichment?.nickname ?: displayFallback,
+            displayName = listOfNotNull(
+                sanitizeDisplayName(enrichment?.displayName),
+                sanitizeDisplayName(enrichment?.nickname),
+                displayFallback,
+            ).firstOrNull(),
             nickname = enrichment?.nickname,
             companyName = enrichment?.company,
             jobTitle = enrichment?.title,
@@ -60,6 +62,9 @@ internal object PersonDetailProjector {
         scheduleLinks: List<ScheduleEventLinkEntity>,
     ): List<SourceEventCardProjection> {
         val rawById = rawEvents.associateBy { it.id }
+        val rawBySource = rawEvents
+            .filter { !it.sourceRef.isNullOrBlank() }
+            .associateBy { it.sourceType to it.sourceRef }
         val linksByRawEventId = scheduleLinks.groupBy { it.rawEventId }
         val linksByCalendarSource = scheduleLinks.groupBy { it.calendarSourceType to it.calendarSourceRef }
         val buckets = linkedMapOf<String, MutableSourceEventCard>()
@@ -70,6 +75,8 @@ internal object PersonDetailProjector {
                 val rawEventId = interaction.sourceEventId
                     ?: interaction.sourceRef.takeIf { it.startsWith("raw:") }?.removePrefix("raw:")
                 val raw = rawEventId?.let(rawById::get)
+                    ?: rawBySource[interaction.sourceType to interaction.sourceRef]
+                val navigableRawEventId = raw?.id ?: rawEventId
                 val bucket = buckets.getOrPut(key) {
                     val rawTitle = interaction.title ?: raw?.eventTitle
                     val rawSnippet = interaction.snippet ?: raw?.eventSnippet
@@ -77,7 +84,7 @@ internal object PersonDetailProjector {
                     MutableSourceEventCard(
                         sourceEventKey = key,
                         sourceType = interaction.sourceType,
-                        rawEventId = rawEventId,
+                        rawEventId = navigableRawEventId,
                         occurredAt = interaction.occurredAt,
                         title = displayTitle,
                         snippet = displaySnippet(
@@ -98,7 +105,7 @@ internal object PersonDetailProjector {
                 val rawSnippet = interaction.snippet ?: raw?.eventSnippet
                 val displayTitle = displayTitle(title = rawTitle, snippet = rawSnippet)
                 bucket.applySourceEvidence(
-                    rawEventId = rawEventId,
+                    rawEventId = navigableRawEventId,
                     title = displayTitle,
                     snippet = displaySnippet(
                         title = rawTitle,
@@ -125,7 +132,6 @@ internal object PersonDetailProjector {
         return buckets.values
             .map(MutableSourceEventCard::toProjection)
             .sortedByDescending { it.occurredAt }
-            .withNextActions()
     }
 
     private fun PersonInteractionEntity.toSummary(): PersonDetailCommitmentSummary =
@@ -181,43 +187,15 @@ internal object PersonDetailProjector {
         return SOURCE_ARTIFACT_FILE_NAME_REGEX.matches(value)
     }
 
-    private fun List<SourceEventCardProjection>.withNextActions(): List<SourceEventCardProjection> {
-        val ascending = sortedBy { it.occurredAt }
-        val nextByKey = mutableMapOf<String, PersonDetailNextAction>()
-        ascending.zipWithNext { current, next ->
-            inferNextAction(current, next)?.let { nextByKey[current.sourceEventKey] = it }
-        }
-        return map { card -> card.copy(nextAction = nextByKey[card.sourceEventKey]) }
+    private fun sanitizeDisplayName(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (PersonIdentityResolver.isSpeakerLabelValue(value)) return null
+        if (PersonIdentityResolver.normalizeEmailAnchor(value) != null) return null
+        if (PersonIdentityResolver.normalizePhoneAnchor(value) != null) return null
+        return value
     }
 
-    private fun inferNextAction(
-        current: SourceEventCardProjection,
-        next: SourceEventCardProjection,
-    ): PersonDetailNextAction? {
-        val text = listOfNotNull(current.title, current.snippet)
-            .joinToString(" ")
-            .lowercase()
-        val nextLabelRes = when {
-            next.sourceType.isCallSource() && (text.contains("전화") || text.contains("call")) ->
-                R.string.person_detail_next_action_call
-            next.sourceType.isEmailSource() && (
-                text.contains("답장") ||
-                    text.contains("답신") ||
-                    text.contains("메일") ||
-                    text.contains("email") ||
-                    text.contains("reply")
-                ) -> R.string.person_detail_next_action_email_reply
-            next.sourceType.isMeetingTimelineSource() && (
-                text.contains("미팅") ||
-                    text.contains("회의") ||
-                    text.contains("일정") ||
-                    text.contains("meeting") ||
-                    text.contains("schedule")
-                ) -> R.string.person_detail_next_action_schedule
-            else -> null
-        } ?: return null
-        return PersonDetailNextAction(labelRes = nextLabelRes, nextSourceEventKey = next.sourceEventKey)
-    }
+    private const val UNKNOWN_PERSON_DISPLAY_NAME = "아직 이름을 모르는 연락처"
 
     private data class MutableSourceEventCard(
         val sourceEventKey: String,

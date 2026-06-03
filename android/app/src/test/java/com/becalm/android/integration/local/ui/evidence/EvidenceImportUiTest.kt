@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
@@ -62,7 +63,7 @@ class EvidenceImportUiTest {
         composeRule.onAllNodesWithTag("evidence-import-meeting-transcript").assertCountEquals(0)
         composeRule.onAllNodesWithTag("evidence-import-manual-text").assertCountEquals(0)
         composeRule.onNodeWithTag("evidence-import-message-screenshot").assertIsDisplayed()
-        composeRule.onNodeWithTag("evidence-import-meeting-audio").assertIsDisplayed()
+        composeRule.onNodeWithTag("evidence-import-meeting-audio").performScrollTo().assertExists()
     }
 
     @Test

@@ -3,17 +3,21 @@ package com.becalm.android.unit.worker
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.SourceParticipantRefreshScope
+import com.becalm.android.worker.UploadWorker
 import com.becalm.android.worker.WorkScheduler
+import com.becalm.android.worker.sourceRelationRefreshPlanFor
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -30,6 +34,8 @@ class SourceRelationRefreshCoordinatorSpecTest {
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
     private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk(relaxed = true)
     private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk(relaxed = true)
+    private val userCorrectionRepository: UserCorrectionRepository = mockk(relaxed = true)
+    private val syncCursorStore: SyncCursorStore = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
@@ -107,6 +113,49 @@ class SourceRelationRefreshCoordinatorSpecTest {
     }
 
     @Test
+    fun `refresh keeps source graph success when user correction refresh fails`() = runTest {
+        stubSourceParticipants(upserted = 0)
+        stubCommitments(upserted = 1)
+        stubCommitmentParticipants(upserted = 0)
+        coEvery { userCorrectionRepository.refreshSince("user-1", null) } returns
+            BecalmResult.Failure(BecalmError.NotFound("user_corrections"))
+        coEvery { userCorrectionRepository.applyActiveCorrections("user-1") } returns BecalmResult.Success(0)
+
+        val result = coordinator(userCorrectionRepository = userCorrectionRepository).refresh(
+            userId = "user-1",
+            plan = SourceRelationRefreshPlan(sourceType = "gmail"),
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(1, (result as BecalmResult.Success).value.changedCount)
+        coVerify(exactly = 1) { userCorrectionRepository.refreshSince("user-1", null) }
+        coVerify(exactly = 1) { userCorrectionRepository.applyActiveCorrections("user-1") }
+        verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `refresh keeps source graph success when active user correction reapply fails`() = runTest {
+        stubSourceParticipants(upserted = 0)
+        stubCommitments(upserted = 1)
+        stubCommitmentParticipants(upserted = 0)
+        coEvery { userCorrectionRepository.refreshSince("user-1", null) } returns
+            BecalmResult.Success(UserCorrectionRepository.RefreshStats(fetched = 0, upserted = 0, hasMore = false, nextCursor = null))
+        coEvery { userCorrectionRepository.applyActiveCorrections("user-1") } returns
+            BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("apply failed")))
+
+        val result = coordinator(userCorrectionRepository = userCorrectionRepository).refresh(
+            userId = "user-1",
+            plan = SourceRelationRefreshPlan(sourceType = "gmail"),
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(1, (result as BecalmResult.Success).value.changedCount)
+        coVerify(exactly = 1) { userCorrectionRepository.refreshSince("user-1", null) }
+        coVerify(exactly = 1) { userCorrectionRepository.applyActiveCorrections("user-1") }
+        verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
     fun `refresh enqueues follow-up mirror refresh when any repository still has more pages`() = runTest {
         stubRaw(upserted = 0, hasMore = true)
         stubSourceParticipants(upserted = 0)
@@ -124,6 +173,46 @@ class SourceRelationRefreshCoordinatorSpecTest {
         assertTrue(result is BecalmResult.Success)
         assertTrue((result as BecalmResult.Success).value.hasMore)
         verify(exactly = 1) { workScheduler.enqueueSourceRelationRefresh("gmail", 0L) }
+    }
+
+    @Test
+    fun `backend sync follow-up uses broad mirror refresh instead of unsupported source scoped pull`() = runTest {
+        stubSourceParticipants(upserted = 1)
+        stubCommitments(upserted = 0)
+        stubCommitmentParticipants(upserted = 0)
+
+        val plan = sourceRelationRefreshPlanFor(UploadWorker.SOURCE_TYPE, resetBeforeRefresh = false)
+        val result = coordinator().refresh(userId = "user-1", plan = plan)
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(SourceParticipantRefreshScope.ALL, plan.sourceParticipantRefreshScope)
+        assertEquals(null, plan.rawSourceType)
+        assertEquals(null, plan.calendarRefresh)
+        coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince("user-1", null, null) }
+        coVerify(exactly = 0) { sourceEventParticipantRepository.refreshSince("user-1", UploadWorker.SOURCE_TYPE, null) }
+        verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `refresh resets mirror cursors once before first server-backed mirror pull`() = runTest {
+        stubRaw(upserted = 1)
+        stubSourceParticipants(upserted = 0)
+        stubCommitments(upserted = 0)
+        stubCommitmentParticipants(upserted = 0)
+
+        val result = coordinator().refresh(
+            userId = "user-1",
+            plan = SourceRelationRefreshPlan(
+                sourceType = "gmail",
+                rawSourceType = "gmail",
+                resetMirrorCursorBeforeRefresh = true,
+            ),
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        coVerify(exactly = 1) { syncCursorStore.clearCursor("raw_ingestion_events:gmail") }
+        coVerify(exactly = 1) { syncCursorStore.clearCursor("source_event_participants:gmail") }
+        coVerify(exactly = 1) { rawIngestionRepository.refreshSince("user-1", "gmail", null) }
     }
 
     @Test
@@ -156,6 +245,7 @@ class SourceRelationRefreshCoordinatorSpecTest {
 
     private fun coordinator(
         scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+        userCorrectionRepository: UserCorrectionRepository? = null,
     ): SourceRelationRefreshCoordinator =
         SourceRelationRefreshCoordinator(
             rawIngestionRepository = rawIngestionRepository,
@@ -164,6 +254,8 @@ class SourceRelationRefreshCoordinatorSpecTest {
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
             scheduleEventLinkRepository = scheduleEventLinkRepository,
+            userCorrectionRepository = userCorrectionRepository,
+            syncCursorStore = syncCursorStore,
             workScheduler = workScheduler,
             logger = logger,
         )

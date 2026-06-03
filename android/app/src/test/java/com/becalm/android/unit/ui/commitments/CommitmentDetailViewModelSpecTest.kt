@@ -59,6 +59,7 @@ class CommitmentDetailViewModelSpecTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeDisabledCommitmentReminderIds() } returns flowOf(emptySet())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
         coEvery { meetingSpeakerAliasDao.findForRawEvent(any(), any()) } returns emptyList()
     }
@@ -88,7 +89,7 @@ class CommitmentDetailViewModelSpecTest {
         assertEquals("2024-03-15 팀 미팅", state.source.sourceTitle)
         assertEquals(Instant.parse("2026-04-18T06:00:00Z"), state.source.sourceOccurredAt)
         assertEquals(
-            listOf("REMIND", "FOLLOW_UP", "COMPLETE", "CANCEL"),
+            listOf("FOLLOW_UP", "COMPLETE", "CANCEL"),
             state.actionButtons.availableActions.map { action -> action.toString() },
         )
     }

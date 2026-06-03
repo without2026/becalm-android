@@ -100,12 +100,12 @@ internal class VoiceMediaStoreProbe(
      *
      * @return Count of [RawIngestionEventEntity] rows freshly inserted this run.
      */
-    suspend fun ingestVoiceRecordings(now: Instant, lookbackDays: Int? = null): Int {
+    suspend fun ingestVoiceRecordings(now: Instant, lookbackDays: Int? = null): VoiceIngestOutcome {
         // userId is required: skip rather than insert orphan rows
         val userId = userPrefsStore.observeCurrentUserId().first()
         if (userId == null) {
             logger.w(TAG, "userId null — skipping voice ingestion this cycle")
-            return 0
+            return VoiceIngestOutcome(insertedCount = 0, hasMore = false)
         }
 
         // Cursor stored in ms; DATE_ADDED is in seconds
@@ -113,7 +113,8 @@ internal class VoiceMediaStoreProbe(
         val lookbackCursorMs = lookbackDays?.let { days ->
             now.toEpochMilliseconds() - days * 86_400_000L
         } ?: 0L
-        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs)
+        val sourceEnabledAtMs = userPrefsStore.observeSourceEnabledAt(SourceType.VOICE).first() ?: 0L
+        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs, sourceEnabledAtMs)
         val lastSeenSec = lastSeenMs / 1_000L
 
         // Build folder-filter predicate and projection.
@@ -192,6 +193,7 @@ internal class VoiceMediaStoreProbe(
 
         var insertedCount = 0
         var hasInsertFailure = false
+        val batchLimiter = MediaStoreBatchLimiter()
         // Track the highest DATE_ADDED (in ms) across successfully processed rows only
         var maxDateAddedMs = lastSeenMs
 
@@ -223,6 +225,7 @@ internal class VoiceMediaStoreProbe(
                     idxFolder = idxFolder,
                     idxIsPending = idxIsPending,
                 )
+                if (batchLimiter.shouldStopBefore(row.dateAddedSec)) break
 
                 // PII guard: log only a hash of the file name, never the raw path
                 logger.d(
@@ -274,7 +277,7 @@ internal class VoiceMediaStoreProbe(
                 }
             }
         }
-        if (!scanned) return 0
+        if (!scanned) return VoiceIngestOutcome(insertedCount = 0, hasMore = false)
 
         // Only advance cursor when every row succeeded. If any insert failed, freeze the
         // cursor so the failed row is re-discovered on the next run (>= predicate + dedup).
@@ -287,8 +290,8 @@ internal class VoiceMediaStoreProbe(
         }
 
         sourceStatusRepository.recordSyncSuccess(SourceType.VOICE, now)
-        logger.d(TAG, "ING-003 voice recordings inserted=$insertedCount")
-        return insertedCount
+        logger.d(TAG, "ING-003 voice recordings inserted=$insertedCount hasMore=${batchLimiter.hasMore}")
+        return VoiceIngestOutcome(insertedCount = insertedCount, hasMore = batchLimiter.hasMore)
     }
 
     /**
@@ -328,7 +331,7 @@ internal class VoiceMediaStoreProbe(
         val userId = userPrefsStore.observeCurrentUserId().first()
         if (userId == null) {
             logger.w(TAG, "userId null — skipping call_recording ingestion this cycle")
-            return CallRecordingIngestOutcome.Success(insertedCount = 0)
+            return CallRecordingIngestOutcome.Success(insertedCount = 0, hasMore = false)
         }
 
         val callLogMatchingConsented = userPrefsStore.observeCallLogMatchingConsent().first()
@@ -343,7 +346,8 @@ internal class VoiceMediaStoreProbe(
         val lookbackCursorMs = lookbackDays?.let { days ->
             now.toEpochMilliseconds() - days * 86_400_000L
         } ?: 0L
-        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs)
+        val sourceEnabledAtMs = userPrefsStore.observeSourceEnabledAt(SourceType.CALL_RECORDING).first() ?: 0L
+        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs, sourceEnabledAtMs)
         val lastSeenSec = lastSeenMs / 1_000L
 
         val folderColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -369,6 +373,7 @@ internal class VoiceMediaStoreProbe(
 
         var insertedCount = 0
         var hasInsertFailure = false
+        val batchLimiter = MediaStoreBatchLimiter()
         var maxDateAddedMs = lastSeenMs
 
         val scanned = queryMediaStore(
@@ -408,6 +413,7 @@ internal class VoiceMediaStoreProbe(
                     idxTitle = idxTitle.takeIf { it >= 0 },
                     idxSize = idxSize.takeIf { it >= 0 },
                 )
+                if (batchLimiter.shouldStopBefore(row.dateAddedSec)) break
                 when (val decision = row.ingestionDecision(SourceType.CALL_RECORDING)) {
                     AudioMediaStoreDecision.Process -> Unit
                     is AudioMediaStoreDecision.Defer -> {
@@ -495,22 +501,23 @@ internal class VoiceMediaStoreProbe(
         }
 
         sourceStatusRepository.recordSyncSuccess(SourceType.CALL_RECORDING, now)
-        logger.d(TAG, "ING-001 call recordings inserted=$insertedCount")
-        return CallRecordingIngestOutcome.Success(insertedCount = insertedCount)
+        logger.d(TAG, "ING-001 call recordings inserted=$insertedCount hasMore=${batchLimiter.hasMore}")
+        return CallRecordingIngestOutcome.Success(insertedCount = insertedCount, hasMore = batchLimiter.hasMore)
     }
 
     suspend fun ingestMeetingAudio(now: Instant, lookbackDays: Int? = null): MeetingIngestOutcome {
         val userId = userPrefsStore.observeCurrentUserId().first()
         if (userId == null) {
             logger.w(TAG, "userId null — skipping meeting audio ingestion this cycle")
-            return MeetingIngestOutcome.Success(insertedCount = 0)
+            return MeetingIngestOutcome.Success(insertedCount = 0, hasMore = false)
         }
 
         val persistedCursorMs = syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING).first()
         val lookbackCursorMs = lookbackDays?.let { days ->
             now.toEpochMilliseconds() - days * 86_400_000L
         } ?: 0L
-        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs)
+        val sourceEnabledAtMs = userPrefsStore.observeSourceEnabledAt(SourceType.MEETING).first() ?: 0L
+        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs, sourceEnabledAtMs)
         val lastSeenSec = lastSeenMs / 1_000L
 
         val folderColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -531,6 +538,7 @@ internal class VoiceMediaStoreProbe(
 
         var insertedCount = 0
         var hasInsertFailure = false
+        val batchLimiter = MediaStoreBatchLimiter()
         var maxDateAddedMs = lastSeenMs
 
         val scanned = queryMediaStore(
@@ -571,6 +579,7 @@ internal class VoiceMediaStoreProbe(
                         legacyClientEventId = legacyKey,
                     )
                 }
+                if (batchLimiter.shouldStopBefore(row.dateAddedSec)) break
                 logger.d(
                     TAG,
                         "meeting audio row nameHash=${redact(row.displayName)} durationSec=${row.durationSec} " +
@@ -624,8 +633,8 @@ internal class VoiceMediaStoreProbe(
             syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, maxDateAddedMs)
         }
         sourceStatusRepository.recordSyncSuccess(SourceType.MEETING, now)
-        logger.d(TAG, "meeting audio inserted=$insertedCount")
-        return MeetingIngestOutcome.Success(insertedCount = insertedCount)
+        logger.d(TAG, "meeting audio inserted=$insertedCount hasMore=${batchLimiter.hasMore}")
+        return MeetingIngestOutcome.Success(insertedCount = insertedCount, hasMore = batchLimiter.hasMore)
     }
 
     /**
@@ -700,6 +709,26 @@ internal class VoiceMediaStoreProbe(
          */
         val title: String? = null,
     )
+
+    private class MediaStoreBatchLimiter {
+        private var processedRows: Int = 0
+        private var boundaryDateAddedSec: Long? = null
+        var hasMore: Boolean = false
+            private set
+
+        fun shouldStopBefore(dateAddedSec: Long): Boolean {
+            val boundary = boundaryDateAddedSec
+            if (boundary != null && dateAddedSec > boundary) {
+                hasMore = true
+                return true
+            }
+            if (processedRows == MediaStoreWorker.MEDIASTORE_SCAN_BATCH_SIZE - 1) {
+                boundaryDateAddedSec = dateAddedSec
+            }
+            processedRows += 1
+            return false
+        }
+    }
 
     /**
      * insertVoiceRow 결과를 판별한 sealed 타입.
@@ -949,7 +978,7 @@ internal class VoiceMediaStoreProbe(
 internal sealed interface CallRecordingIngestOutcome {
 
     /** Scan completed without a query exception; [insertedCount] new rows were written. */
-    data class Success(val insertedCount: Int) : CallRecordingIngestOutcome
+    data class Success(val insertedCount: Int, val hasMore: Boolean = false) : CallRecordingIngestOutcome
 
     /**
      * ContentResolver query threw before any row could be read. Caller must map to
@@ -958,3 +987,8 @@ internal sealed interface CallRecordingIngestOutcome {
      */
     data object ScanFailed : CallRecordingIngestOutcome
 }
+
+internal data class VoiceIngestOutcome(
+    val insertedCount: Int,
+    val hasMore: Boolean,
+)

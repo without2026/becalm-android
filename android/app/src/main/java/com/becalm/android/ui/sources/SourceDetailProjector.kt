@@ -28,7 +28,7 @@ internal object SourceDetailProjector {
                 title = entity.eventTitle,
             )
         }
-        val connectionButtons = buttonVisibilityFor(sourceType, status?.status)
+        val connectionButtons = buttonVisibilityFor(sourceType, status?.status, processingState)
         return SourceDetailUiState(
             sourceType = sourceType,
             status = sourceSyncStatusFor(status?.status),
@@ -54,10 +54,17 @@ internal object SourceDetailProjector {
     private fun buttonVisibilityFor(
         sourceType: String,
         status: SourceConnectionStatus?,
+        processingState: ProcessingSourceState?,
     ): DetailButtonVisibility =
         if (sourceType == SourceType.MESSAGE_SCREENSHOT) {
             DetailButtonVisibility(
                 showReconnectButton = false,
+                showDisconnectButton = false,
+                showManualSyncButton = false,
+            )
+        } else if (processingState.requiresSourceSetupRecovery()) {
+            DetailButtonVisibility(
+                showReconnectButton = true,
                 showDisconnectButton = false,
                 showManualSyncButton = false,
             )
@@ -83,6 +90,15 @@ internal object SourceDetailProjector {
                 showManualSyncButton = false,
             )
         }
+}
+
+private fun ProcessingSourceState?.requiresSourceSetupRecovery(): Boolean {
+    if (this?.phase != ProcessingPhase.BLOCKED) return false
+    val message = message.orEmpty().lowercase()
+    return message.contains("audio permission missing") ||
+        message.contains("recording path selection missing") ||
+        message.contains("credentials missing") ||
+        message.contains("imap credentials")
 }
 
 internal data class DetailButtonVisibility(

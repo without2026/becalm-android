@@ -17,6 +17,7 @@ public interface ProductAnalyticsEventQueue {
     public suspend fun enqueue(events: List<ProductAnalyticsEvent>)
     public suspend fun peek(limit: Int): List<ProductAnalyticsEvent>
     public suspend fun remove(eventIds: Set<String>)
+    public suspend fun clearAll()
 }
 
 @Singleton
@@ -67,6 +68,14 @@ public class FileProductAnalyticsEventQueue internal constructor(
             lock.withLock {
                 val remaining = readAll().filterNot { it.eventId in eventIds }
                 rewrite(remaining)
+            }
+        }
+    }
+
+    override suspend fun clearAll() {
+        withContext(ioDispatcher) {
+            lock.withLock {
+                rewrite(emptyList())
             }
         }
     }

@@ -24,7 +24,10 @@ import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthRepositoryImpl
 import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.integration.local.LocalIntegrationSupport
+import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import com.becalm.android.worker.ContentObserverBootstrap
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
@@ -110,7 +113,18 @@ class AuthRepositoryLocalIntegrationTest {
     private val imapCredentialStore = mockk<com.becalm.android.data.local.secure.ImapCredentialStore>(relaxed = true)
     private val oauthCredentialStore = mockk<OAuthCredentialStore>(relaxed = true)
     private val sourceArtifactRepository = mockk<SourceArtifactRepository>(relaxed = true)
+    private val sourceStatusRepository = mockk<SourceStatusRepository>(relaxed = true)
+    private val processingStatusRepository = mockk<ProcessingStatusRepository>(relaxed = true)
+    private val runtimeBootstrap = mockk<AuthenticatedRuntimeBootstrap>(relaxed = true)
+    private val productAnalyticsEventQueue = mockk<com.becalm.android.core.analytics.ProductAnalyticsEventQueue>(relaxed = true)
+    private val productAnalyticsAttributionStore =
+        mockk<com.becalm.android.core.analytics.ProductAnalyticsAttributionStore>(relaxed = true)
     private val processRestarter = mockk<ProcessRestarter>()
+
+    init {
+        coEvery { sourceStatusRepository.clearAll() } returns BecalmResult.Success(Unit)
+    }
+
     private val repository: AuthRepository = AuthRepositoryImpl(
         authClientProvider = Provider { authClient },
         sessionStore = sessionStore,
@@ -126,6 +140,11 @@ class AuthRepositoryLocalIntegrationTest {
         imapCredentialStore = imapCredentialStore,
         oauthCredentialStore = oauthCredentialStore,
         processRestarter = processRestarter,
+        sourceStatusRepository = sourceStatusRepository,
+        processingStatusRepository = processingStatusRepository,
+        runtimeBootstrap = runtimeBootstrap,
+        productAnalyticsEventQueue = productAnalyticsEventQueue,
+        productAnalyticsAttributionStore = productAnalyticsAttributionStore,
         ioDispatcher = Dispatchers.IO,
         logger = logger,
     )
@@ -201,6 +220,11 @@ class AuthRepositoryLocalIntegrationTest {
             imapCredentialStore = imapCredentialStore,
             oauthCredentialStore = oauthCredentialStore,
             processRestarter = processRestarter,
+            sourceStatusRepository = sourceStatusRepository,
+            processingStatusRepository = processingStatusRepository,
+            runtimeBootstrap = runtimeBootstrap,
+            productAnalyticsEventQueue = productAnalyticsEventQueue,
+            productAnalyticsAttributionStore = productAnalyticsAttributionStore,
             ioDispatcher = Dispatchers.IO,
             logger = logger,
         )

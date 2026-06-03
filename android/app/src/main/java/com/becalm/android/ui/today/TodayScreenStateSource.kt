@@ -8,10 +8,12 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
@@ -20,6 +22,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.UiMessage
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +37,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -44,6 +48,7 @@ internal data class TodaySnapshot(
     val userId: String?,
     val commitments: List<TodayCommitmentRow>,
     val calendarEvents: List<CalendarEventEntity>,
+    val scheduleActions: List<PersonActionItemCacheEntity>,
     val scheduleLinks: List<ScheduleEventLinkEntity>,
     val sourceStatuses: List<SourceStatus>,
     val processingStates: List<ProcessingSourceState>,
@@ -58,10 +63,19 @@ private data class TodaySourceProcessingSnapshot(
     val processingStates: List<ProcessingSourceState>,
 )
 
+private data class TodayRowsSnapshot(
+    val scope: ScheduleQueryScope,
+    val commitments: List<TodayCommitmentRow>,
+    val calendarEvents: List<CalendarEventEntity>,
+    val scheduleActions: List<PersonActionItemCacheEntity>,
+    val scheduleLinks: List<ScheduleEventLinkEntity>,
+)
+
 internal class TodayScreenStateSource @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val calendarEventRepository: CalendarEventRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    private val personActionRepository: PersonActionRepository? = null,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository? = null,
     private val authRepository: AuthRepository,
@@ -69,6 +83,7 @@ internal class TodayScreenStateSource @Inject constructor(
     private val clock: Clock,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    @IoDispatcher private val todayPollDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     fun userIdFlow(scope: kotlinx.coroutines.CoroutineScope): StateFlow<String?> = flow {
         val userId = authRepository.currentSession()?.userId
@@ -108,6 +123,20 @@ internal class TodayScreenStateSource @Inject constructor(
             calendarEventRepository.observeForUser(userId, rangeStart, rangeEnd)
         }
 
+        val scheduleActionFlow = userDayFlow.flatMapLatest { scope ->
+            val userId = scope.userId
+            val repository = personActionRepository
+            if (userId == null || repository == null) {
+                flowOf(emptyList())
+            } else {
+                repository.observeActiveForSurface(
+                    userId = userId,
+                    surface = "schedule",
+                    limit = SCHEDULE_ACTION_LIMIT,
+                )
+            }
+        }
+
         val scheduleLinkFlow = userDayFlow.flatMapLatest { scope ->
             val userId = scope.userId
             if (userId == null || scheduleEventLinkRepository == null) return@flatMapLatest flowOf(emptyList())
@@ -135,23 +164,34 @@ internal class TodayScreenStateSource @Inject constructor(
             )
         }
 
-        val baseSnapshotFlow = combine(
+        val rowsSnapshotFlow = combine(
             userDayFlow,
             commitmentFlow,
             calendarFlow,
+            scheduleActionFlow,
             scheduleLinkFlow,
-            sourceProcessingFlow,
-        ) { scope, commitments, calendarEvents, scheduleLinks, sourceProcessing ->
-            TodaySnapshot(
-                userId = scope.userId,
+        ) { scope, commitments, calendarEvents, scheduleActions, scheduleLinks ->
+            TodayRowsSnapshot(
+                scope = scope,
                 commitments = commitments,
                 calendarEvents = calendarEvents,
+                scheduleActions = scheduleActions,
                 scheduleLinks = scheduleLinks,
+            )
+        }
+
+        val baseSnapshotFlow = combine(rowsSnapshotFlow, sourceProcessingFlow) { rows, sourceProcessing ->
+            TodaySnapshot(
+                userId = rows.scope.userId,
+                commitments = rows.commitments,
+                calendarEvents = rows.calendarEvents,
+                scheduleActions = rows.scheduleActions,
+                scheduleLinks = rows.scheduleLinks,
                 sourceStatuses = sourceProcessing.sourceStatuses,
                 processingStates = sourceProcessing.processingStates,
                 processingPaused = false,
-                rangeFilter = scope.rangeFilter,
-                today = scope.today,
+                rangeFilter = rows.scope.rangeFilter,
+                today = rows.scope.today,
                 now = clock.nowInstant(),
             )
         }
@@ -202,23 +242,40 @@ internal class TodayScreenStateSource @Inject constructor(
 
     private fun scheduleRange(today: LocalDate, filter: ScheduleRangeFilter): Pair<Instant, Instant> {
         val todayStart = today.atStartOfDayIn(KST)
+        val tomorrowStart = today.plus(DatePeriod(days = 1)).atStartOfDayIn(KST)
+        val thisWeekEnd = today.plus(DatePeriod(days = daysUntilNextWeek(today))).atStartOfDayIn(KST)
+        val nextSevenDaysEnd = today.plus(DatePeriod(days = 7)).atStartOfDayIn(KST)
         return when (filter) {
-            ScheduleRangeFilter.UPCOMING -> todayStart to DISTANT_FUTURE
-            ScheduleRangeFilter.PAST -> EPOCH_START to todayStart
+            ScheduleRangeFilter.TODAY -> todayStart to tomorrowStart
+            ScheduleRangeFilter.THIS_WEEK -> todayStart to thisWeekEnd
+            ScheduleRangeFilter.NEXT_7_DAYS -> todayStart to nextSevenDaysEnd
             ScheduleRangeFilter.ALL -> EPOCH_START to DISTANT_FUTURE
         }
+    }
+
+    private fun daysUntilNextWeek(today: LocalDate): Int = when (today.dayOfWeek) {
+        kotlinx.datetime.DayOfWeek.MONDAY -> 7
+        kotlinx.datetime.DayOfWeek.TUESDAY -> 6
+        kotlinx.datetime.DayOfWeek.WEDNESDAY -> 5
+        kotlinx.datetime.DayOfWeek.THURSDAY -> 4
+        kotlinx.datetime.DayOfWeek.FRIDAY -> 3
+        kotlinx.datetime.DayOfWeek.SATURDAY -> 2
+        kotlinx.datetime.DayOfWeek.SUNDAY -> 1
     }
 
     private fun todayFlow(): Flow<LocalDate> = flow {
         while (currentCoroutineContext().isActive) {
             emit(clock.today(KST))
-            delay(TODAY_POLL_INTERVAL_MS)
+            withContext(todayPollDispatcher) {
+                delay(TODAY_POLL_INTERVAL_MS)
+            }
         }
     }.distinctUntilChanged()
 
     private companion object {
         private const val TAG = "TodayViewModel"
         private const val TODAY_POLL_INTERVAL_MS = 60_000L
+        private const val SCHEDULE_ACTION_LIMIT = 50
         private val EPOCH_START: Instant = Instant.fromEpochMilliseconds(0)
         private val DISTANT_FUTURE: Instant = Instant.fromEpochMilliseconds(Long.MAX_VALUE)
     }

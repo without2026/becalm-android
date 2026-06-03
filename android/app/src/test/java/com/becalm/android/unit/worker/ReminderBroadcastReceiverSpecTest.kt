@@ -3,15 +3,18 @@ package com.becalm.android.unit.worker
 import android.content.Context
 import com.becalm.android.R
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.receiver.ReminderBroadcastReceiver
+import com.becalm.android.receiver.ReminderNotificationSpec
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.spyk
 import io.mockk.verify
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import kotlin.coroutines.Continuation
@@ -52,9 +55,12 @@ class ReminderBroadcastReceiverSpecTest {
         val context: Context = mockk(relaxed = true)
         val commitmentDao: CommitmentDao = mockk()
         val logger: Logger = mockk(relaxed = true)
+        val userPrefsStore: UserPrefsStore = mockk()
         val receiver = spyk(ReminderBroadcastReceiver())
         receiver.commitmentDao = commitmentDao
         receiver.logger = logger
+        receiver.userPrefsStore = userPrefsStore
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(true)
 
         coEvery { commitmentDao.findByIdForUser("user-1", "completed-1") } returns
             entity(id = "completed-1", actionState = "completed")
@@ -74,9 +80,12 @@ class ReminderBroadcastReceiverSpecTest {
         val context: Context = mockk(relaxed = true)
         val commitmentDao: CommitmentDao = mockk()
         val logger: Logger = mockk(relaxed = true)
+        val userPrefsStore: UserPrefsStore = mockk()
         val receiver = spyk(ReminderBroadcastReceiver())
         receiver.commitmentDao = commitmentDao
         receiver.logger = logger
+        receiver.userPrefsStore = userPrefsStore
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(true)
 
         coEvery { commitmentDao.findByIdForUser("user-1", "no-deadline-1") } returns
             entity(id = "no-deadline-1", actionState = "pending", dueAt = null)
@@ -86,6 +95,46 @@ class ReminderBroadcastReceiverSpecTest {
         verify(exactly = 0) { context.getString(any<Int>()) }
         verify(exactly = 0) { context.getString(any<Int>(), *anyVararg()) }
         verify(exactly = 0) { context.packageName }
+    }
+
+    @Test
+    fun `handle drops when user disabled notifications`() = runTest {
+        val context: Context = mockk(relaxed = true)
+        val commitmentDao: CommitmentDao = mockk()
+        val logger: Logger = mockk(relaxed = true)
+        val userPrefsStore: UserPrefsStore = mockk()
+        val receiver = spyk(ReminderBroadcastReceiver())
+        receiver.commitmentDao = commitmentDao
+        receiver.logger = logger
+        receiver.userPrefsStore = userPrefsStore
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
+
+        invokeHandle(receiver, context, "disabled-1", "user-1")
+
+        verify(exactly = 0) { context.getString(any<Int>()) }
+        verify(exactly = 0) { context.packageName }
+    }
+
+    @Test
+    fun `handle does not crash when legacy commitment direction is missing`() = runTest {
+        val context: Context = mockk(relaxed = true)
+        val commitmentDao: CommitmentDao = mockk()
+        val logger: Logger = mockk(relaxed = true)
+        val userPrefsStore: UserPrefsStore = mockk()
+        val receiver = spyk(ReminderBroadcastReceiver())
+        receiver.commitmentDao = commitmentDao
+        receiver.logger = logger
+        receiver.userPrefsStore = userPrefsStore
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(true)
+        every { context.getString(R.string.commitment_alarm_title) } returns "곧 마감되는 약속 (1시간 뒤)"
+        every { context.getString(R.string.commitment_alarm_body_generic_fmt, *anyVararg()) } returns "[상대가 할 일] 보고서 전달"
+        every { receiver["postNotification"](context, any<ReminderNotificationSpec>()) } answers { Unit }
+        coEvery { commitmentDao.findByIdForUser("user-1", "legacy-direction") } returns
+            entity(id = "legacy-direction", actionState = "pending", direction = null)
+
+        invokeHandle(receiver, context, "legacy-direction", "user-1")
+
+        verify(exactly = 1) { receiver["postNotification"](context, any<ReminderNotificationSpec>()) }
     }
 
     private fun invokeHandle(
@@ -121,10 +170,11 @@ class ReminderBroadcastReceiverSpecTest {
         id: String,
         actionState: String,
         dueAt: Instant? = Instant.parse("2026-04-23T01:00:00Z"),
+        direction: String? = "give",
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
-        direction = "give",
+        direction = direction,
         counterpartyRaw = null,
         counterpartyRef = "lee@corp.com",
         title = "보고서 전달",

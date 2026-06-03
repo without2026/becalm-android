@@ -156,7 +156,7 @@ class TodayTimelineScreenTest {
     }
 
     @Test
-    fun schedule_content_groups_upcoming_sections_and_exposes_range_chips() {
+    fun schedule_content_groups_next_7_days_sections_and_exposes_range_dropdown() {
         var selectedFilter: ScheduleRangeFilter? = null
 
         composeTestRule.setContent {
@@ -165,21 +165,27 @@ class TodayTimelineScreenTest {
                     state = TodayUiState(
                         loading = false,
                         today = LocalDate(2026, 4, 23),
-                        scheduleRangeFilter = ScheduleRangeFilter.UPCOMING,
+                        scheduleRangeFilter = ScheduleRangeFilter.NEXT_7_DAYS,
                         timeline = listOf(
                             TimelineItem.Meeting(
                                 id = "today",
+                                sourceType = "meeting",
+                                sourceRef = "meeting-today",
                                 title = "오늘 미팅",
                                 attendeesRaw = "team@example.com",
                                 sortKey = Instant.parse("2026-04-23T02:00:00Z"),
                             ),
                             TimelineItem.CalendarEvent(
                                 id = "week",
+                                sourceType = "google_calendar",
+                                sourceRef = "calendar-week",
                                 title = "금요일 리뷰",
                                 sortKey = Instant.parse("2026-04-24T02:00:00Z"),
                             ),
                             TimelineItem.CalendarEvent(
                                 id = "past",
+                                sourceType = "google_calendar",
+                                sourceRef = "calendar-past",
                                 title = "지난 미팅",
                                 sortKey = Instant.parse("2026-04-01T02:00:00Z"),
                             ),
@@ -198,10 +204,11 @@ class TodayTimelineScreenTest {
         composeTestRule.onNodeWithText("금요일 리뷰").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("지난 미팅").assertCountEquals(0)
 
-        composeTestRule.onNodeWithTag("schedule-range-past").performClick()
+        composeTestRule.onNodeWithTag("schedule-range-selector").performClick()
+        composeTestRule.onNodeWithText(string(R.string.schedule_range_all)).performClick()
 
         composeTestRule.runOnIdle {
-            assertEquals(ScheduleRangeFilter.PAST, selectedFilter)
+            assertEquals(ScheduleRangeFilter.ALL, selectedFilter)
         }
     }
 

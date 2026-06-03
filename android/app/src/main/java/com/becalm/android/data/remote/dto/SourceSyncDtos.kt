@@ -20,4 +20,6 @@ public data class SourceSyncJobResponse(
     @field:Json(name = "progress") val progress: Double? = null,
     @field:Json(name = "message") val message: String? = null,
     @field:Json(name = "sync_mode") val syncMode: String? = null,
+    @field:Json(name = "has_more_pages") val hasMorePages: Boolean = false,
+    @field:Json(name = "backfill_complete") val backfillComplete: Boolean? = null,
 )

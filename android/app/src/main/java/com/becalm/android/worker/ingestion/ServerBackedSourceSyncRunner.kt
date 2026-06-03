@@ -5,14 +5,17 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.WorkScheduler
@@ -31,7 +34,12 @@ internal data class ServerBackedSourceSyncRequest(
 
 internal sealed interface ServerBackedTriggerResult {
     data class Success(val syncedCount: Int? = null) : ServerBackedTriggerResult
-    data class Pending(val message: String, val retryAfterSeconds: Long? = null) : ServerBackedTriggerResult
+    data class Pending(
+        val message: String,
+        val retryAfterSeconds: Long? = null,
+        val reasonCode: String? = null,
+        val syncedCount: Int = 0,
+    ) : ServerBackedTriggerResult
     data class Failure(val message: String, val retryable: Boolean) : ServerBackedTriggerResult
 }
 
@@ -54,6 +62,8 @@ internal class ServerBackedSourceSyncRunner(
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    private val userCorrectionRepository: UserCorrectionRepository? = null,
+    private val syncCursorStore: SyncCursorStore? = null,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository? = null,
     private val workScheduler: WorkScheduler,
@@ -74,6 +84,7 @@ internal class ServerBackedSourceSyncRunner(
             processingStatusRepository?.recordGemini(request.sourceType, it)
         }
 
+        var retryAfterPartialRefresh = false
         when (val triggerResult = request.trigger()) {
             is ServerBackedTriggerResult.Failure -> {
                 sourceStatusRepository.recordSyncError(request.sourceType, triggerResult.message, clock.nowInstant())
@@ -86,12 +97,20 @@ internal class ServerBackedSourceSyncRunner(
                 }
             }
             is ServerBackedTriggerResult.Pending -> {
-                processingStatusRepository?.recordScanning(request.sourceType, triggerResult.message)
-                logger.d(
-                    tag,
-                    "backend sync pending source=${request.sourceType} retryAfter=${triggerResult.retryAfterSeconds}",
-                )
-                return ServerBackedSourceSyncResult.RETRY
+                processingStatusRepository?.recordScanning(request.sourceType, triggerResult.processingStatusMessage())
+                if (triggerResult.reasonCode == "provider_has_more_pages") {
+                    logger.d(
+                        tag,
+                        "backend sync partial source=${request.sourceType} synced=${triggerResult.syncedCount} retryAfter=${triggerResult.retryAfterSeconds}",
+                    )
+                    retryAfterPartialRefresh = true
+                } else {
+                    logger.d(
+                        tag,
+                        "backend sync pending source=${request.sourceType} retryAfter=${triggerResult.retryAfterSeconds}",
+                    )
+                    return ServerBackedSourceSyncResult.RETRY
+                }
             }
             is ServerBackedTriggerResult.Success -> {
                 triggerResult.syncedCount?.let { count ->
@@ -115,6 +134,8 @@ internal class ServerBackedSourceSyncRunner(
                 sourceEventParticipantRepository = sourceEventParticipantRepository,
                 commitmentParticipantRepository = commitmentParticipantRepository,
                 scheduleEventLinkRepository = scheduleEventLinkRepository,
+                userCorrectionRepository = userCorrectionRepository,
+                syncCursorStore = syncCursorStore,
                 workScheduler = workScheduler,
                 logger = logger,
             ).refresh(
@@ -140,6 +161,14 @@ internal class ServerBackedSourceSyncRunner(
             }
         }
 
+        if (retryAfterPartialRefresh) {
+            logger.d(
+                tag,
+                "backend sync partial refresh complete source=${request.sourceType} changed=${refreshStats.changedCount} " +
+                    "elapsedMs=${clock.nowInstant().toEpochMilliseconds() - startedAt.toEpochMilliseconds()}",
+            )
+            return ServerBackedSourceSyncResult.RETRY
+        }
         if (!request.recordSyncSuccessBeforeRefresh) {
             sourceStatusRepository.recordSyncSuccess(request.sourceType, clock.nowInstant())
         }
@@ -151,3 +180,11 @@ internal class ServerBackedSourceSyncRunner(
         return ServerBackedSourceSyncResult.SUCCESS
     }
 }
+
+private fun ServerBackedTriggerResult.Pending.processingStatusMessage(): String =
+    when (reasonCode) {
+        "backpressure_delayed" -> ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED
+        "provider_has_more_pages" -> ProcessingStatusMessages.SOURCE_SYNC_IMPORTING_MORE_PAGES
+        "llm_rate_limited_retrying" -> ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING
+        else -> message
+    }

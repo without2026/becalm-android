@@ -2,19 +2,23 @@ package com.becalm.android.ui.persons
 
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.PersonActionDao
 import com.becalm.android.data.local.db.dao.PersonIndexAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.email.OutgoingEmailSalutationExtractor
 import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.PersonMatchingEventPolicy
 import com.becalm.android.worker.ForegroundCatchUpScheduler
+import com.becalm.android.worker.SourceParticipantReviewPolicy
 import com.becalm.android.worker.WorkScheduler
 import dagger.Binds
 import dagger.Module
@@ -30,6 +34,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.datetime.Instant
 
 /** Projection row used by [PersonsViewModel] to expose SRC-001/002 contracts. */
@@ -44,6 +49,7 @@ public data class PersonListProjection(
     val channelSources: Set<String>,
     val lastInteractionAt: Instant?,
     val lastInteractionSnippet: String?,
+    val topAction: PersonActionSummary? = null,
 )
 
 /** Candidate surfaced for an unresolved person interaction. */
@@ -70,6 +76,7 @@ public data class UnassignedEventSummary(
     val snippet: String? = null,
     val suggestedLabel: String? = null,
     val candidates: List<PersonMatchCandidateSummary> = emptyList(),
+    val isSpeakerReviewCandidate: Boolean = false,
 )
 
 /** Offline badge contract for the persons screen. */
@@ -120,6 +127,7 @@ public interface PersonsRefreshCoordinator {
 @Singleton
 public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
+    private val personActionDao: PersonActionDao,
     private val personIndexDao: PersonIndexDao,
     private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
     private val sourceStatusRepository: SourceStatusRepository,
@@ -131,9 +139,10 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
         combine(
             personEnrichmentRepository.observeAll(),
             personIndexDao.observeAggregates(userId, PEOPLE_LIST_LIMIT + 1),
+            personActionDao.observeActiveForSurface(userId, surface = "person", limit = PEOPLE_LIST_LIMIT + 1),
             selfIdentityAnchorDao.observeActive(userId),
             userPrefsStore.observeBlockedPersonRefs(),
-        ) { enrichmentRows, indexAggregateRows, selfAnchors, blockedPersonRefs ->
+        ) { enrichmentRows, indexAggregateRows, actionRows, selfAnchors, blockedPersonRefs ->
             val selfMatcher = SelfIdentityAnchorMatcher(selfAnchors)
             val filteredIndexRows = indexAggregateRows.filterNot { row ->
                 PersonIdentityResolver.isBlocked(row.primaryIdentityKey, blockedPersonRefs) ||
@@ -147,6 +156,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                     selfMatcher.matches(row.personRef, row.displayName, row.nickname)
                 },
                 aggregateRows = filteredIndexRows,
+                actionRows = actionRows,
             )
         }
             .distinctUntilChanged()
@@ -169,10 +179,10 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                 .map { enrichment ->
                     PersonListProjection(
                         personId = enrichment.personRef,
-                        displayName = enrichment.displayName,
-                        nickname = enrichment.nickname,
-                        companyName = enrichment.company,
-                        jobTitle = enrichment.title,
+                        displayName = sanitizeDisplayName(enrichment.displayName),
+                        nickname = sanitizeDisplayName(enrichment.nickname),
+                        companyName = sanitizeDisplayName(enrichment.company),
+                        jobTitle = sanitizeDisplayName(enrichment.title),
                         eventCount = 0,
                         pendingCommitmentCount = 0,
                         channelSources = emptySet(),
@@ -211,15 +221,17 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                 semanticIndexRows = semanticIndexRows,
                 blockedPersonRefs = blockedPersonRefs,
             )
-        }.let { matchingContextFlow ->
+        }
+            .onStart { emit(MatchingProjectionContext(candidates = emptyList(), blockedPersonRefs = emptySet())) }
+            .let { matchingContextFlow ->
         combine(
-            personIndexDao.observeUnmatchedInteractions(userId, limit),
+            personIndexDao.observeUnmatchedInteractionsWithEmailBodies(userId, limit),
             personIndexDao.observeSourceEventParticipantsForUser(userId),
             matchingContextFlow,
         ) { events, participants, matchingContext ->
             events
-                .filterNot { event -> event.shouldHideFromManualMatching(matchingContext.blockedPersonRefs) }
-                .mapNotNull { event ->
+                .mapNotNull { eventRow ->
+                    val event = eventRow.toEntity()
                     val matchedParticipants = candidateSourceRefs(event.sourceRef)
                         .flatMap { ref ->
                             participants.filter { participant ->
@@ -236,6 +248,17 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                         participant.resolutionStatus.isReviewableForManualMatch() &&
                             participant.relationToUser != "self"
                     }
+                    val hasSpeakerReviewCandidate =
+                        reviewableParticipants.any(SourceParticipantReviewPolicy::isSourceLocalSpeakerReviewCandidate)
+                    if (
+                        event.shouldHideFromManualMatching(
+                            blockedPersonRefs = matchingContext.blockedPersonRefs,
+                            isSpeakerReviewCandidate = hasSpeakerReviewCandidate,
+                            hasReviewableParticipant = reviewableParticipants.isNotEmpty(),
+                        )
+                    ) {
+                        return@mapNotNull null
+                    }
                     if (matchedParticipants.isNotEmpty() && reviewableParticipants.isEmpty()) {
                         return@mapNotNull null
                     }
@@ -244,7 +267,16 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                             participant.toRecommendedCandidateSummaries(
                                 event = event,
                                 matchingContext = matchingContext,
-                            ) + listOfNotNull(participant.toMatchCandidateSummary(matchingContext.blockedPersonRefs))
+                                emailFolder = eventRow.emailFolder,
+                                emailBodyPlain = eventRow.emailBodyPlain,
+                            ) + listOfNotNull(
+                                participant.toMatchCandidateSummary(
+                                    blockedPersonRefs = matchingContext.blockedPersonRefs,
+                                    emailFolder = eventRow.emailFolder,
+                                    emailBodyPlain = eventRow.emailBodyPlain,
+                                    eventSnippet = event.snippet,
+                                ),
+                            )
                         }
                         .distinctBy { it.anchor }
                         .sortedWith(compareByDescending<PersonMatchCandidateSummary> { it.recommended }.thenByDescending { it.confidence })
@@ -257,6 +289,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                         snippet = event.snippet,
                         suggestedLabel = event.suggestedLabel,
                         candidates = eventCandidates,
+                        isSpeakerReviewCandidate = hasSpeakerReviewCandidate,
                         timestamp = event.occurredAt,
                     )
                 }
@@ -273,28 +306,68 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private fun buildProjectionPage(
         enrichmentRows: List<PersonEnrichmentEntity>,
         aggregateRows: List<PersonIndexAggregateRow>,
+        actionRows: List<PersonActionItemCacheEntity>,
     ): PersonsListPageProjection {
         val enrichmentByRef = enrichmentRows.associateBy { it.personRef }
-        val hasMore = aggregateRows.size > PEOPLE_LIST_LIMIT
-        val pageRows = aggregateRows
-            .take(PEOPLE_LIST_LIMIT)
+        val topActionByPersonId = actionRows
+            .filter { !it.personId.isNullOrBlank() }
+            .groupBy { requireNotNull(it.personId) }
+            .mapValues { (_, rows) -> rows.maxWith(compareBy<PersonActionItemCacheEntity> { it.urgencyScore }.thenBy { it.updatedAt }) }
+        val indexedPersonIds = aggregateRows.map { it.personId }.toSet()
+        val indexedRows = aggregateRows
             .map { aggregate ->
                 val enrichment = aggregate.primaryIdentityKey
                     ?.removeIdentityPrefix()
                     ?.let(enrichmentByRef::get)
+                val topAction = topActionByPersonId[aggregate.personId]?.toActionSummary()
+                val safeDisplayName = listOfNotNull(
+                    sanitizeDisplayName(topActionByPersonId[aggregate.personId]?.personDisplayName),
+                    sanitizeDisplayName(enrichment?.displayName),
+                    sanitizeDisplayName(enrichment?.nickname),
+                    sanitizeDisplayName(aggregate.displayNameHint),
+                    sanitizeDisplayName(aggregate.primaryIdentityKey),
+                ).firstOrNull()
+                    ?: UNKNOWN_PERSON_DISPLAY_NAME
                 PersonListProjection(
                     personId = aggregate.personId,
-                    displayName = enrichment?.displayName ?: aggregate.displayNameHint,
-                    nickname = enrichment?.nickname,
-                    companyName = enrichment?.company,
-                    jobTitle = enrichment?.title,
+                    displayName = safeDisplayName,
+                    nickname = sanitizeDisplayName(enrichment?.nickname),
+                    companyName = sanitizeDisplayName(enrichment?.company),
+                    jobTitle = sanitizeDisplayName(enrichment?.title),
                     eventCount = aggregate.eventCount,
                     pendingCommitmentCount = aggregate.pendingCommitmentCount,
                     channelSources = aggregate.channelSources.toSourceSet(),
                     lastInteractionAt = aggregate.lastInteractionAt,
                     lastInteractionSnippet = aggregate.lastInteractionSnippet,
+                    topAction = topAction,
                 )
             }
+        val actionOnlyRows = actionRows
+            .filter { !it.personId.isNullOrBlank() && it.personId !in indexedPersonIds }
+            .groupBy { requireNotNull(it.personId) }
+            .map { (_, rows) -> rows.maxWith(compareBy<PersonActionItemCacheEntity> { it.urgencyScore }.thenBy { it.updatedAt }) }
+            .map { action ->
+                PersonListProjection(
+                    personId = requireNotNull(action.personId),
+                    displayName = sanitizeDisplayName(action.personDisplayName) ?: UNKNOWN_PERSON_DISPLAY_NAME,
+                    nickname = null,
+                    companyName = null,
+                    jobTitle = null,
+                    eventCount = 0,
+                    pendingCommitmentCount = 1,
+                    channelSources = listOfNotNull(action.sourceType).toSet(),
+                    lastInteractionAt = action.updatedAt,
+                    lastInteractionSnippet = action.shortReason,
+                    topAction = action.toActionSummary(),
+                )
+            }
+        val mergedRows = (indexedRows + actionOnlyRows)
+            .sortedWith(
+                compareByDescending<PersonListProjection> { it.topAction?.urgencyScore ?: -1.0 }
+                    .thenByDescending { it.lastInteractionAt },
+            )
+        val hasMore = mergedRows.size > PEOPLE_LIST_LIMIT
+        val pageRows = mergedRows.take(PEOPLE_LIST_LIMIT)
 
         return PersonsListPageProjection(
             rows = pageRows,
@@ -330,25 +403,38 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
 
     private fun SourceEventParticipantEntity.toMatchCandidateSummary(
         blockedPersonRefs: Set<String>,
+        emailFolder: String? = null,
+        emailBodyPlain: String? = null,
+        eventSnippet: String? = null,
     ): PersonMatchCandidateSummary? {
-        val anchor = emailRaw
-            ?: phoneRaw
-            ?: displayNameRaw
-            ?: normalizedValue
-            ?: organizationRaw
+        val anchor = listOf(
+            emailRaw,
+            phoneRaw,
+            normalizedValue,
+            organizationRaw,
+            displayNameRaw,
+        ).firstOrNull { it != null && it.isNotBlank() }
             ?: return null
         if (isSourceLocalSpeakerLabelOnly() || anchor.isSpeakerLabelProjectionValue()) return null
         if (
             PersonIdentityResolver.isBlocked(anchor, blockedPersonRefs) ||
             PersonIdentityResolver.isLikelyAutomated(anchor)
         ) {
-            return null
+                return null
         }
-        val displayName = displayNameRaw ?: emailRaw ?: phoneRaw ?: normalizedValue ?: organizationRaw ?: return null
+        val salutationDisplayName = OutgoingEmailSalutationExtractor.extractNames(
+            folder = emailFolder,
+            bodyText = emailBodyPlain ?: eventSnippet,
+        ).firstOrNull()
+        val displayName = listOfNotNull(
+            sanitizeDisplayName(displayNameRaw),
+            sanitizeDisplayName(salutationDisplayName),
+            sanitizeDisplayName(organizationRaw),
+        ).firstOrNull()
+            ?: UNKNOWN_PERSON_DISPLAY_NAME
         val detail = listOfNotNull(
-            emailRaw?.takeUnless { it == displayName },
-            phoneRaw?.takeUnless { it == displayName },
-            organizationRaw,
+            organizationRaw?.trim()
+                ?.takeIf { it.isNotBlank() && isDisplaySafeMetadata(it) },
         ).firstOrNull()
         return PersonMatchCandidateSummary(
             anchor = anchor,
@@ -361,6 +447,25 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
         )
     }
 
+    private fun sanitizeDisplayName(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (value in GENERIC_DISPLAY_NAMES) return null
+        if (isTechnicalPersonValue(value)) return null
+        return value
+    }
+
+    private fun isTechnicalPersonValue(value: String): Boolean {
+        if (PersonIdentityResolver.isSpeakerLabelValue(value)) return true
+        if (PersonIdentityResolver.normalizeEmailAnchor(value) != null) return true
+        if (PersonIdentityResolver.normalizePhoneAnchor(value) != null) return true
+        return value.all { it.isDigit() || it == '-' || it == ' ' }
+    }
+
+    private fun isDisplaySafeMetadata(raw: String?): Boolean {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return false
+        return !isTechnicalPersonValue(value)
+    }
+
     private fun String?.toSourceSet(): Set<String> =
         this
             ?.split(',')
@@ -368,12 +473,25 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             ?.toCollection(linkedSetOf())
             ?: emptySet()
 
+    private fun PersonActionItemCacheEntity.toActionSummary(): PersonActionSummary =
+        PersonActionSummary(
+            id = id,
+            title = title,
+            primaryVerb = primaryVerb,
+            shortReason = shortReason,
+            actionKind = actionKind,
+            dueAt = dueAt,
+            urgencyScore = urgencyScore,
+        )
+
     private fun UnmatchedPersonInteractionEntity.shouldHideFromManualMatching(
         blockedPersonRefs: Set<String>,
+        isSpeakerReviewCandidate: Boolean = false,
+        hasReviewableParticipant: Boolean = false,
     ): Boolean {
-        if (PersonMatchingEventPolicy.isLikelyServiceAccountNotification(title, snippet, suggestedLabel)) return true
+        if (!hasReviewableParticipant && PersonMatchingEventPolicy.isLikelyServiceAccountNotification(title, snippet, suggestedLabel)) return true
         if (PersonIdentityResolver.isBlocked(suggestedLabel, blockedPersonRefs)) return true
-        if (suggestedLabel.isSpeakerLabelProjectionValue()) return true
+        if (suggestedLabel.isSpeakerLabelProjectionValue()) return !isSpeakerReviewCandidate
         return PersonIdentityResolver.isLikelyAutomated(suggestedLabel)
     }
 
@@ -405,6 +523,31 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private companion object {
         const val PEOPLE_LIST_LIMIT: Int = 200
         const val MATCH_CANDIDATE_LIMIT: Int = 200
+        const val UNKNOWN_PERSON_DISPLAY_NAME = "아직 이름을 모르는 연락처"
+        val GENERIC_DISPLAY_NAMES: Set<String> = setOf(
+            "고객",
+            "고객님",
+            "담당자",
+            "담당자님",
+            "대표",
+            "대표님",
+            "멘토",
+            "멘토님",
+            "교수",
+            "교수님",
+            "선생",
+            "선생님",
+            "팀장",
+            "팀장님",
+            "박사",
+            "박사님",
+            "변호사",
+            "변호사님",
+            "원장",
+            "원장님",
+            "이사",
+            "이사님",
+        )
     }
 }
 

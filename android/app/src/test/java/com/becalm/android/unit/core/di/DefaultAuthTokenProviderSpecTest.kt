@@ -3,6 +3,7 @@ package com.becalm.android.unit.core.di
 import com.becalm.android.core.di.DefaultAuthTokenProvider
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.remote.interceptor.AuthInterceptor
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
@@ -85,6 +86,26 @@ class DefaultAuthTokenProviderSpecTest {
 
         assertEquals(AuthTokenProvider.RefreshResult.Unauthenticated, result)
         assertEquals(1, store.clearCount)
+    }
+
+    @Test
+    fun `debug local-only session is not refreshed or cleared when token cache is cold`() = runTest {
+        val debugToken = "header.payload.${AuthInterceptor.DEBUG_LOCAL_ONLY_TOKEN_SIGNATURE}"
+        val store = FakeSessionStore(initial = session.copy(accessToken = debugToken, refreshToken = "debug-refresh-token"))
+        val provider = DefaultAuthTokenProvider(
+            authClientProvider = Provider { error("SupabaseAuthClient must not refresh debug local-only sessions") },
+            sessionStore = store,
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            applicationScope = backgroundScope,
+            logger = logger,
+        )
+        provider.invalidate()
+
+        val result = provider.refresh(previousAccessToken = "")
+
+        assertEquals(AuthTokenProvider.RefreshResult.Failed, result)
+        assertEquals(debugToken, provider.currentAccessToken())
+        assertEquals(0, store.clearCount)
     }
 
     private class FakeSessionStore(initial: SupabaseSession?) : SupabaseSessionStore {

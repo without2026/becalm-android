@@ -22,6 +22,7 @@ import com.becalm.android.core.di.ApplicationScope
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.domain.commitment.CommitmentState
 import dagger.hilt.android.AndroidEntryPoint
@@ -30,6 +31,7 @@ import javax.inject.Inject
 import kotlinx.datetime.Clock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
 public data class ReminderNotificationSpec(
@@ -72,6 +74,9 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     public lateinit var logger: Logger
+
+    @Inject
+    public lateinit var userPrefsStore: UserPrefsStore
 
     @Inject
     public lateinit var productAnalytics: ProductAnalyticsClient
@@ -143,6 +148,13 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             )
             return
         }
+        if (userPrefsStore.observeNotificationsEnabled().firstOrNull() == false) {
+            logger.d(
+                TAG,
+                "silent drop: notifications disabled for commitmentId_hash=${redact(commitmentId)}",
+            )
+            return
+        }
         val entity = commitmentDao.findByIdForUser(scheduledUserId, commitmentId)
         if (entity == null) {
             logger.d(
@@ -173,7 +185,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
                 context = context,
                 commitmentId = commitmentId,
                 title = entity.title,
-                direction = requireNotNull(entity.direction) { "Reminder notifications require action direction" },
+                direction = entity.direction.orEmpty(),
             ),
         )
     }
@@ -287,7 +299,8 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
         ): ReminderNotificationSpec {
             val bodyResId = when (direction) {
                 "give" -> R.string.commitment_alarm_body_give_fmt
-                else -> R.string.commitment_alarm_body_take_fmt
+                "take" -> R.string.commitment_alarm_body_take_fmt
+                else -> R.string.commitment_alarm_body_generic_fmt
             }
             return ReminderNotificationSpec(
                 commitmentId = commitmentId,

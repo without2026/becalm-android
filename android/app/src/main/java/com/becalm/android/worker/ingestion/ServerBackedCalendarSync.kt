@@ -6,12 +6,20 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
+import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.SourceSyncJobPollResult
+import com.becalm.android.data.repository.SourceSyncJobPoller
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
+import com.becalm.android.data.repository.toSnapshot
 import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.ProcessingPauseGate
@@ -26,11 +34,15 @@ internal suspend fun runServerBackedCalendarSync(
     runAttemptCount: Int,
     inputData: Data,
     authRepository: AuthRepository,
+    api: RailwayApi,
     calendarEventRepository: CalendarEventRepository,
     commitmentRepository: CommitmentRepository,
+    sourceConnectionRepository: SourceConnectionRepository,
     sourceEventParticipantRepository: SourceEventParticipantRepository,
     commitmentParticipantRepository: CommitmentParticipantRepository,
+    userCorrectionRepository: UserCorrectionRepository? = null,
     sourceStatusRepository: SourceStatusRepository,
+    syncCursorStore: SyncCursorStore,
     workScheduler: WorkScheduler,
     processingPauseGate: ProcessingPauseGate,
     clock: Clock,
@@ -62,7 +74,9 @@ internal suspend fun runServerBackedCalendarSync(
         commitmentRepository = commitmentRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
+        userCorrectionRepository = userCorrectionRepository,
         sourceStatusRepository = sourceStatusRepository,
+        syncCursorStore = syncCursorStore,
         workScheduler = workScheduler,
         clock = clock,
         logger = logger,
@@ -77,33 +91,21 @@ internal suspend fun runServerBackedCalendarSync(
                     rangeStart = rangeStart,
                     rangeEnd = rangeEnd,
                 ),
+                resetMirrorCursorBeforeRefresh = true,
             ),
             refreshFailureMessage = { error -> error.toCalendarSyncMessage() },
             refreshFailureRetryable = { error ->
                 error is BecalmError.Network || error is BecalmError.ServerError
             },
             trigger = {
-                when (val syncResult = calendarEventRepository.triggerServerSync()) {
-                    is BecalmResult.Success -> {
-                        logger.d(tag, "triggerServerSync succeeded synced=${syncResult.value.synced}")
-                        ServerBackedTriggerResult.Success()
-                    }
-                    is BecalmResult.Failure -> {
-                        val error = syncResult.error
-                        val message = if (error is BecalmError.Unauthorized) {
-                            "Unauthorized: session invalid"
-                        } else {
-                            error.toCalendarSyncMessage()
-                        }
-                        logger.w(tag, "triggerServerSync failed: $message")
-                        ServerBackedTriggerResult.Failure(
-                            message = message,
-                            retryable = error is BecalmError.RateLimited ||
-                                error is BecalmError.Network ||
-                                error is BecalmError.ServerError,
-                        )
-                    }
-                }
+                triggerConnectionScopedCalendarSync(
+                    userId = userId,
+                    sourceType = sourceType,
+                    api = api,
+                    sourceConnectionRepository = sourceConnectionRepository,
+                    logger = logger,
+                    tag = tag,
+                )
             },
         ),
     )
@@ -119,6 +121,83 @@ internal suspend fun runServerBackedCalendarSync(
 
 private const val NO_LOOKBACK: Int = -1
 private const val MAX_RETRIES: Int = 5
+
+private suspend fun triggerConnectionScopedCalendarSync(
+    userId: String,
+    sourceType: String,
+    api: RailwayApi,
+    sourceConnectionRepository: SourceConnectionRepository,
+    logger: Logger,
+    tag: String,
+): ServerBackedTriggerResult {
+    val connections = when (val refresh = sourceConnectionRepository.refresh(userId)) {
+        is BecalmResult.Success -> refresh.value.syncableCalendarConnectionsFor(sourceType)
+        is BecalmResult.Failure -> {
+            val message = refresh.error.toCalendarSyncMessage()
+            logger.w(tag, "source connection refresh failed before calendar sync: $message")
+            return ServerBackedTriggerResult.Failure(
+                message = message,
+                retryable = refresh.error is BecalmError.Network || refresh.error is BecalmError.ServerError,
+            )
+        }
+    }
+    if (connections.isEmpty()) {
+        return ServerBackedTriggerResult.Failure("No source connection for $sourceType", retryable = false)
+    }
+
+    val jobs = mutableListOf<Pair<SourceConnectionEntity, com.becalm.android.data.remote.dto.SourceSyncJobResponse>>()
+    for (connection in connections) {
+        val response = api.syncSourceConnection(connection.id)
+        if (!response.isSuccessful) {
+            val message = "HTTP ${response.code()}"
+            return ServerBackedTriggerResult.Failure(
+                message = message,
+                retryable = response.code() == 429 || response.code() in 500..599,
+            )
+        }
+        val body = response.body()
+            ?: return ServerBackedTriggerResult.Failure("Empty response", retryable = true)
+        jobs += connection to body
+    }
+
+    var synced = 0
+    for ((connection, body) in jobs) {
+        when (
+            val pollResult = SourceSyncJobPoller(
+                api = api,
+                logger = logger,
+            ).awaitTerminal(sourceType, body.toSnapshot())
+        ) {
+            is SourceSyncJobPollResult.Completed -> {
+                synced += pollResult.synced
+                logger.d(tag, "calendar connection sync success source=$sourceType connectionId=${connection.id} synced=${pollResult.synced}")
+            }
+            is SourceSyncJobPollResult.Pending -> return ServerBackedTriggerResult.Pending(
+                message = pollResult.message,
+                retryAfterSeconds = pollResult.retryAfterSeconds,
+                reasonCode = pollResult.reasonCode,
+                syncedCount = pollResult.synced,
+            )
+            is SourceSyncJobPollResult.Failed -> return ServerBackedTriggerResult.Failure(
+                message = pollResult.message,
+                retryable = pollResult.retryable,
+            )
+        }
+    }
+    return ServerBackedTriggerResult.Success(syncedCount = synced)
+}
+
+private fun List<SourceConnectionEntity>.syncableCalendarConnectionsFor(sourceType: String): List<SourceConnectionEntity> =
+    filter { connection ->
+        connection.status != "disconnected" && connection.toCalendarSourceType() == sourceType
+    }
+
+private fun SourceConnectionEntity.toCalendarSourceType(): String? =
+    when {
+        provider == "google" && capability == "calendar" -> com.becalm.android.data.remote.dto.SourceType.GOOGLE_CALENDAR
+        provider == "outlook" && capability == "calendar" -> com.becalm.android.data.remote.dto.SourceType.OUTLOOK_CALENDAR
+        else -> null
+    }
 
 private fun daysAgo(now: Instant, days: Int): Instant =
     Instant.fromEpochMilliseconds(now.toEpochMilliseconds() - days * 86_400_000L)

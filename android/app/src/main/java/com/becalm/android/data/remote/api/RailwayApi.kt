@@ -20,6 +20,9 @@ import com.becalm.android.data.remote.dto.ManualMemoryCreateResponseDto
 import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
 import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
+import com.becalm.android.data.remote.dto.PersonActionFeedbackDto
+import com.becalm.android.data.remote.dto.PersonActionFeedResponseDto
+import com.becalm.android.data.remote.dto.PersonActionStatePatchDto
 import com.becalm.android.data.remote.dto.PersonMemoryDownloadResponseDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadRequestDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadResponseDto
@@ -28,7 +31,10 @@ import com.becalm.android.data.remote.dto.ProductEventsBatchResponse
 import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
 import com.becalm.android.data.remote.dto.ScheduleEventLinkPatchDto
 import com.becalm.android.data.remote.dto.ScheduleEventLinksResponse
+import com.becalm.android.data.remote.dto.ScheduleRowTombstoneRequestDto
+import com.becalm.android.data.remote.dto.ScheduleRowTombstoneResponseDto
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
+import com.becalm.android.data.remote.dto.SinglePersonActionItemResponseDto
 import com.becalm.android.data.remote.dto.SingleScheduleEventLinkResponse
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
 import com.becalm.android.data.remote.dto.SourceEventParticipantPatchRequestDto
@@ -40,12 +46,14 @@ import com.becalm.android.data.remote.dto.SelfIdentityAnchorResponseDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorsResponseDto
 import com.becalm.android.data.remote.dto.OnboardingSelfIdentityCommitRequestDto
 import com.becalm.android.data.remote.dto.OnboardingSelfIdentityCommitResponseDto
-import com.becalm.android.data.remote.dto.SourceConnectionPatchRequestDto
 import com.becalm.android.data.remote.dto.SourceConnectionResponseDto
 import com.becalm.android.data.remote.dto.SourceConnectionsResponseDto
 import com.becalm.android.data.remote.dto.SourceSyncJobResponse
 import com.becalm.android.data.remote.dto.UserProfilePatchRequestDto
 import com.becalm.android.data.remote.dto.UserProfileResponseDto
+import com.becalm.android.data.remote.dto.UserCorrectionBatchRequestDto
+import com.becalm.android.data.remote.dto.UserCorrectionBatchResponseDto
+import com.becalm.android.data.remote.dto.UserCorrectionsResponseDto
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -212,6 +220,8 @@ public interface RailwayApi {
         @Query("person_id") personId: String? = null,
         @Query("direction") direction: String? = null,
         @Query("action_state") actionState: String? = null,
+        @Query("source_type") sourceType: String? = null,
+        @Query("include_unresolved_counterparty") includeUnresolvedCounterparty: Boolean = false,
     ): Response<PaginatedCommitmentsResponse>
 
     /**
@@ -338,12 +348,6 @@ public interface RailwayApi {
     @GET("v1/source_connections")
     public suspend fun getSourceConnections(): Response<SourceConnectionsResponseDto>
 
-    @PATCH("v1/source_connections/{id}")
-    public suspend fun patchSourceConnection(
-        @Path("id") id: String,
-        @Body request: SourceConnectionPatchRequestDto,
-    ): Response<SourceConnectionResponseDto>
-
     @POST("v1/source_connections/{id}:disconnect")
     public suspend fun disconnectSourceConnection(
         @Path("id") id: String,
@@ -353,6 +357,12 @@ public interface RailwayApi {
     public suspend fun deleteSourceConnection(
         @Path("id") id: String,
     ): Response<SourceConnectionResponseDto>
+
+    @POST("v1/source_connections/{id}:sync")
+    public suspend fun syncSourceConnection(
+        @Path("id") id: String,
+        @Query("mode") mode: String? = null,
+    ): Response<SourceSyncJobResponse>
 
     // =========================================================================
     // CALENDAR EVENTS
@@ -383,7 +393,30 @@ public interface RailwayApi {
      * Spec refs: TDY-005.
      */
     @POST("v1/calendar_events:sync")
-    public suspend fun syncCalendarEvents(): Response<CalendarSyncResponse>
+    public suspend fun syncCalendarEvents(
+        @Query("provider") provider: String? = null,
+        @Query("mode") mode: String? = null,
+    ): Response<CalendarSyncResponse>
+
+    @POST("v1/schedule_row_tombstones")
+    public suspend fun upsertScheduleRowTombstone(
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: ScheduleRowTombstoneRequestDto,
+    ): Response<ScheduleRowTombstoneResponseDto>
+
+    @GET("v1/user_corrections")
+    public suspend fun getUserCorrections(
+        @Query("cursor") cursor: String? = null,
+        @Query("limit") limit: Int? = null,
+        @Query("since") since: String? = null,
+        @Query("status") status: String? = null,
+    ): Response<UserCorrectionsResponseDto>
+
+    @POST("v1/user_corrections:batch")
+    public suspend fun uploadUserCorrectionsBatch(
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: UserCorrectionBatchRequestDto,
+    ): Response<UserCorrectionBatchResponseDto>
 
     /**
      * Triggers a server-side Gmail / Outlook Mail sync for the authenticated user.
@@ -509,4 +542,36 @@ public interface RailwayApi {
     public suspend fun getPersonMemory(
         @Path("person_id") personId: String,
     ): Response<PersonMemoryDownloadResponseDto>
+
+    // =========================================================================
+    // PERSON ACTION ITEMS
+    // =========================================================================
+
+    @GET("v1/person_action_items")
+    public suspend fun getPersonActionItems(
+        @Query("cursor") cursor: String? = null,
+        @Query("snapshot_id") snapshotId: String? = null,
+        @Query("limit") limit: Int? = null,
+        @Query("changed_since") changedSince: String? = null,
+        @Query("surface") surface: String? = null,
+        @Query("status") status: String? = "active",
+        @Query("person_id") personId: String? = null,
+        @Query("commitment_id") commitmentId: String? = null,
+        @Query("calendar_event_id") calendarEventId: String? = null,
+        @Query("include_stale") includeStale: Boolean = true,
+    ): Response<PersonActionFeedResponseDto>
+
+    @PATCH("v1/person_action_items/{id}")
+    public suspend fun patchPersonActionItem(
+        @Path("id") id: String,
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: PersonActionStatePatchDto,
+    ): Response<SinglePersonActionItemResponseDto>
+
+    @POST("v1/person_action_items/{id}:feedback")
+    public suspend fun submitPersonActionFeedback(
+        @Path("id") id: String,
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: PersonActionFeedbackDto,
+    ): Response<SinglePersonActionItemResponseDto>
 }

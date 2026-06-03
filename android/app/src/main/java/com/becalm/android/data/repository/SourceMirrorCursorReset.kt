@@ -10,24 +10,39 @@ internal object SourceMirrorCursorReset {
         connection: SourceConnectionEntity,
     ) {
         val sourceType = connection.toMirrorSourceType() ?: return
-        clearForSourceType(syncCursorStore, sourceType)
+        clearForSourceType(syncCursorStore, connection.userId, sourceType)
     }
 
     suspend fun clearForSourceType(
         syncCursorStore: SyncCursorStore,
+        userId: String,
         sourceType: String,
     ) {
         syncCursorStore.clearCursor("source_event_participants:$sourceType")
         syncCursorStore.clearCursor("source_event_participants:all")
+        syncCursorStore.clearCursor(MirrorCursorKeys.sourceEventParticipants(userId, sourceType))
+        syncCursorStore.clearCursor(MirrorCursorKeys.sourceEventParticipants(userId, null))
         syncCursorStore.clearCursor("commitments_cursor")
+        syncCursorStore.clearCursor("commitments_cursor:v2_include_unresolved")
+        syncCursorStore.clearCursor("commitments_cursor:v3_source_event_anchor")
+        syncCursorStore.clearCursor(MirrorCursorKeys.commitments(userId))
         syncCursorStore.clearCursor("commitment_participants")
+        syncCursorStore.clearCursor(MirrorCursorKeys.commitmentParticipants(userId))
         syncCursorStore.clearCursor("schedule_event_links")
+        syncCursorStore.clearCursor(MirrorCursorKeys.scheduleEventLinks(userId))
         if (sourceType in RAW_MIRROR_SOURCE_TYPES) {
             syncCursorStore.clearCursor("raw_ingestion_events:$sourceType")
             syncCursorStore.clearCursor("raw_ingestion_events:all")
+            syncCursorStore.clearCursor("raw_ingestion_events:v2_title_alias:$sourceType")
+            syncCursorStore.clearCursor("raw_ingestion_events:v2_title_alias:all")
+            syncCursorStore.clearCursor("raw_ingestion_events:v3_source_event_anchor:$sourceType")
+            syncCursorStore.clearCursor("raw_ingestion_events:v3_source_event_anchor:all")
+            syncCursorStore.clearCursor(MirrorCursorKeys.rawEvents(userId, sourceType))
+            syncCursorStore.clearCursor(MirrorCursorKeys.rawEvents(userId, null))
         }
         if (sourceType in CALENDAR_SOURCE_TYPES) {
             syncCursorStore.clearCursor("calendar_events")
+            syncCursorStore.clearCursor(MirrorCursorKeys.calendarEvents(userId))
         }
     }
 
@@ -36,7 +51,11 @@ internal object SourceMirrorCursorReset {
         next: SourceConnectionEntity,
     ): Boolean {
         if (next.toMirrorSourceType() == null || next.status != CONNECTED) return false
-        return previous == null || previous.status != CONNECTED
+        return previous == null ||
+            previous.status != CONNECTED ||
+            previous.accountIdentifier != next.accountIdentifier ||
+            previous.provider != next.provider ||
+            previous.capability != next.capability
     }
 
     private fun SourceConnectionEntity.toMirrorSourceType(): String? =

@@ -97,6 +97,7 @@ internal fun SourceExtractedItemDto.toTrackableCommitmentEntity(
     actionState = "pending",
     sourceType = sourceType,
     sourceRef = sourceRef,
+    sourceEventId = rawEventId,
     confidence = confidence.toDouble(),
     commitmentState = CommitmentLifecycleLegacy.DRAFT,
     syncStatus = STATUS_PENDING,

@@ -8,6 +8,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
+import com.becalm.android.data.local.db.entity.CommitmentAgendaIntent
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
@@ -36,6 +37,9 @@ import com.becalm.android.ui.today.ScheduleRangeFilter
 import com.becalm.android.ui.today.TimelineItem
 import com.becalm.android.ui.today.TodayCommitmentRowTreatment
 import com.becalm.android.ui.today.TodayEffect
+import com.becalm.android.ui.today.TodaySnapshot
+import com.becalm.android.ui.today.TodaySyncProjector
+import com.becalm.android.ui.today.TodayTimelineProjector
 import com.becalm.android.ui.today.TodayViewModel
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.WorkScheduler
@@ -83,6 +87,7 @@ class TodayViewModelSpecTest {
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
+    private val createdViewModels = mutableListOf<TodayViewModel>()
 
     @Before
     fun setUp() {
@@ -119,6 +124,8 @@ class TodayViewModelSpecTest {
 
     @After
     fun tearDown() {
+        createdViewModels.forEach(::clearViewModel)
+        createdViewModels.clear()
         Dispatchers.resetMain()
     }
 
@@ -217,10 +224,39 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `calendar event is hidden from today timeline when mirrored as schedule commitment`() = runTest {
-        coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
-            todayRows(
+    fun agenda_timeline_includes_schedule_candidates_and_schedule_coordination_actions() = runTest {
+        val timeline = TodayTimelineProjector.buildTimeline(
+            commitments = todayRows(
+                commitment(
+                    id = "tentative-schedule",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.TENTATIVE,
+                    occurredAt = Instant.parse("2026-04-18T01:30:00Z"),
+                    counterpartyRef = null,
+                ),
+                commitment(
+                    id = "meeting-coordinate",
+                    itemType = CommitmentItemType.ACTION,
+                    direction = "take",
+                    agendaIntent = CommitmentAgendaIntent.SCHEDULE_COORDINATION,
+                    scheduleStatus = null,
+                    occurredAt = Instant.parse("2026-04-18T02:00:00Z"),
+                    counterpartyRef = "lee@corp.com",
+                    dueAt = null,
+                ),
+            ),
+            calendarEvents = emptyList(),
+        )
+
+        assertEquals(listOf("tentative-schedule"), timeline.map { (it as TimelineItem.Commitment).id })
+        assertEquals(TodayCommitmentRowTreatment.SCHEDULE, (timeline[0] as TimelineItem.Commitment).rowTreatment)
+    }
+
+    @Test
+    fun `calendar event is hidden from today timeline when mirrored as schedule commitment`() {
+        val timeline = TodayTimelineProjector.buildTimeline(
+            commitments = todayRows(
                 commitment(
                     id = "calendar-schedule-1",
                     itemType = CommitmentItemType.SCHEDULE,
@@ -232,9 +268,7 @@ class TodayViewModelSpecTest {
                     sourceRef = "event-1",
                 ),
             ),
-        )
-        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
-            listOf(
+            calendarEvents = listOf(
                 calendarEvent(
                     id = "event-1",
                     startAt = Instant.parse("2026-04-18T01:00:00Z"),
@@ -242,16 +276,9 @@ class TodayViewModelSpecTest {
                 ),
             ),
         )
-        val viewModel = buildViewModel()
 
-        viewModel.state.test {
-            var emission = awaitItem()
-            while (emission.loading) emission = awaitItem()
-
-            assertEquals(1, emission.timeline.size)
-            assertTrue(emission.timeline.single() is TimelineItem.Commitment)
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertEquals(1, timeline.size)
+        assertTrue(timeline.single() is TimelineItem.Commitment)
     }
 
     @Test
@@ -582,7 +609,7 @@ class TodayViewModelSpecTest {
 
             assertTrue(emission.timeline.isEmpty())
             assertEquals(
-                Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds(),
+                Instant.fromEpochMilliseconds(0).toEpochMilliseconds(),
                 dayStartEpochMs.captured,
             )
             assertEquals(Long.MAX_VALUE - 1L, dayEndEpochMs.captured)
@@ -633,7 +660,7 @@ class TodayViewModelSpecTest {
             while (emission.loading) emission = awaitItem()
 
             assertTrue(emission.timeline.isEmpty())
-            assertEquals(Instant.parse("2026-04-17T15:00:00Z"), todayStart.captured)
+            assertEquals(Instant.fromEpochMilliseconds(0), todayStart.captured)
             assertEquals(Long.MAX_VALUE, todayEnd.captured.toEpochMilliseconds())
 
             calendarFlow.value = listOf(
@@ -680,17 +707,17 @@ class TodayViewModelSpecTest {
             var emission = awaitItem()
             while (emission.loading) emission = awaitItem()
             assertEquals(ScheduleRangeFilter.ALL, emission.scheduleRangeFilter)
-            assertEquals(0L, startBounds.last())
+            assertEquals(Instant.fromEpochMilliseconds(0).toEpochMilliseconds(), startBounds.last())
             assertEquals(Long.MAX_VALUE - 1L, endBounds.last())
 
-            viewModel.onScheduleRangeChange(ScheduleRangeFilter.PAST)
+            viewModel.onScheduleRangeChange(ScheduleRangeFilter.TODAY)
 
             do {
                 emission = awaitItem()
-            } while (emission.scheduleRangeFilter != ScheduleRangeFilter.PAST)
-            assertEquals(0L, startBounds.last())
+            } while (emission.scheduleRangeFilter != ScheduleRangeFilter.TODAY)
+            assertEquals(Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds(), startBounds.last())
             assertEquals(
-                Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds() - 1L,
+                Instant.parse("2026-04-18T15:00:00Z").toEpochMilliseconds() - 1L,
                 endBounds.last(),
             )
             cancelAndIgnoreRemainingEvents()
@@ -715,6 +742,7 @@ class TodayViewModelSpecTest {
                     counterpartyRef = "startup@asan-nanum.org",
                     itemType = CommitmentItemType.SCHEDULE,
                     direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
                     sourceEventTitle = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
                     dueAt = Instant.parse("2026-04-18T05:00:00Z"),
                 ),
@@ -731,6 +759,41 @@ class TodayViewModelSpecTest {
             assertEquals(listOf("asan-schedule"), emission.timeline.map { (it as TimelineItem.Commitment).id })
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun schedule_timeline_hides_rows_that_violate_schedule_shape() {
+        val timeline = TodayTimelineProjector.buildTimeline(
+            commitments = todayRows(
+                commitment(
+                    id = "valid-schedule",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    counterpartyRef = null,
+                ),
+                commitment(
+                    id = "action-shaped-schedule",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = "give",
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T02:00:00Z"),
+                    counterpartyRef = "lee@corp.com",
+                ),
+                commitment(
+                    id = "unknown-status-schedule",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = null,
+                    occurredAt = Instant.parse("2026-04-18T03:00:00Z"),
+                    counterpartyRef = null,
+                ),
+            ),
+            calendarEvents = emptyList(),
+        )
+
+        assertEquals(listOf("valid-schedule"), timeline.map { (it as TimelineItem.Commitment).id })
     }
 
     @Test
@@ -1054,34 +1117,35 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `processing status does not show recent terminal work on today surface`() = runTest {
-        coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
-        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
-        every { processingStatusRepository.observeAll() } returns flowOf(
-            listOf(
+    fun `processing status does not show recent terminal work on today surface`() {
+        val uiState = TodaySyncProjector.buildUiState(
+            snapshot = TodaySnapshot(
+                userId = "user-1",
+                commitments = emptyList(),
+                calendarEvents = emptyList(),
+                scheduleActions = emptyList(),
+                scheduleLinks = emptyList(),
+                sourceStatuses = emptyList(),
+                processingStates = listOf(
                 ProcessingSourceState(
                     sourceType = SourceType.MEETING,
                     phase = ProcessingPhase.SYNCED,
                     itemCount = 1,
                     updatedAt = Instant.parse("2026-04-18T08:55:00Z"),
                 ),
+                ),
+                processingPaused = false,
+                rangeFilter = ScheduleRangeFilter.ALL,
+                today = kotlinx.datetime.LocalDate(2026, 4, 18),
+                now = now,
             ),
+            refreshing = false,
         )
 
-        val viewModel = buildViewModel()
-
-        viewModel.state.test {
-            var emission = awaitItem()
-            while (emission.loading) emission = awaitItem()
-
-            assertEquals(0, emission.processingStatus.activeCount)
-            assertEquals(0, emission.processingStatus.actionCount)
-            assertEquals(ProcessingPhase.SYNCED, emission.processingStatus.latestPhase)
-            assertFalse(emission.processingStatus.visible)
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertEquals(0, uiState.processingStatus.activeCount)
+        assertEquals(0, uiState.processingStatus.actionCount)
+        assertEquals(ProcessingPhase.SYNCED, uiState.processingStatus.latestPhase)
+        assertFalse(uiState.processingStatus.visible)
     }
 
     @Test
@@ -1179,7 +1243,16 @@ class TodayViewModelSpecTest {
         foregroundCatchUpScheduler = foregroundCatchUpScheduler,
         clock = clock,
         logger = logger,
-    )
+    ).also(createdViewModels::add)
+
+    private fun clearViewModel(viewModel: TodayViewModel) {
+        runCatching {
+            androidx.lifecycle.ViewModel::class.java
+                .getDeclaredMethod("clear")
+                .apply { isAccessible = true }
+                .invoke(viewModel)
+        }
+    }
 
     private fun session() = SupabaseSession(
         accessToken = "a",
@@ -1211,12 +1284,14 @@ class TodayViewModelSpecTest {
         sourceEventTitle: String? = null,
         dueAt: Instant? = occurredAt,
         dueIsApproximate: Boolean = false,
+        agendaIntent: String? = null,
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
         itemType = itemType,
         direction = direction,
         scheduleStatus = scheduleStatus,
+        agendaIntent = agendaIntent,
         counterpartyRaw = null,
         counterpartyRef = counterpartyRef,
         title = "title-$id",
@@ -1248,12 +1323,14 @@ class TodayViewModelSpecTest {
                 title = commitment.title,
                 direction = commitment.direction,
                 scheduleStatus = commitment.scheduleStatus,
+                agendaIntent = commitment.agendaIntent,
                 counterpartyDisplayName = commitment.counterpartyRef?.let { ref ->
                     enrichment[ref] ?: ref
                 } ?: commitment.counterpartyRaw?.take(30),
                 sourceType = commitment.sourceType,
                 sourceRef = commitment.sourceRef,
                 sourceTitle = commitment.sourceEventTitle,
+                quote = commitment.quote,
                 dueAt = commitment.dueAt,
                 dueIsApproximate = commitment.dueIsApproximate,
                 dueHint = commitment.dueHint,

@@ -1,10 +1,12 @@
 package com.becalm.android.data.repository
 
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.OnboardingActivationPreviewRow
 import com.becalm.android.data.remote.api.RailwayApi
+import com.becalm.android.data.remote.dto.CommitmentDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
@@ -67,9 +69,11 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
+    private val personActionRepository: PersonActionRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
     private val commitmentDao: CommitmentDao,
+    private val userCorrectionRepository: UserCorrectionRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -84,6 +88,7 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
             if (normalizedUserId.isEmpty()) return@withContext OnboardingActivationPreviewResult.Failed(retryable = false)
 
             loadLocalPreview(normalizedUserId)?.let { previews ->
+                refreshActivationActions(normalizedUserId)
                 return@withContext OnboardingActivationPreviewResult.Ready(previews)
             }
 
@@ -116,6 +121,30 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
             val body = response.body()
                 ?: return@withContext OnboardingActivationPreviewResult.Failed(retryable = true)
 
+            val initialSnapshot = body.toSourceSyncJobSnapshot()
+            if (
+                !initialSnapshot.jobId.isNullOrBlank() &&
+                initialSnapshot.syncMode != ACTIVATION_PREVIEW_MODE
+            ) {
+                loadRemotePreview(api)?.let { previews ->
+                    refreshActivationActions(normalizedUserId)
+                    return@withContext OnboardingActivationPreviewResult.Ready(previews)
+                }
+                val progress = OnboardingActivationProgress(
+                    stage = initialSnapshot.stage ?: "background_sync",
+                    progress = initialSnapshot.progress ?: 0.35,
+                    message = "Gmail 자료를 백그라운드에서 정리하고 있습니다",
+                )
+                onProgress(progress)
+                processingStatusRepository.recordScanning(SourceType.GMAIL, progress.message)
+                workScheduler.enqueueSourceRelationRefresh(
+                    SourceType.GMAIL,
+                    initialDelaySeconds = FULL_SYNC_FOLLOW_UP_REFRESH_DELAY_SECONDS,
+                    resetBeforeRefresh = true,
+                )
+                return@withContext OnboardingActivationPreviewResult.Pending(progress)
+            }
+
             when (
                 val pollResult = SourceSyncJobPoller(
                     api = api,
@@ -124,7 +153,7 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
                     delayMillis = { waitMs -> delay(waitMs.coerceAtMost(FOREGROUND_MAX_WAIT_MS)) },
                 ).awaitTerminal(
                     SourceType.GMAIL,
-                    body.toSourceSyncJobSnapshot(),
+                    initialSnapshot,
                     onSnapshot = { snapshot ->
                         val progress = snapshot.toActivationProgress()
                         onProgress(progress)
@@ -142,6 +171,7 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
 	                    workScheduler.enqueueSourceRelationRefresh(
 	                        SourceType.GMAIL,
 	                        initialDelaySeconds = FULL_SYNC_FOLLOW_UP_REFRESH_DELAY_SECONDS,
+	                        resetBeforeRefresh = true,
 	                    )
 	                }
 	                is SourceSyncJobPollResult.Pending -> {
@@ -154,6 +184,7 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
 	                    workScheduler.enqueueSourceRelationRefresh(
 	                        SourceType.GMAIL,
 	                        initialDelaySeconds = FULL_SYNC_FOLLOW_UP_REFRESH_DELAY_SECONDS,
+	                        resetBeforeRefresh = true,
 	                    )
 	                    return@withContext OnboardingActivationPreviewResult.Pending(
 	                        progress,
@@ -172,6 +203,7 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
                     commitmentRepository = commitmentRepository,
                     sourceEventParticipantRepository = sourceEventParticipantRepository,
                     commitmentParticipantRepository = commitmentParticipantRepository,
+                    userCorrectionRepository = userCorrectionRepository,
                     workScheduler = workScheduler,
                     logger = logger,
                 ).refresh(
@@ -182,17 +214,37 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
                     ),
                 )
             ) {
-                is com.becalm.android.core.result.BecalmResult.Success -> Unit
-                is com.becalm.android.core.result.BecalmResult.Failure -> {
+                is BecalmResult.Success -> Unit
+                is BecalmResult.Failure -> {
                     logger.w(TAG, "gmail activation preview relation refresh failed")
                     return@withContext OnboardingActivationPreviewResult.Failed(retryable = true)
                 }
             }
 
+            val actionProgress = OnboardingActivationProgress(
+                stage = "action_scan",
+                progress = 0.92,
+                message = "찾은 약속을 다음 행동으로 정리하고 있습니다",
+            )
+            onProgress(actionProgress)
+            processingStatusRepository.recordScanning(SourceType.GMAIL, actionProgress.message)
+            refreshActivationActions(normalizedUserId)
+
             loadLocalPreview(normalizedUserId)?.let { previews ->
                 OnboardingActivationPreviewResult.Ready(previews)
-            } ?: OnboardingActivationPreviewResult.Empty
+            }
+                ?: loadRemotePreview(api)?.let { previews ->
+                    OnboardingActivationPreviewResult.Ready(previews)
+                }
+                ?: OnboardingActivationPreviewResult.Empty
         }
+
+    private suspend fun refreshActivationActions(userId: String) {
+        when (val result = personActionRepository.refresh(userId = userId, surface = null)) {
+            is BecalmResult.Success -> Unit
+            is BecalmResult.Failure -> logger.w(TAG, "gmail activation action refresh failed: ${result.error}")
+        }
+    }
 
     private suspend fun loadLocalPreview(userId: String): List<OnboardingActivationPreview>? =
         commitmentDao.findOnboardingActivationPreview(
@@ -204,11 +256,47 @@ public class OnboardingActivationPreviewRepositoryImpl @Inject constructor(
             row.toActivationPreview()
         }.takeIf { it.isNotEmpty() }
 
+    private suspend fun loadRemotePreview(api: RailwayApi): List<OnboardingActivationPreview>? {
+        val response = runCatching {
+            api.getCommitments(
+                limit = REMOTE_PREVIEW_FETCH_LIMIT,
+                sourceType = SourceType.GMAIL,
+                includeUnresolvedCounterparty = true,
+            )
+        }.getOrElse { error ->
+            logger.w(TAG, "gmail activation preview fallback fetch failed type=${error.javaClass.simpleName}")
+            return null
+        }
+        if (!response.isSuccessful) {
+            logger.w(TAG, "gmail activation preview fallback fetch HTTP ${response.code()}")
+            return null
+        }
+        return response.body()
+            ?.data
+            .orEmpty()
+            .asSequence()
+            .filter { it.sourceType == SourceType.GMAIL }
+            .filter { it.deletedAt == null }
+            .filter { it.itemType in PREVIEW_ITEM_TYPES }
+            .filter { it.actionState != "completed" }
+            .filter { it.confidence >= MIN_PREVIEW_CONFIDENCE }
+            .sortedWith(
+                compareByDescending<CommitmentDto> { it.sourceEventOccurredAt }
+                    .thenByDescending { it.createdAt },
+            )
+            .take(PREVIEW_LIMIT)
+            .map { it.toActivationPreview() }
+            .toList()
+            .takeIf { it.isNotEmpty() }
+    }
+
     private companion object {
         private const val TAG = "OnboardingActivationPreview"
         private const val ACTIVATION_PREVIEW_MODE = "activation_preview"
         private const val MIN_PREVIEW_CONFIDENCE = 0.64
-	        private const val PREVIEW_LIMIT = 2
+        private const val PREVIEW_LIMIT = 2
+        private const val REMOTE_PREVIEW_FETCH_LIMIT = 20
+        private val PREVIEW_ITEM_TYPES = setOf("action", "schedule", "decision")
 	        private const val FOREGROUND_POLL_ATTEMPTS = 10
 	        private const val FOREGROUND_MAX_WAIT_MS = 3_000L
 	        private const val FULL_SYNC_FOLLOW_UP_REFRESH_DELAY_SECONDS: Long = 45L
@@ -227,6 +315,7 @@ private fun String?.activationProgressMessage(fallback: String? = null): String 
         "queued" -> "Gmail 연결을 확인하고 있습니다"
         "fetching" -> "최근 메일을 가져오고 있습니다"
         "extracting" -> "메일 속 약속 후보를 확인하고 있습니다"
+        "retry_waiting" -> "서버 사용량 제한으로 잠시 대기 중입니다. 곧 자동으로 다시 확인합니다"
         "mirroring" -> "화면에 보여줄 자료를 준비하고 있습니다"
         "complete" -> "Gmail 확인을 마쳤습니다"
         else -> fallback ?: "Gmail 자료를 정리하고 있습니다"
@@ -251,6 +340,29 @@ private fun OnboardingActivationPreviewRow.toActivationPreview(): OnboardingActi
         dueHint = dueHint,
         sourceType = sourceType,
         sourceTitle = sourceTitle,
+        sourceEventOccurredAt = sourceEventOccurredAt,
+        confidence = confidence,
+    )
+
+private fun CommitmentDto.toActivationPreview(): OnboardingActivationPreview =
+    OnboardingActivationPreview(
+        commitmentId = id,
+        personId = null,
+        personName = null,
+        participantId = null,
+        participantName = null,
+        participantEmail = null,
+        participantPhone = null,
+        contactMatched = false,
+        title = title,
+        itemType = itemType,
+        direction = direction,
+        scheduleStatus = scheduleStatus,
+        decisionStatus = decisionStatus,
+        dueAt = dueAt,
+        dueHint = dueHint,
+        sourceType = sourceType,
+        sourceTitle = sourceEventTitle,
         sourceEventOccurredAt = sourceEventOccurredAt,
         confidence = confidence,
     )

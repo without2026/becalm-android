@@ -39,6 +39,7 @@ import com.becalm.android.domain.onboarding.FirstMemoryKind
 import com.becalm.android.domain.onboarding.FirstMemoryOrigin
 import com.becalm.android.domain.onboarding.FirstMemoryValidator
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.ui.sources.sourceConnectionTitle
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.WorkScheduler
@@ -58,6 +59,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -329,7 +331,6 @@ public data class OnboardingUiState(
     val sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
     val sourceOwnershipsLoaded: Boolean = false,
     val sourceOwnershipLoadFailed: Boolean = false,
-    val updatingSourceOwnershipId: String? = null,
     val callRecordingConnectionState: SourceConnectionState = SourceConnectionState.Idle,
     val contactsPreview: OnboardingContactsPreviewUi = OnboardingContactsPreviewUi(),
     val calendarPreview: OnboardingCalendarPreviewUi = OnboardingCalendarPreviewUi(),
@@ -414,6 +415,7 @@ public class OnboardingViewModel @Inject constructor(
     private val firstMemoryRepository: FirstMemoryRepository,
     private val onboardingActivationPreviewRepository: OnboardingActivationPreviewRepository,
     private val rawIngestionRepository: RawIngestionRepository,
+    private val sourceSyncPort: SourceSyncPort,
     private val workScheduler: WorkScheduler,
 ) : ViewModel() {
 
@@ -1067,47 +1069,6 @@ public class OnboardingViewModel @Inject constructor(
             else -> DISPLAY_NAME_SOURCE_MANUAL
         }
 
-    public fun onSetSourceConnectionOwnership(connectionId: String, ownership: String) {
-        if (ownership !in SOURCE_OWNERSHIP_VALUES) return
-        viewModelScope.launch {
-            try {
-                val userId = userPrefsStore.observeCurrentUserId().first()
-                if (userId.isNullOrBlank()) {
-                    _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_no_user)) }
-                    return@launch
-                }
-                _uiState.update { it.copy(updatingSourceOwnershipId = connectionId, error = null) }
-                when (sourceConnectionRepository.setOwnership(userId, connectionId, ownership)) {
-                    is BecalmResult.Success -> {
-                        selfIdentityRepository.refresh(userId)
-                        _uiState.update {
-                            it.copy(
-                                updatingSourceOwnershipId = null,
-                                error = null,
-                            )
-                        }
-                    }
-                    is BecalmResult.Failure -> _uiState.update {
-                        it.copy(
-                            updatingSourceOwnershipId = null,
-                            error = UiMessage.resource(R.string.settings_identity_error_update_connection),
-                        )
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.e(TAG, "failed to update source connection ownership", e)
-                _uiState.update {
-                    it.copy(
-                        updatingSourceOwnershipId = null,
-                        error = UiMessage.resource(R.string.settings_identity_error_update_connection),
-                    )
-                }
-            }
-        }
-    }
-
     /**
      * Persists the current voice-source availability and records the recording-folder step
      * result using the same public state machine as the rest of onboarding.
@@ -1438,6 +1399,9 @@ public class OnboardingViewModel @Inject constructor(
             }
             CalendarSourceRefreshResult.Pending -> {
                 logger.i(TAG, "calendar source sync still pending provider=${provider.sourceType}")
+                onMarkStepStatus(provider.step, StepStatus.COMPLETE)
+                refreshSourceStatusAfterBackendSync(provider.sourceType)
+                _calendarConnectEvents.emit(CalendarConnectEvent.Connected(provider))
             }
             CalendarSourceRefreshResult.Failed -> {
                 onMarkStepStatus(provider.step, StepStatus.NOT_STARTED)
@@ -1462,17 +1426,23 @@ public class OnboardingViewModel @Inject constructor(
     public fun onContactsPermissionResult(granted: Boolean) {
         val status = if (granted) StepStatus.GRANTED else StepStatus.DENIED
         onMarkStepStatus(OnboardingStep.CONTACTS_PERM, status)
-        if (granted) {
-            workScheduler.enqueueEnrichment()
+        viewModelScope.launch {
+            userPrefsStore.setContactsConsent(granted)
+            if (granted) {
+                workScheduler.enqueueEnrichment()
+            }
+            appRuntimeSyncCoordinator.refresh()
         }
-        appRuntimeSyncCoordinator.refresh()
         _contactsPermissionEffects.tryEmit(ContactsPermissionEffect.NavigateToSources)
     }
 
     /** Explicit graceful-skip branch for contacts permission. */
     public fun onSkipContacts() {
         onSkipStep(OnboardingStep.CONTACTS_PERM)
-        appRuntimeSyncCoordinator.refresh()
+        viewModelScope.launch {
+            userPrefsStore.setContactsConsent(false)
+            appRuntimeSyncCoordinator.refresh()
+        }
         _contactsPermissionEffects.tryEmit(ContactsPermissionEffect.NavigateToSources)
     }
 
@@ -1656,25 +1626,7 @@ public class OnboardingViewModel @Inject constructor(
                     )
                 }
             }
-            val activationResult = if (provider == EmailPipaProvider.GMAIL) {
-                val userId = userPrefsStore.observeCurrentUserId().first()
-                if (userId.isNullOrBlank()) {
-                    OnboardingActivationPreviewResult.Failed(retryable = false)
-                } else {
-                    runCatching {
-                        onboardingActivationPreviewRepository.syncGmailAndLoadPreview(
-                            userId,
-                            onProgress = { progress -> updateGmailActivationProgress(progress) },
-                        )
-                    }.getOrElse { error ->
-                        if (error is CancellationException) throw error
-                        logger.w(TAG, "gmail inline activation preview failed", error)
-                        OnboardingActivationPreviewResult.Failed(retryable = true)
-                    }
-                }
-            } else {
-                OnboardingActivationPreviewResult.Empty
-            }
+            val activationResult = syncBackendMailAfterOAuth(provider, oauthProvider)
             when (activationResult) {
                 is OnboardingActivationPreviewResult.Ready -> {
                     _uiState.update {
@@ -1761,6 +1713,36 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
+    private suspend fun syncBackendMailAfterOAuth(
+        provider: EmailPipaProvider,
+        oauthProvider: EmailOAuthProvider,
+    ): OnboardingActivationPreviewResult =
+        if (provider == EmailPipaProvider.GMAIL) {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                OnboardingActivationPreviewResult.Failed(retryable = false)
+            } else {
+                runCatching {
+                    onboardingActivationPreviewRepository.syncGmailAndLoadPreview(
+                        userId,
+                        onProgress = { progress -> updateGmailActivationProgress(progress) },
+                    )
+                }.getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    logger.w(TAG, "gmail inline activation preview failed", error)
+                    OnboardingActivationPreviewResult.Failed(retryable = true)
+                }
+            }
+        } else {
+            when (val syncResult = sourceSyncPort.requestManualSync(oauthProvider.sourceType)) {
+                is BecalmResult.Success -> OnboardingActivationPreviewResult.Empty
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "backend mail sync failed after OAuth connect sourceType=${oauthProvider.sourceType}")
+                    OnboardingActivationPreviewResult.Failed(retryable = true)
+                }
+            }
+        }
+
     private suspend fun refreshSourceStatusAfterBackendSync(sourceType: String) {
         when (sourceStatusRepository.refreshFromServer()) {
             is BecalmResult.Success -> Unit
@@ -1809,6 +1791,7 @@ public class OnboardingViewModel @Inject constructor(
                 onSaved = {
                     sourceStatusRepository.clear(sourceType)
                     appRuntimeSyncCoordinator.refresh()
+                    workScheduler.enqueueExpedited(sourceType)
                 },
             )
         }
@@ -2326,6 +2309,10 @@ public class OnboardingViewModel @Inject constructor(
     private fun hydrateContactsPreview() {
         viewModelScope.launch {
             try {
+                if (!userPrefsStore.observeContactsConsent().first()) {
+                    _uiState.update { it.copy(contactsPreview = OnboardingContactsPreviewUi()) }
+                    return@launch
+                }
                 personEnrichmentRepository.observeAll().collect { rows ->
                     val groups = rows.groupBy { row ->
                         row.sourceContactId?.takeIf { it.isNotBlank() }
@@ -2388,7 +2375,20 @@ public class OnboardingViewModel @Inject constructor(
         val userId = userPrefsStore.observeCurrentUserId().first()
         if (userId.isNullOrBlank()) return CalendarSourceRefreshResult.Failed
         _uiState.update { it.copy(calendarPreview = it.calendarPreview.copy(loading = true, failed = false)) }
-        val syncResult = calendarEventRepository.triggerServerSync()
+        val syncResult = withTimeoutOrNull(ONBOARDING_PREVIEW_TIMEOUT_MS) {
+            calendarEventRepository.triggerServerSync(
+                sourceType = sourceType,
+                mode = ONBOARDING_ACTIVATION_PREVIEW_MODE,
+            )
+        } ?: run {
+            workScheduler.enqueueSourceRelationRefresh(
+                sourceType,
+                initialDelaySeconds = PENDING_BACKEND_REFRESH_DELAY_SECONDS,
+                resetBeforeRefresh = true,
+            )
+            _uiState.update { it.copy(calendarPreview = it.calendarPreview.copy(loading = false, failed = false)) }
+            return CalendarSourceRefreshResult.Pending
+        }
         if (syncResult is BecalmResult.Failure) {
             logger.w(TAG, "calendar source sync trigger failed after OAuth connect sourceType=$sourceType")
             _uiState.update { it.copy(calendarPreview = it.calendarPreview.copy(loading = false, failed = true)) }
@@ -2401,6 +2401,7 @@ public class OnboardingViewModel @Inject constructor(
                 sourceType,
                 initialDelaySeconds = (syncResponse.retryAfterSeconds ?: PENDING_BACKEND_REFRESH_DELAY_SECONDS)
                     .coerceAtLeast(PENDING_BACKEND_REFRESH_DELAY_SECONDS),
+                resetBeforeRefresh = true,
             )
             return CalendarSourceRefreshResult.Pending
         }
@@ -2527,7 +2528,6 @@ private fun SourceConnectionEntity.toOnboardingOwnershipUi(): OnboardingSourceOw
         id = id,
         title = sourceConnectionTitle(provider = provider, capability = capability),
         accountLabel = accountDisplayName ?: accountIdentifier ?: provider,
-        ownership = ownership,
         status = status,
         provider = provider,
         capability = capability,
@@ -2554,8 +2554,6 @@ private fun SourceConnectionEntity.connectedOnboardingStep(): OnboardingStep? =
 
 private const val SOURCE_CONNECTION_STATUS_CONNECTED = "connected"
 
-private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")
-
 private val RECORDING_SOURCE_TYPES = setOf(
     SourceType.VOICE,
     SourceType.CALL_RECORDING,
@@ -2565,6 +2563,8 @@ private val RECORDING_SOURCE_TYPES = setOf(
 private const val RECORDING_GRANT_LOOKBACK_DAYS = 30
 private const val CALENDAR_PREVIEW_RANGE_MILLIS = 183L * 24L * 60L * 60L * 1000L
 private const val PENDING_BACKEND_REFRESH_DELAY_SECONDS = 45L
+private const val ONBOARDING_ACTIVATION_PREVIEW_MODE = "activation_preview"
+private const val ONBOARDING_PREVIEW_TIMEOUT_MS = 30_000L
 
 private enum class CalendarSourceRefreshResult {
     Ready,

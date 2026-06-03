@@ -19,6 +19,8 @@ import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
@@ -67,6 +69,8 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
                 ACTION_SEED_PROCESSING_STATUS_SMOKE,
                 ACTION_SEED_ACCOUNT_SWAP_SMOKE,
                 ACTION_SEED_PRIVACY_SMOKE,
+                ACTION_SEED_CORRECTION_SMOKE,
+                ACTION_REPORT_CORRECTION_SMOKE,
             )
         ) return
         val pending = goAsync()
@@ -83,6 +87,8 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
                     ACTION_SEED_PROCESSING_STATUS_SMOKE -> seedProcessingStatusSmoke()
                     ACTION_SEED_ACCOUNT_SWAP_SMOKE -> seedAccountSwapSmoke()
                     ACTION_SEED_PRIVACY_SMOKE -> seedPrivacySmoke()
+                    ACTION_SEED_CORRECTION_SMOKE -> seedCorrectionSmoke(intent)
+                    ACTION_REPORT_CORRECTION_SMOKE -> reportCorrectionSmoke(intent)
                 }
             }.onSuccess {
                 Timber.i("Debug action completed action=${intent.action}")
@@ -381,6 +387,88 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
                 commitment("qa-cmt-local-first-memory", PERSON_JIHOON, localFirstMemoryId, CommitmentItemType.DECISION, null, null, CommitmentDecisionStatus.APPROVED, "원문은 로컬에 두고 memory.md와 DB를 분리 관리", "DB를 분리해서 관리하는 건 찬성합니다", now.minusHours(3), null, null),
                 commitment("qa-cmt-history-window", PERSON_JIHOON, historyWindowId, CommitmentItemType.DECISION, null, null, CommitmentDecisionStatus.APPROVED, "사람별 interaction history를 3개월까지 확장", "3개월까지 history를 늘리는 건 문제가 전혀 안될듯", now.minusHours(2), null, null),
                 commitment("qa-cmt-old-email-import", PERSON_JIHOON, oldEmailImportId, CommitmentItemType.ACTION, "give", null, null, "이전 이메일을 가져와 사람 중심 interaction 채우기", "이전 이메일 다 긁어오자", now.minusHours(1), null, null),
+            ),
+        )
+        db.personActionDao().applyFeedSnapshot(
+            userId = USER_ID,
+            rows = listOf(
+                personAction(
+                    id = "qa-pa-youngkyung-time-followup",
+                    personId = PERSON_KIM_YOUNGKYUNG,
+                    personDisplayName = "김영경",
+                    title = "김영경 센터장님 미팅 시간을 오늘 확정",
+                    primaryVerb = "확인",
+                    shortReason = "일정 조율 캡처에서 정확한 시간을 다시 알려주기로 했습니다.",
+                    actionKind = "confirm_schedule",
+                    commitmentId = "qa-cmt-youngkyung-time-followup",
+                    sourceEventId = kimYoungkyungScheduleId,
+                    sourceRef = "raw:$kimYoungkyungScheduleId",
+                    dueAt = now.plusHours(4),
+                    dueHint = "오늘",
+                    urgencyScore = 98.0,
+                    updatedAt = now.minusHours(8),
+                ),
+                personAction(
+                    id = "qa-pa-chaerin-contact-centers",
+                    personId = PERSON_KIM_CHAERIN,
+                    personDisplayName = "김채린",
+                    title = "센터장님들께 멘토링 일정 연락",
+                    primaryVerb = "연락",
+                    shortReason = "스타트업 익스프레스 답변에서 직접 연락해 일자를 잡으라고 안내했습니다.",
+                    actionKind = "follow_up",
+                    commitmentId = "qa-cmt-startup-contact-centers",
+                    sourceEventId = startupReplyId,
+                    sourceRef = "raw:$startupReplyId",
+                    dueAt = now.plusHours(8),
+                    dueHint = "오늘",
+                    urgencyScore = 91.0,
+                    updatedAt = now.minusHours(7),
+                ),
+                personAction(
+                    id = "qa-pa-park-availability",
+                    personId = PERSON_PARK_JINKYU,
+                    personDisplayName = "박진규",
+                    title = "박진규 센터장님 가능 시간 팔로업",
+                    primaryVerb = "팔로업",
+                    shortReason = "미팅 가능 시간을 편하게 알려달라고 요청한 캡처가 아직 열려 있습니다.",
+                    actionKind = "follow_up",
+                    commitmentId = "qa-cmt-park-jinkyu-availability",
+                    sourceEventId = parkJinkyuId,
+                    sourceRef = "raw:$parkJinkyuId",
+                    dueAt = now.plusHours(12),
+                    dueHint = "오늘",
+                    urgencyScore = 86.0,
+                    updatedAt = now.minusHours(5),
+                ),
+                personAction(
+                    id = "qa-pa-jihoon-old-email",
+                    personId = PERSON_JIHOON,
+                    personDisplayName = "Jihoon Kang",
+                    title = "이전 이메일 import 범위 결정 반영",
+                    primaryVerb = "정리",
+                    shortReason = "이전 이메일을 가져와 사람 중심 interaction을 채우기로 한 결정에서 나온 실행 항목입니다.",
+                    actionKind = "do_work",
+                    commitmentId = "qa-cmt-old-email-import",
+                    sourceEventId = oldEmailImportId,
+                    sourceRef = "raw:$oldEmailImportId",
+                    dueAt = now.plusHours(24),
+                    dueHint = "내일",
+                    urgencyScore = 76.0,
+                    updatedAt = now.minusHours(1),
+                ),
+            ),
+            deletedIds = emptyList(),
+            replaceScope = true,
+            surface = "person",
+            syncState = PersonActionSyncStateEntity(
+                userId = USER_ID,
+                surfaceKey = "person",
+                status = "active",
+                serverWatermark = now,
+                recomputeState = "caught_up",
+                capacityState = "normal",
+                lastSyncedAt = now,
+                updatedAt = now,
             ),
         )
         db.personIndexDao().upsertInteractions(
@@ -877,6 +965,169 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         Timber.i("Debug privacy smoke seeded voiceConsent=true pendingVoiceRows=1")
     }
 
+    private suspend fun seedCorrectionSmoke(intent: Intent) {
+        val userId = ensureE2eSession(intent)
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
+        val db = databaseProvider.current()
+        clearCorrectionSmokeRows(db, userId)
+        sourceStatusRepository.recordSyncSuccess(SourceType.MESSAGE_SCREENSHOT, now)
+
+        db.rawIngestionEventDao().upsertSyncedFromServer(
+            listOf(
+                RawIngestionEventEntity(
+                    id = CORRECTION_SMOKE_EVENT_ID,
+                    userId = userId,
+                    clientEventId = CORRECTION_SMOKE_CLIENT_EVENT_ID,
+                    sourceType = SourceType.MESSAGE_SCREENSHOT,
+                    sourceRef = CORRECTION_SMOKE_SOURCE_REF,
+                    counterpartyRef = "QA Wrong Person",
+                    eventTitle = "QA correction smoke - wrong person",
+                    eventSnippet = "Synthetic correction smoke row. No user content.",
+                    folder = null,
+                    commitmentsExtractedCount = 0,
+                    timestamp = now.minusHours(1),
+                    syncStatus = "synced",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertPersons(
+            listOf(
+                person(CORRECTION_SMOKE_WRONG_PERSON_ID, "QA Wrong Person", null, null, now, userId = userId),
+                person(CORRECTION_SMOKE_CORRECT_PERSON_ID, "QA Correct Person", null, null, now, userId = userId),
+            ),
+        )
+        db.personIndexDao().upsertIdentities(
+            listOf(
+                identity(
+                    personId = CORRECTION_SMOKE_WRONG_PERSON_ID,
+                    type = "name",
+                    value = "QA Wrong Person",
+                    displayName = "QA Wrong Person",
+                    sourceType = SourceType.MESSAGE_SCREENSHOT,
+                    now = now,
+                    primary = true,
+                    userId = userId,
+                ),
+                identity(
+                    personId = CORRECTION_SMOKE_CORRECT_PERSON_ID,
+                    type = "name",
+                    value = "QA Correct Person",
+                    displayName = "QA Correct Person",
+                    sourceType = SourceType.MESSAGE_SCREENSHOT,
+                    now = now,
+                    primary = true,
+                    userId = userId,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = CORRECTION_SMOKE_PARTICIPANT_ID,
+                    userId = userId,
+                    sourceEventId = CORRECTION_SMOKE_EVENT_ID,
+                    sourceType = SourceType.MESSAGE_SCREENSHOT,
+                    sourceRef = "raw:$CORRECTION_SMOKE_EVENT_ID",
+                    personId = CORRECTION_SMOKE_WRONG_PERSON_ID,
+                    role = "counterparty",
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "qa wrong person",
+                    displayNameRaw = "QA Wrong Person",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "Synthetic correction smoke participant.",
+                    confidence = 1.0,
+                    resolutionStatus = "resolved",
+                    createdAt = now.minusHours(1),
+                ),
+            ),
+        )
+        db.personIndexDao().upsertInteractions(
+            listOf(
+                PersonInteractionEntity(
+                    id = CORRECTION_SMOKE_INTERACTION_ID,
+                    userId = userId,
+                    personId = CORRECTION_SMOKE_WRONG_PERSON_ID,
+                    sourceType = SourceType.MESSAGE_SCREENSHOT,
+                    sourceRef = "raw:$CORRECTION_SMOKE_EVENT_ID",
+                    interactionKind = "message",
+                    sourceEventId = CORRECTION_SMOKE_EVENT_ID,
+                    role = "counterparty",
+                    direction = null,
+                    status = null,
+                    occurredAt = now.minusHours(1),
+                    title = "QA correction smoke - wrong person",
+                    snippet = "Synthetic correction smoke row. No user content.",
+                    confidence = 1.0,
+                    createdAt = now.minusHours(1),
+                ),
+            ),
+        )
+        Timber.i(
+            "Debug correction smoke seeded userHash=${userId.shortHash()} " +
+                "eventId=$CORRECTION_SMOKE_EVENT_ID participantId=$CORRECTION_SMOKE_PARTICIPANT_ID",
+        )
+    }
+
+    private suspend fun reportCorrectionSmoke(intent: Intent) {
+        val userId = intent.getStringExtra(EXTRA_USER_ID)?.takeIf { it.isNotBlank() }
+            ?: userPrefsStore.observeCurrentUserId().first()
+            ?: error("No active userId for correction smoke report")
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
+        val db = databaseProvider.current()
+        val participantState = db.readSingleString(
+            """
+            SELECT COALESCE(resolution_status, '') || '|' || COALESCE(person_id, '')
+            FROM source_event_participants
+            WHERE user_id = ? AND id = ?
+            """.trimIndent(),
+            arrayOf(userId, CORRECTION_SMOKE_PARTICIPANT_ID),
+        ) ?: "missing"
+        val correctionCount = db.countRows(
+            "SELECT COUNT(*) FROM user_corrections WHERE user_id = ? AND target_id = ?",
+            arrayOf(userId, CORRECTION_SMOKE_PARTICIPANT_ID),
+        )
+        val pendingSyncCount = db.countRows(
+            """
+            SELECT COUNT(*) FROM user_corrections
+            WHERE user_id = ? AND target_id = ? AND sync_status = 'pending'
+            """.trimIndent(),
+            arrayOf(userId, CORRECTION_SMOKE_PARTICIPANT_ID),
+        )
+        val syncedCount = db.countRows(
+            """
+            SELECT COUNT(*) FROM user_corrections
+            WHERE user_id = ? AND target_id = ? AND sync_status = 'synced'
+            """.trimIndent(),
+            arrayOf(userId, CORRECTION_SMOKE_PARTICIPANT_ID),
+        )
+        val failedCount = db.countRows(
+            """
+            SELECT COUNT(*) FROM user_corrections
+            WHERE user_id = ? AND target_id = ? AND sync_status = 'failed'
+            """.trimIndent(),
+            arrayOf(userId, CORRECTION_SMOKE_PARTICIPANT_ID),
+        )
+        val interactionCount = db.countRows(
+            "SELECT COUNT(*) FROM person_interactions WHERE user_id = ? AND source_event_id = ?",
+            arrayOf(userId, CORRECTION_SMOKE_EVENT_ID),
+        )
+        Timber.i(
+            "Debug correction smoke report userHash=${userId.shortHash()} " +
+                "participantState=$participantState corrections=$correctionCount " +
+                "pendingSync=$pendingSyncCount synced=$syncedCount failed=$failedCount " +
+                "interactions=$interactionCount",
+        )
+    }
+
     private suspend fun seedAccountSwapPerson(
         db: BeCalmDatabase,
         userId: String,
@@ -937,7 +1188,7 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
         val db = databaseProvider.current()
         clearMirrorRowsForUser(db, userId)
-        SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+        SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
         sourceStatusRepository.recordSyncSuccess(sourceType, now)
         workScheduler.enqueueSourceRelationRefresh(sourceType, initialDelaySeconds = 0L)
         Timber.i(
@@ -1020,6 +1271,9 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         sql.execSQL("DELETE FROM person_identities WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM persons WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM raw_ingestion_events WHERE user_id = ?", args)
+        runCatching { sql.execSQL("DELETE FROM person_action_item_cache WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_action_sync_state WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_action_mutation_queue WHERE user_id = ?", args) }
         sql.execSQL("DELETE FROM persons_enrichment")
     }
 
@@ -1037,12 +1291,56 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         sql.execSQL("DELETE FROM person_identities WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM persons WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM raw_ingestion_events WHERE user_id = ?", args)
+        runCatching { sql.execSQL("DELETE FROM person_action_item_cache WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_action_sync_state WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_action_mutation_queue WHERE user_id = ?", args) }
         sql.execSQL("DELETE FROM persons_enrichment")
+    }
+
+    private fun clearCorrectionSmokeRows(db: BeCalmDatabase, userId: String) {
+        val sql = db.openHelper.writableDatabase
+        val userAndParticipant = arrayOf(userId, CORRECTION_SMOKE_PARTICIPANT_ID)
+        val userAndEvent = arrayOf(userId, CORRECTION_SMOKE_EVENT_ID)
+        sql.execSQL(
+            "DELETE FROM user_corrections WHERE user_id = ? AND target_id = ?",
+            userAndParticipant,
+        )
+        sql.execSQL(
+            "DELETE FROM source_event_participants WHERE user_id = ? AND id = ?",
+            userAndParticipant,
+        )
+        sql.execSQL(
+            "DELETE FROM person_interactions WHERE user_id = ? AND source_event_id = ?",
+            userAndEvent,
+        )
+        sql.execSQL(
+            "DELETE FROM raw_ingestion_events WHERE user_id = ? AND id = ?",
+            userAndEvent,
+        )
+        sql.execSQL(
+            "DELETE FROM person_identities WHERE user_id = ? AND person_id IN (?, ?)",
+            arrayOf(userId, CORRECTION_SMOKE_WRONG_PERSON_ID, CORRECTION_SMOKE_CORRECT_PERSON_ID),
+        )
+        sql.execSQL(
+            "DELETE FROM persons WHERE user_id = ? AND id IN (?, ?)",
+            arrayOf(userId, CORRECTION_SMOKE_WRONG_PERSON_ID, CORRECTION_SMOKE_CORRECT_PERSON_ID),
+        )
+        runCatching {
+            sql.execSQL(
+                "DELETE FROM person_index_dirty_sources WHERE user_id = ? AND source_event_id = ?",
+                userAndEvent,
+            )
+        }
     }
 
     private fun BeCalmDatabase.countRows(sql: String, args: Array<String>): Int =
         openHelper.readableDatabase.query(sql, args).use { cursor ->
             if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+
+    private fun BeCalmDatabase.readSingleString(sql: String, args: Array<String>): String? =
+        openHelper.readableDatabase.query(sql, args).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
         }
 
     private fun rawEvent(
@@ -1281,8 +1579,61 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
             confidence = 1.0,
         )
 
+    private fun personAction(
+        id: String,
+        personId: String,
+        personDisplayName: String,
+        title: String,
+        primaryVerb: String,
+        shortReason: String,
+        actionKind: String,
+        commitmentId: String,
+        sourceEventId: String,
+        sourceRef: String,
+        dueAt: Instant,
+        dueHint: String,
+        urgencyScore: Double,
+        updatedAt: Instant,
+    ): PersonActionItemCacheEntity =
+        PersonActionItemCacheEntity(
+            id = id,
+            userId = USER_ID,
+            personId = personId,
+            personDisplayName = personDisplayName,
+            personSortKey = personDisplayName.lowercase(),
+            surfacesCsv = "person,commitment",
+            actionKind = actionKind,
+            status = "active",
+            title = title,
+            primaryVerb = primaryVerb,
+            shortReason = shortReason,
+            commitmentId = commitmentId,
+            calendarEventId = null,
+            sourceEventId = sourceEventId,
+            sourceType = SourceType.MESSAGE_SCREENSHOT,
+            sourceRef = sourceRef,
+            dueAt = dueAt,
+            dueHint = dueHint,
+            dueIsApproximate = true,
+            staleAfter = dueAt.plusHours(24),
+            urgencyScore = urgencyScore,
+            importanceScore = 80.0,
+            confidence = 1.0,
+            reasonCodesCsv = "debug_source_seed,source:message_screenshot",
+            inputWatermark = updatedAt,
+            serverWatermark = updatedAt,
+            computedAt = updatedAt,
+            updatedAt = updatedAt,
+            snoozedUntil = null,
+            completedAt = null,
+            dismissedAt = null,
+        )
+
     private fun Instant.minusHours(hours: Long): Instant =
         Instant.fromEpochMilliseconds(toEpochMilliseconds() - hours * 60L * 60L * 1000L)
+
+    private fun Instant.plusHours(hours: Long): Instant =
+        Instant.fromEpochMilliseconds(toEpochMilliseconds() + hours * 60L * 60L * 1000L)
 
     private fun String.shortHash(): Int = hashCode()
 
@@ -1320,6 +1671,8 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         const val ACTION_SEED_PROCESSING_STATUS_SMOKE = "com.becalm.android.DEBUG_SEED_PROCESSING_STATUS_SMOKE"
         const val ACTION_SEED_ACCOUNT_SWAP_SMOKE = "com.becalm.android.DEBUG_SEED_ACCOUNT_SWAP_SMOKE"
         const val ACTION_SEED_PRIVACY_SMOKE = "com.becalm.android.DEBUG_SEED_PRIVACY_SMOKE"
+        const val ACTION_SEED_CORRECTION_SMOKE = "com.becalm.android.DEBUG_SEED_CORRECTION_SMOKE"
+        const val ACTION_REPORT_CORRECTION_SMOKE = "com.becalm.android.DEBUG_REPORT_CORRECTION_SMOKE"
         const val EXTRA_AUDIO_PATH = "audio_path"
         const val EXTRA_DURATION_SECONDS = "duration_seconds"
         const val EXTRA_SOURCE_TYPE = "source_type"
@@ -1330,6 +1683,13 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         const val EXTRA_REFRESH_TOKEN = "refresh_token"
         const val EXTRA_EMAIL = "email"
         const val EXTRA_EXPIRES_AT_EPOCH_MS = "expires_at_epoch_ms"
+        const val CORRECTION_SMOKE_EVENT_ID = "10000000-0000-4000-8000-000000000001"
+        const val CORRECTION_SMOKE_PARTICIPANT_ID = "10000000-0000-4000-8000-000000000002"
+        const val CORRECTION_SMOKE_WRONG_PERSON_ID = "10000000-0000-4000-8000-000000000003"
+        const val CORRECTION_SMOKE_CORRECT_PERSON_ID = "10000000-0000-4000-8000-000000000004"
+        const val CORRECTION_SMOKE_INTERACTION_ID = "10000000-0000-4000-8000-000000000005"
+        const val CORRECTION_SMOKE_CLIENT_EVENT_ID = "10000000-0000-4000-8000-000000000006"
+        const val CORRECTION_SMOKE_SOURCE_REF = "qa-correction-smoke:10000000-0000-4000-8000-000000000001"
         const val USER_ID = "00000000-0000-4000-8000-000000000001"
         const val ACCOUNT_SWAP_USER_A = "debug-account-swap-user-a"
         const val ACCOUNT_SWAP_USER_B = "debug-account-swap-user-b"

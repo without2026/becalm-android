@@ -5,6 +5,7 @@ import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import com.becalm.android.data.remote.dto.MailSyncResponse
 import com.becalm.android.data.remote.dto.SourceSyncJobResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 internal data class SourceSyncJobSnapshot(
@@ -19,6 +20,8 @@ internal data class SourceSyncJobSnapshot(
     val progress: Double? = null,
     val message: String? = null,
     val syncMode: String? = null,
+    val hasMorePages: Boolean = false,
+    val backfillComplete: Boolean? = null,
 )
 
 internal sealed interface SourceSyncJobPollResult {
@@ -29,6 +32,7 @@ internal sealed interface SourceSyncJobPollResult {
         val reasonCode: String? = null,
         val stage: String? = null,
         val progress: Double? = null,
+        val synced: Int = 0,
     ) : SourceSyncJobPollResult
     data class Failed(val message: String, val retryable: Boolean) : SourceSyncJobPollResult
 }
@@ -50,45 +54,78 @@ internal class SourceSyncJobPoller(
         }
 
         var snapshot = initial
+        var statusUnavailable = false
         onSnapshot(snapshot)
-        repeat(maxPollAttempts.coerceAtLeast(1)) { attempt ->
+        val attempts = maxPollAttempts.coerceAtLeast(1)
+        repeat(attempts) { attempt ->
             when (val terminal = snapshot.terminalResultOrNull()) {
                 null -> Unit
                 else -> return terminal
             }
 
-            if (attempt == maxPollAttempts.coerceAtLeast(1) - 1) {
-                return SourceSyncJobPollResult.Pending(
-                    message = snapshot.message ?: "Provider sync still running",
-                    retryAfterSeconds = snapshot.retryAfterSeconds,
-                    stage = snapshot.stage,
-                    progress = snapshot.progress,
-                )
+            if (attempt == attempts - 1) {
+                return if (statusUnavailable) snapshot.statusUnavailablePending() else snapshot.runningPending()
             }
 
             val waitMs = (snapshot.retryAfterSeconds ?: 1L).coerceAtLeast(0L) * 1_000L
             if (waitMs > 0L) delayMillis(waitMs)
 
-            val response = api.getSourceSyncJob(jobId)
+            val response = try {
+                api.getSourceSyncJob(jobId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                logger.w(
+                    TAG,
+                    "source sync job status temporarily unavailable sourceType=$sourceType jobId=$jobId error=${error::class.java.simpleName}",
+                    error,
+                )
+                statusUnavailable = true
+                return@repeat
+            }
             if (!response.isSuccessful) {
                 val retryable = response.code() == 404 || response.code() == 429 || response.code() in 500..599
                 logger.w(
                     TAG,
                     "source sync job poll failed sourceType=$sourceType jobId=$jobId http=${response.code()} retryable=$retryable",
                 )
-                return SourceSyncJobPollResult.Failed("HTTP ${response.code()}", retryable = retryable)
+                if (retryable) {
+                    statusUnavailable = true
+                    return@repeat
+                }
+                return SourceSyncJobPollResult.Failed("HTTP ${response.code()}", retryable = false)
             }
-            snapshot = response.body()?.toSnapshot()
-                ?: return SourceSyncJobPollResult.Failed("Empty source sync job response", retryable = true)
+            val body = response.body()
+            if (body == null) {
+                logger.w(TAG, "source sync job poll returned empty body sourceType=$sourceType jobId=$jobId")
+                statusUnavailable = true
+                return@repeat
+            }
+            snapshot = body.toSnapshot()
+            statusUnavailable = false
             onSnapshot(snapshot)
         }
-        return SourceSyncJobPollResult.Pending(
-            message = snapshot.message ?: "Provider sync still running",
-            retryAfterSeconds = snapshot.retryAfterSeconds,
-            stage = snapshot.stage,
-            progress = snapshot.progress,
-        )
+        return if (statusUnavailable) snapshot.statusUnavailablePending() else snapshot.runningPending()
     }
+
+    private fun SourceSyncJobSnapshot.runningPending(): SourceSyncJobPollResult.Pending =
+        SourceSyncJobPollResult.Pending(
+            message = message ?: "Provider sync still running",
+            retryAfterSeconds = retryAfterSeconds,
+            stage = stage,
+            progress = progress,
+            synced = synced,
+        )
+
+    private fun SourceSyncJobSnapshot.statusUnavailablePending(): SourceSyncJobPollResult.Pending =
+        SourceSyncJobPollResult.Pending(
+            message = "Source sync status is temporarily unavailable. Please retry shortly.",
+            retryAfterSeconds = retryAfterSeconds ?: 1L,
+            reasonCode = "source_sync_status_unavailable",
+            stage = stage,
+            progress = progress,
+            synced = synced,
+        )
 
     private fun SourceSyncJobSnapshot.terminalResultOrNull(): SourceSyncJobPollResult? =
         when (status?.lowercase()) {
@@ -97,18 +134,30 @@ internal class SourceSyncJobPoller(
             "pending",
             "running",
             -> null
-            "retry" -> if (errorCode == "backpressure_delayed") {
+            "retry" -> if (errorCode != null && errorCode in RETRY_WAIT_REASON_CODES) {
                 SourceSyncJobPollResult.Pending(
                     message = errorMessage ?: errorCode,
                     retryAfterSeconds = retryAfterSeconds,
                     reasonCode = errorCode,
                     stage = stage,
                     progress = progress,
+                    synced = synced,
                 )
             } else {
                 null
             }
-            "succeeded" -> SourceSyncJobPollResult.Completed(synced)
+            "succeeded" -> if (hasMorePages) {
+                SourceSyncJobPollResult.Pending(
+                    message = message ?: "Provider sync still importing older pages",
+                    retryAfterSeconds = retryAfterSeconds,
+                    reasonCode = "provider_has_more_pages",
+                    stage = stage,
+                    progress = progress,
+                    synced = synced,
+                )
+            } else {
+                SourceSyncJobPollResult.Completed(synced)
+            }
             "needs_reauth" -> SourceSyncJobPollResult.Failed(errorMessage ?: errorCode ?: "needs_reauth", retryable = false)
             "failed",
             "cancelled",
@@ -118,12 +167,17 @@ internal class SourceSyncJobPoller(
                 retryAfterSeconds = retryAfterSeconds,
                 stage = stage,
                 progress = progress,
+                synced = synced,
             )
         }
 
     private companion object {
         private const val TAG = "SourceSyncJobPoller"
         private const val DEFAULT_MAX_POLL_ATTEMPTS = 3
+        private val RETRY_WAIT_REASON_CODES = setOf(
+            "backpressure_delayed",
+            "llm_rate_limited_retrying",
+        )
     }
 }
 
@@ -140,6 +194,8 @@ internal fun MailSyncResponse.toSourceSyncJobSnapshot(): SourceSyncJobSnapshot =
         progress = progress,
         message = message,
         syncMode = syncMode,
+        hasMorePages = hasMorePages,
+        backfillComplete = backfillComplete,
     )
 
 internal fun CalendarSyncResponse.toSourceSyncJobSnapshot(): SourceSyncJobSnapshot =
@@ -155,6 +211,8 @@ internal fun CalendarSyncResponse.toSourceSyncJobSnapshot(): SourceSyncJobSnapsh
         progress = progress,
         message = message,
         syncMode = syncMode,
+        hasMorePages = hasMorePages,
+        backfillComplete = backfillComplete,
     )
 
 internal fun SourceSyncJobResponse.toSnapshot(): SourceSyncJobSnapshot =
@@ -170,4 +228,6 @@ internal fun SourceSyncJobResponse.toSnapshot(): SourceSyncJobSnapshot =
         progress = progress,
         message = message,
         syncMode = syncMode,
+        hasMorePages = hasMorePages,
+        backfillComplete = backfillComplete,
     )

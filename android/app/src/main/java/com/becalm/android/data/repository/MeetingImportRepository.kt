@@ -326,6 +326,7 @@ public class MeetingImportRepository @Inject constructor(
             actionState = "pending",
             sourceType = rawEvent.sourceType,
             sourceRef = rawEvent.sourceRef,
+            sourceEventId = rawEvent.id,
             confidence = 1.0,
             commitmentState = CommitmentLifecycleLegacy.DRAFT,
             syncStatus = STATUS_PENDING,

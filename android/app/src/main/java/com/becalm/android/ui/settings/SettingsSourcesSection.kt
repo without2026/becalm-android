@@ -5,6 +5,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -39,18 +43,21 @@ internal fun SettingsSourcesSection(
         SettingsNavigationRow(
             label = stringResource(R.string.settings_sources_label),
             onClick = onSourcesClick,
+            leadingIcon = Icons.Outlined.Settings,
             rowTestTag = "settings-sources-row",
         )
         HorizontalDivider()
         SettingsNavigationRow(
             label = stringResource(R.string.settings_processing_status_label),
             onClick = onProcessingStatusClick,
+            leadingIcon = Icons.Outlined.Sync,
             rowTestTag = "settings-processing-status-row",
         )
         HorizontalDivider()
         SettingsNavigationRow(
             label = stringResource(R.string.settings_privacy_label),
             onClick = onPrivacyClick,
+            leadingIcon = Icons.Outlined.Lock,
             rowTestTag = "settings-privacy-row",
         )
     }

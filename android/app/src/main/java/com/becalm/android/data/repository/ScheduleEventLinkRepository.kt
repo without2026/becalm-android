@@ -60,8 +60,6 @@ public interface ScheduleEventLinkRepository {
     )
 }
 
-private const val CURSOR_KEY = "schedule_event_links"
-
 @Singleton
 public class ScheduleEventLinkRepositoryImpl @Inject constructor(
     private val dao: ScheduleEventLinkDao,
@@ -91,7 +89,8 @@ public class ScheduleEventLinkRepositoryImpl @Inject constructor(
         status: String?,
     ): BecalmResult<ScheduleEventLinkRepository.RefreshStats> = withContext(ioDispatcher) {
         val useStoredCursor = since == null && status == null
-        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(CURSOR_KEY).first() else null
+        val cursorKey = MirrorCursorKeys.scheduleEventLinks(userId)
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -132,7 +131,7 @@ public class ScheduleEventLinkRepositoryImpl @Inject constructor(
             lastCursor = body.cursor
             cursor = body.cursor
             if (useStoredCursor) {
-                cursorStore.setCursor(CURSOR_KEY, body.cursor)
+                cursorStore.setCursor(cursorKey, body.cursor)
             }
         }
 

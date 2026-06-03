@@ -547,7 +547,145 @@ class MigrationTest {
         assertIndexIsNotUnique(migrated, "idx_meeting_speaker_aliases_user_raw_event")
     }
 
+    @Test
+    fun migrate34To35_createsSourceEventAnchorsAndBackfillsRawAndCommitments() {
+        helper.createDatabase(TEST_DB, 34).use { db ->
+            insertV34RawIngestionEvent(
+                db = db,
+                id = "raw-gmail-1",
+                sourceType = "gmail",
+                sourceRef = "gmail-message-1",
+                conversationRef = "gmail-thread-1",
+                title = "Gmail subject",
+                snippet = "Gmail snippet",
+            )
+            insertV34RawIngestionEvent(
+                db = db,
+                id = "raw-naver-1",
+                sourceType = "naver_imap",
+                sourceRef = "naver-message-1",
+                conversationRef = "naver-thread-1",
+                title = "Naver subject",
+                snippet = "Naver snippet",
+            )
+            insertV34Commitment(
+                db = db,
+                id = "commit-gmail-1",
+                sourceType = "gmail",
+                sourceRef = "gmail-message-1",
+                sourceEventId = "raw-gmail-1",
+                sourceTitle = "Commitment source title",
+            )
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 35, true, migration(34, 35))
+
+        val columns = queryTableColumns(migrated, "source_event_anchors")
+        assertEquals("TEXT", columns.getValue("source_event_id").type)
+        assertEquals("TEXT", columns.getValue("local_raw_event_id").type)
+        assertEquals("TEXT", columns.getValue("provider_event_id").type)
+        assertEquals("TEXT", columns.getValue("conversation_ref").type)
+        assertIndexPresent(migrated, "ux_source_event_anchors_user_source_event")
+        assertIndexIsUnique(migrated, "ux_source_event_anchors_user_source_event")
+        assertIndexPresent(migrated, "idx_source_event_anchors_user_local_raw")
+        assertIndexIsUnique(migrated, "idx_source_event_anchors_user_local_raw")
+        assertTableRowCount(migrated, "source_event_anchors", 2)
+
+        migrated.query(
+            """
+            SELECT source_origin, source_event_id, local_raw_event_id, provider_event_id,
+                   conversation_ref, source_ref, title, snippet
+            FROM source_event_anchors
+            WHERE user_id = '$USER_ID' AND source_type = 'gmail'
+            """.trimIndent(),
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("backend", cursor.getString(0))
+            assertEquals("raw-gmail-1", cursor.getString(1))
+            assertEquals("raw-gmail-1", cursor.getString(2))
+            assertEquals("gmail-message-1", cursor.getString(3))
+            assertEquals("gmail-thread-1", cursor.getString(4))
+            assertEquals("gmail-message-1", cursor.getString(5))
+            assertEquals("Commitment source title", cursor.getString(6))
+            assertEquals("Gmail snippet", cursor.getString(7))
+        }
+
+        migrated.query(
+            """
+            SELECT source_origin, source_event_id, local_raw_event_id, provider_event_id,
+                   conversation_ref, source_ref, title, snippet
+            FROM source_event_anchors
+            WHERE user_id = '$USER_ID' AND source_type = 'naver_imap'
+            """.trimIndent(),
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("android_local", cursor.getString(0))
+            assertTrue(cursor.isNull(1))
+            assertEquals("raw-naver-1", cursor.getString(2))
+            assertEquals("naver-message-1", cursor.getString(3))
+            assertEquals("naver-thread-1", cursor.getString(4))
+            assertEquals("naver-message-1", cursor.getString(5))
+            assertEquals("Naver subject", cursor.getString(6))
+            assertEquals("Naver snippet", cursor.getString(7))
+        }
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────
+
+    private fun insertV34RawIngestionEvent(
+        db: SupportSQLiteDatabase,
+        id: String,
+        sourceType: String,
+        sourceRef: String,
+        conversationRef: String,
+        title: String,
+        snippet: String,
+    ) {
+        db.execSQL(
+            """
+            INSERT INTO raw_ingestion_events (
+                id, user_id, client_event_id, source_type, source_ref,
+                counterparty_ref, event_title, event_snippet, duration_seconds, location,
+                conversation_ref, folder, commitments_extracted_count, timestamp, sync_status,
+                processing_confirmed_at, retry_count, last_attempt_at, last_error
+            ) VALUES (
+                '$id', '$USER_ID', 'client-$id', '$sourceType', '$sourceRef',
+                NULL, '$title', '$snippet', NULL, NULL,
+                '$conversationRef', 'INBOX', 0, $TS, 'synced',
+                NULL, 0, NULL, NULL
+            )
+            """.trimIndent(),
+        )
+    }
+
+    private fun insertV34Commitment(
+        db: SupportSQLiteDatabase,
+        id: String,
+        sourceType: String,
+        sourceRef: String,
+        sourceEventId: String,
+        sourceTitle: String,
+    ) {
+        db.execSQL(
+            """
+            INSERT INTO commitments (
+                id, user_id, item_type, direction, schedule_status, decision_status,
+                agenda_intent, counterparty_raw, counterparty_ref, title, description, quote,
+                source_event_title, source_event_occurred_at, due_at, due_hint, due_is_approximate,
+                action_state, source_type, source_ref, source_event_id, confidence,
+                commitment_state, sync_status, created_at, updated_at, last_edited_by,
+                last_edited_at, quote_disputed, quote_disputed_at, deleted_at, supersedes_commitment_id
+            ) VALUES (
+                '$id', '$USER_ID', 'action', 'take', NULL, NULL,
+                NULL, NULL, NULL, 'Commitment title', NULL, 'quote',
+                '$sourceTitle', $TS, NULL, NULL, 0,
+                'pending', '$sourceType', '$sourceRef', '$sourceEventId', $DEFAULT_CONFIDENCE,
+                'DRAFT', 'synced', $TS, $TS, NULL,
+                NULL, 0, NULL, NULL, NULL
+            )
+            """.trimIndent(),
+        )
+    }
 
     private fun insertV8RawIngestionEvent(
         db: SupportSQLiteDatabase,

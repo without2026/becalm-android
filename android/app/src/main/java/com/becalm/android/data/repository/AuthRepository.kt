@@ -4,7 +4,9 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.onSuccess
 import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsAttributionStore
 import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEventQueue
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
@@ -21,6 +23,7 @@ import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.worker.ContentObserverBootstrap
+import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import com.becalm.android.worker.WorkScheduler
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
@@ -163,6 +166,11 @@ public class AuthRepositoryImpl @Inject constructor(
     private val imapCredentialStore: ImapCredentialStore,
     private val oauthCredentialStore: OAuthCredentialStore,
     private val processRestarter: ProcessRestarter,
+    private val sourceStatusRepository: SourceStatusRepository,
+    private val processingStatusRepository: ProcessingStatusRepository,
+    private val runtimeBootstrap: AuthenticatedRuntimeBootstrap,
+    private val productAnalyticsEventQueue: ProductAnalyticsEventQueue,
+    private val productAnalyticsAttributionStore: ProductAnalyticsAttributionStore,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
@@ -182,6 +190,11 @@ public class AuthRepositoryImpl @Inject constructor(
         sourceArtifactRepository = sourceArtifactRepository,
         imapCredentialStore = imapCredentialStore,
         oauthCredentialStore = oauthCredentialStore,
+        sourceStatusRepository = sourceStatusRepository,
+        processingStatusRepository = processingStatusRepository,
+        runtimeBootstrap = runtimeBootstrap,
+        productAnalyticsEventQueue = productAnalyticsEventQueue,
+        productAnalyticsAttributionStore = productAnalyticsAttributionStore,
         ioDispatcher = ioDispatcher,
     )
 
@@ -316,8 +329,9 @@ public class AuthRepositoryImpl @Inject constructor(
         val steps = cleanupPlanner.buildInvalidateSessionSteps(session)
 
         // NOTE: Intentionally NOT calling databaseProvider.current().clearAllTables(),
-        // personEnrichmentRepository.deleteAll(), syncCursorStore.clearAll(), or
-        // userPrefsStore.clearAll() — those belong to the full PIPA wipe in [signOut].
+        // personEnrichmentRepository.deleteAll(), or userPrefsStore.clearAll() — those
+        // belong to the full PIPA wipe in [signOut]. Volatile cursors/status are cleared
+        // at the auth boundary because they can otherwise suppress the next account's sync.
         // The per-user DB file is preserved on disk; sign-in as the same user re-opens it.
         //
         // Also intentionally NOT closing the [BeCalmDatabaseProvider]: the

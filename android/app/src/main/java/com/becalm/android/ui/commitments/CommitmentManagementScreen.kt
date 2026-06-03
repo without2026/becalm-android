@@ -55,6 +55,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.core.util.KST
+import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CommitmentCard
 import com.becalm.android.ui.components.CommitmentWire
@@ -302,6 +305,18 @@ public fun CommitmentManagementScreenContent(
 	                                .fillMaxSize()
 	                                .testTag("commitment-list"),
 	                        ) {
+                                if (state.topActions.isNotEmpty()) {
+                                    item(key = "commitment-action-panel") {
+                                        CommitmentActionPanel(
+                                            actions = state.topActions,
+                                            onOpenDetail = onOpenDetail,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(bottom = 12.dp),
+                                        )
+                                    }
+                                }
+
 	                            commitmentBucketSection(
 	                                sectionKey = "confirmed",
 	                                title = confirmedHeader,
@@ -409,6 +424,128 @@ public fun CommitmentManagementScreenContent(
  * is the closest built-in (~10 s), so the call-site races it against this timeout.
  */
 private const val UNDO_WINDOW_MS: Long = 5_000L
+
+@Composable
+private fun CommitmentActionPanel(
+    actions: List<PersonActionItemUi>,
+    onOpenDetail: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    EvidenceCard(
+        modifier = modifier.testTag("commitment-action-panel"),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.commitment_action_feed_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = actions.size.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            actions.forEach { action ->
+                CommitmentActionRow(
+                    action = action,
+                    onOpenDetail = onOpenDetail,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommitmentActionRow(
+    action: PersonActionItemUi,
+    onOpenDetail: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val commitmentId = action.commitmentId
+    val rowModifier = if (commitmentId == null) {
+        modifier
+    } else {
+        modifier.clickable { onOpenDetail(commitmentId) }
+    }
+    Column(
+        modifier = rowModifier
+            .fillMaxWidth()
+            .testTag("commitment-action-${action.id}"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            action.personDisplayName?.takeIf { it.isNotBlank() }?.let { displayName ->
+                CommitmentActionMetaPill(text = displayName)
+            }
+            action.sourceType?.let { sourceType ->
+                CommitmentActionMetaPill(text = stringResource(sourcePresentationFor(sourceType).labelRes))
+            }
+        }
+        Text(
+            text = action.title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = action.shortReason,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        action.evidence?.quote?.takeIf { it.isNotBlank() }?.let { quote ->
+            Text(
+                text = stringResource(R.string.schedule_row_quote_fmt, quote),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        BecalmButton(
+            text = action.primaryVerb,
+            onClick = {
+                if (commitmentId != null) {
+                    onOpenDetail(commitmentId)
+                }
+            },
+            enabled = commitmentId != null,
+            modifier = Modifier.align(Alignment.End),
+            variant = BecalmButtonVariant.Secondary,
+        )
+    }
+}
+
+@Composable
+private fun CommitmentActionMetaPill(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        modifier = modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
 
 @Composable
 private fun ScheduleTimelineList(

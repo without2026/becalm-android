@@ -197,7 +197,8 @@ public data class RawIngestionEventEntity(
      * - "failed"            — upload exhausted max retries; event quarantined.
      * - "awaiting_consent"  — device-owned extraction sources. pipa_third_party_consent=false at worker
      *                         run time; upload blocked until consent is granted (VOI-004).
-     *                         Transitions to "pending" when [com.becalm.android.data.local.db.dao.RawIngestionEventDao.releaseAwaitingConsentVoiceAndReturnIds] is called.
+     *                         Transitions to "pending" only after consent and per-file
+     *                         processing confirmation are both present.
      * - "detected_pending_confirmation" — local audio file was discovered, but the user has
      *                         not approved CLOVA/STT processing for that file.
      * - "skipped_by_user"    — user dismissed a detected local audio file without processing it.

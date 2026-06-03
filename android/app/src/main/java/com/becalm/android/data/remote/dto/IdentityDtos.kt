@@ -137,13 +137,6 @@ public data class SourceConnectionsResponseDto(
 )
 
 @JsonClass(generateAdapter = true)
-public data class SourceConnectionPatchRequestDto(
-    @field:Json(name = "ownership") val ownership: String? = null,
-    @field:Json(name = "status") val status: String? = null,
-    @field:Json(name = "linked_self_anchor_id") val linkedSelfAnchorId: String? = null,
-)
-
-@JsonClass(generateAdapter = true)
 public data class SourceConnectionResponseDto(
     @field:Json(name = "data") val data: SourceConnectionDto,
 )

@@ -5,6 +5,7 @@ import com.becalm.android.R
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
@@ -13,6 +14,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.ui.persons.ARG_PERSON_ID
 import com.becalm.android.ui.persons.PersonDetailViewModel
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +41,7 @@ class PersonDetailViewModelSpecTest {
     private val testDispatcher = StandardTestDispatcher()
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk()
     private val personIndexDao: PersonIndexDao = mockk()
+    private val rawIngestionEventDao: RawIngestionEventDao = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
 
@@ -49,6 +52,8 @@ class PersonDetailViewModelSpecTest {
         every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
         every { personIndexDao.observeIdentitiesForPerson(any(), any()) } returns flowOf(emptyList())
         every { personIndexDao.observeInteractionsForPerson(any(), any(), any()) } returns flowOf(emptyList())
+        coEvery { rawIngestionEventDao.findByIdsForUser(any(), any()) } returns emptyList()
+        coEvery { rawIngestionEventDao.findBySourceRefsForUser(any(), any()) } returns emptyList()
     }
 
     @After
@@ -358,7 +363,7 @@ class PersonDetailViewModelSpecTest {
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
-        assertEquals(personId, state.displayName)
+        assertEquals("아직 이름을 모르는 연락처", state.displayName)
         assertTrue(state.sourceEventCards.isEmpty())
     }
 
@@ -432,6 +437,7 @@ class PersonDetailViewModelSpecTest {
         PersonDetailViewModel(
             personEnrichmentRepository = personEnrichmentRepository,
             personIndexDao = personIndexDao,
+            rawIngestionEventDao = rawIngestionEventDao,
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
             logger = logger,

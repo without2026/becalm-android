@@ -4,6 +4,7 @@ import com.becalm.android.data.remote.dto.FOLDER_INBOX
 import com.becalm.android.data.remote.dto.FOLDER_SENT
 import com.becalm.android.data.remote.imap.ImapMessage
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.UUID
 
 /**
@@ -38,6 +39,23 @@ internal fun canonicalizeMessageId(raw: String?): String? {
         .takeIf { it.isNotBlank() }
 }
 
+private val messageIdTokenPattern: Regex = Regex("<([^<>\\s]+)>")
+
+internal fun canonicalizeMessageIds(raw: String?): List<String> {
+    val trimmed = raw?.trim()?.takeIf { it.isNotBlank() } ?: return emptyList()
+    val angleBracketTokens = messageIdTokenPattern.findAll(trimmed)
+        .mapNotNull { match -> canonicalizeMessageId(match.groupValues.getOrNull(1)) }
+        .toList()
+    if (angleBracketTokens.isNotEmpty()) {
+        return angleBracketTokens.distinct()
+    }
+    return trimmed
+        .split(Regex("\\s+"))
+        .mapNotNull(::canonicalizeMessageId)
+        .filter { it.isNotBlank() }
+        .distinct()
+}
+
 internal fun imapProviderMessageId(
     messageId: String?,
     uidValidity: Long,
@@ -46,9 +64,21 @@ internal fun imapProviderMessageId(
 
 internal fun imapClientEventId(
     provider: String,
+    accountIdentifier: String,
     folder: String,
     providerMessageId: String,
-): String = stableClientEventId("$provider:${folder.lowercase()}:message:$providerMessageId")
+): String = stableClientEventId(
+    "$provider:${accountIdentifier.trim().lowercase()}:${folder.lowercase()}:message:$providerMessageId",
+)
+
+internal fun imapSourceAccountKeyHash(
+    userId: String,
+    provider: String,
+    accountIdentifier: String,
+): String? {
+    val normalizedAccount = accountIdentifier.trim().lowercase().takeIf { it.isNotBlank() } ?: return null
+    return sha256Hex("imap:$userId:${provider.trim().lowercase()}:$normalizedAccount")
+}
 
 internal fun legacyImapClientEventId(
     provider: String,
@@ -60,12 +90,29 @@ internal fun legacyImapClientEventId(
 internal fun stableClientEventId(sourceKey: String): String =
     UUID.nameUUIDFromBytes(sourceKey.toByteArray(StandardCharsets.UTF_8)).toString()
 
+private fun sha256Hex(value: String): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(StandardCharsets.UTF_8))
+        .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+
 internal fun ImapMessage.providerMessageId(): String =
     imapProviderMessageId(messageId = messageId, uidValidity = uidValidity, uid = uid)
+
+internal fun ImapMessage.conversationRef(): String {
+    val inReplyToMessageId = canonicalizeMessageIds(inReplyTo).firstOrNull()
+    val referenceRootMessageId = canonicalizeMessageIds(references).firstOrNull()
+    return when {
+        inReplyToMessageId != null && referenceRootMessageId != null -> referenceRootMessageId
+        inReplyToMessageId != null -> inReplyToMessageId
+        referenceRootMessageId != null -> referenceRootMessageId
+        else -> providerMessageId()
+    }
+}
 
 internal fun ImapMessage.stableImapClientEventId(provider: String, folder: String): String =
     imapClientEventId(
         provider = provider,
+        accountIdentifier = "legacy",
         folder = folder,
         providerMessageId = providerMessageId(),
     )

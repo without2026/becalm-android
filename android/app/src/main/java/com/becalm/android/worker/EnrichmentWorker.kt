@@ -10,6 +10,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
@@ -18,6 +19,7 @@ import com.becalm.android.domain.person.PersonIdentityResolver
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -66,6 +68,7 @@ public class EnrichmentWorker @AssistedInject constructor(
     private val authRepositoryProvider: Provider<AuthRepository>,
     private val personEnrichmentRepositoryProvider: Provider<PersonEnrichmentRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+    private val userPrefsStore: UserPrefsStore,
     private val processingPauseGate: ProcessingPauseGate,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
@@ -78,6 +81,7 @@ public class EnrichmentWorker @AssistedInject constructor(
         authRepository: AuthRepository,
         personEnrichmentRepositoryProvider: Provider<PersonEnrichmentRepository>,
         sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+        userPrefsStore: UserPrefsStore,
         processingPauseGate: ProcessingPauseGate,
         workScheduler: WorkScheduler,
         logger: Logger,
@@ -88,6 +92,7 @@ public class EnrichmentWorker @AssistedInject constructor(
         authRepositoryProvider = Provider { authRepository },
         personEnrichmentRepositoryProvider = personEnrichmentRepositoryProvider,
         sourceStatusRepositoryProvider = sourceStatusRepositoryProvider,
+        userPrefsStore = userPrefsStore,
         processingPauseGate = processingPauseGate,
         workScheduler = workScheduler,
         logger = logger,
@@ -115,6 +120,10 @@ public class EnrichmentWorker @AssistedInject constructor(
 
         if (!permissionGranted) {
             logger.w(TAG, "doWork aborted — READ_CONTACTS permission not granted")
+            return@withContext Result.failure()
+        }
+        if (!userPrefsStore.observeContactsConsent().first()) {
+            logger.w(TAG, "doWork aborted — contacts consent not granted for current user")
             return@withContext Result.failure()
         }
 

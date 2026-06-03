@@ -7,6 +7,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
@@ -101,6 +103,7 @@ public class SourcesListViewModel @Inject constructor(
     private val processingStatusRepository: ProcessingStatusRepository,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val contactsPermissionChecker: ContactsPermissionChecker,
+    private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -124,12 +127,14 @@ public class SourcesListViewModel @Inject constructor(
                 processingStatusRepository.observeAll(),
                 personEnrichmentRepository.observeSummary(),
                 contactsPermissionChecker.observeGrantState(),
-            ) { statuses, processingStates, enrichmentSummary, permissionGranted ->
+                userPrefsStore.observeContactsConsent(),
+            ) { statuses, processingStates, enrichmentSummary, permissionGranted, contactsConsented ->
                 SourcesListProjector.buildState(
                     statuses = statuses,
                     processingStates = processingStates,
                     enrichmentSummary = enrichmentSummary,
                     permissionGranted = permissionGranted,
+                    contactsConsented = contactsConsented,
                 )
             }
         }
@@ -154,11 +159,14 @@ public class SourcesListViewModel @Inject constructor(
      * sync-backed sources, so its branch is surfaced here rather than hard-coded in Compose.
      */
     public fun onSourceSelected(sourceType: String) {
-        val target = SourcesListNavigationResolver.resolve(
-            sourceType = sourceType,
-            contactsPermissionGranted = contactsPermissionChecker.isGranted(),
-        )
-        _navigation.tryEmit(target)
+        viewModelScope.launch {
+            val target = SourcesListNavigationResolver.resolve(
+                sourceType = sourceType,
+                contactsPermissionGranted = contactsPermissionChecker.isGranted(),
+                contactsConsented = userPrefsStore.observeContactsConsent().first(),
+            )
+            _navigation.tryEmit(target)
+        }
     }
 
     /** Refreshes server-authoritative source state when the list becomes visible again. */

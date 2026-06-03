@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.settings
 
 import app.cash.turbine.test
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
@@ -12,7 +13,9 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.settings.ProcessingStatusRecoveryActionType
 import com.becalm.android.ui.settings.ProcessingStatusViewModel
+import com.becalm.android.ui.sources.SourceSyncPort
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -37,12 +40,14 @@ class ProcessingStatusViewModelSpecTest {
     private val sourceStatusRepository: SourceStatusRepository = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
     private val audioProcessingConfirmationRepository: AudioProcessingConfirmationRepository = mockk(relaxed = true)
+    private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
     private val authRepository: AuthRepository = mockk()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         coEvery { authRepository.currentSession() } returns session()
+        coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
         every { rawIngestionRepository.observeActiveProcessingItems("user-1", any()) } returns MutableStateFlow(emptyList())
     }
 
@@ -81,6 +86,7 @@ class ProcessingStatusViewModelSpecTest {
             sourceStatusRepository = sourceStatusRepository,
             rawIngestionRepository = rawIngestionRepository,
             audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
+            sourceSyncPort = sourceSyncPort,
             authRepository = authRepository,
         )
 
@@ -112,6 +118,7 @@ class ProcessingStatusViewModelSpecTest {
             sourceStatusRepository = sourceStatusRepository,
             rawIngestionRepository = rawIngestionRepository,
             audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
+            sourceSyncPort = sourceSyncPort,
             authRepository = authRepository,
         )
 
@@ -120,6 +127,81 @@ class ProcessingStatusViewModelSpecTest {
 
             assertEquals(SourceType.MESSAGE_SCREENSHOT, row.sourceType)
             assertFalse(row.opensSourceDetail)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `retryable source error row exposes direct retry action`() = runTest {
+        every { processingStatusRepository.observeAll() } returns MutableStateFlow(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.GMAIL,
+                    phase = ProcessingPhase.ERROR,
+                    message = "Network error",
+                    updatedAt = Instant.fromEpochMilliseconds(5_000),
+                ),
+            ),
+        )
+        every { sourceStatusRepository.observeSources() } returns MutableStateFlow(
+            mapOf(SourceType.GMAIL to status(SourceType.GMAIL, SourceConnectionStatus.CONNECTED)),
+        )
+
+        val viewModel = ProcessingStatusViewModel(
+            processingStatusRepository = processingStatusRepository,
+            sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepository = rawIngestionRepository,
+            audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
+            sourceSyncPort = sourceSyncPort,
+            authRepository = authRepository,
+        )
+
+        viewModel.state.test {
+            val row = awaitItem().rows.single()
+
+            assertEquals(ProcessingStatusRecoveryActionType.RETRY_SOURCE_SYNC, row.recoveryAction?.type)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `server source error is promoted to action-needed row when local processing is idle`() = runTest {
+        every { processingStatusRepository.observeAll() } returns MutableStateFlow(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.GMAIL,
+                    phase = ProcessingPhase.IDLE,
+                    updatedAt = Instant.fromEpochMilliseconds(5_000),
+                ),
+            ),
+        )
+        every { sourceStatusRepository.observeSources() } returns MutableStateFlow(
+            mapOf(
+                SourceType.GMAIL to SourceStatus(
+                    sourceType = SourceType.GMAIL,
+                    status = SourceConnectionStatus.ERROR,
+                    lastSyncedAt = null,
+                    errorMessage = "provider_sync_failed",
+                ),
+            ),
+        )
+
+        val viewModel = ProcessingStatusViewModel(
+            processingStatusRepository = processingStatusRepository,
+            sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepository = rawIngestionRepository,
+            audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
+            sourceSyncPort = sourceSyncPort,
+            authRepository = authRepository,
+        )
+
+        viewModel.state.test {
+            val row = awaitItem().rows.single()
+
+            assertEquals(SourceType.GMAIL, row.sourceType)
+            assertEquals(ProcessingPhase.ERROR, row.phase)
+            assertEquals("provider_sync_failed", row.message)
+            assertEquals(ProcessingStatusRecoveryActionType.RETRY_SOURCE_SYNC, row.recoveryAction?.type)
             cancelAndIgnoreRemainingEvents()
         }
     }

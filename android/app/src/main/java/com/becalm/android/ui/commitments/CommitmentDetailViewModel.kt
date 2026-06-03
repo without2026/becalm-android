@@ -50,6 +50,8 @@ public enum class CommitmentSheetAction {
 public data class CommitmentDetailActionState(
     val availableActions: Set<CommitmentSheetAction> = emptySet(),
     val editEnabled: Boolean = false,
+    val reminderToggleVisible: Boolean = false,
+    val reminderEnabled: Boolean = false,
 )
 
 public data class CommitmentSourcePresentation(
@@ -222,7 +224,8 @@ public class CommitmentDetailViewModel @Inject constructor(
                         combine(
                             commitmentRepository.observeByIdForUser(userId, id),
                             personEnrichmentRepository.observeEnrichmentMap(),
-                        ) { entity, enrichment ->
+                            userPrefsStore.observeDisabledCommitmentReminderIds(),
+                        ) { entity, enrichment, disabledReminderIds ->
                             if (entity == null) {
                                 CommitmentDetailProjector.buildMissingState()
                             } else {
@@ -230,6 +233,7 @@ public class CommitmentDetailViewModel @Inject constructor(
                                     entity = entity,
                                     enrichment = enrichment,
                                     meetingTranscript = loadMeetingTranscript(userId, entity),
+                                    disabledReminderIds = disabledReminderIds,
                                 )
                             }
                         }
@@ -254,9 +258,16 @@ public class CommitmentDetailViewModel @Inject constructor(
         entity: CommitmentEntity,
     ): MeetingTranscriptPresentation? {
         if (entity.sourceType != SourceType.MEETING || entity.itemType != CommitmentItemType.SCHEDULE) return null
-        val sourceRef = entity.sourceRef ?: return null
-        val rawEvent = rawIngestionEventDao.findBySourceRefsForUser(userId, listOf(sourceRef))
-            .firstOrNull { it.sourceType == SourceType.MEETING }
+        val rawEvent = entity.sourceEventId
+            ?.takeIf { it.isNotBlank() }
+            ?.let { rawIngestionEventDao.findById(it, userId) }
+            ?.takeIf { it.sourceType == SourceType.MEETING }
+            ?: entity.sourceRef
+                ?.takeIf { it.isNotBlank() }
+                ?.let { sourceRef ->
+                    rawIngestionEventDao.findBySourceRefsForUser(userId, listOf(sourceRef))
+                        .firstOrNull { it.sourceType == SourceType.MEETING }
+                }
             ?: return null
         val archived = sourceArtifactRepository.findMarkdownOriginal(userId, rawEvent.id) ?: return null
         val markdown = archived.markdown?.takeIf { it.isNotBlank() } ?: return null

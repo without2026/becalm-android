@@ -1,44 +1,29 @@
 package com.becalm.android.unit.ui.sources
 
-import android.content.Context
 import android.content.Intent
-import android.provider.DocumentsContract
-import com.becalm.android.ui.sources.MeetingOpenDocumentContract
 import com.becalm.android.ui.sources.MeetingOpenDocumentRequest
+import com.becalm.android.ui.sources.toOpenDocumentIntentConfig
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [30])
 class MeetingOpenDocumentContractSpecTest {
-    private val context: Context = androidx.test.core.app.ApplicationProvider.getApplicationContext()
-
     @Test
     fun `MTG-001 audio picker is open document with no SAF folder preselection and mime allowlist`() {
-        val intent = MeetingOpenDocumentContract().createIntent(
-            context,
-            MeetingOpenDocumentRequest(
+        val config = MeetingOpenDocumentRequest(
                 mimeTypes = arrayOf("audio/m4a", "audio/mpeg"),
-            ),
-        )
+            )
+            .toOpenDocumentIntentConfig()
 
-        assertEquals(Intent.ACTION_OPEN_DOCUMENT, intent.action)
-        assertEquals("*/*", intent.type)
-        assertTrue(intent.categories?.contains(Intent.CATEGORY_OPENABLE) == true)
+        assertEquals(Intent.ACTION_OPEN_DOCUMENT, config.action)
+        assertEquals("*/*", config.type)
+        assertEquals(Intent.CATEGORY_OPENABLE, config.category)
         assertArrayEquals(
             arrayOf("audio/m4a", "audio/mpeg"),
-            intent.getStringArrayExtra(Intent.EXTRA_MIME_TYPES),
+            config.mimeTypes,
         )
-        assertFalse(intent.hasExtra(DocumentsContract.EXTRA_INITIAL_URI))
-        assertFalse(
-            intent.flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION ==
-                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
-        )
+        assertFalse(config.includesInitialUri)
+        assertFalse(config.grantsPersistableUriPermission)
     }
 }

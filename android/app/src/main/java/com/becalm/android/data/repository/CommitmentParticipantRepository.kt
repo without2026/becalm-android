@@ -38,8 +38,6 @@ public interface CommitmentParticipantRepository {
     )
 }
 
-private const val CURSOR_KEY = "commitment_participants"
-
 @Singleton
 public class CommitmentParticipantRepositoryImpl @Inject constructor(
     private val personIndexDao: PersonIndexDao,
@@ -70,7 +68,8 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
         commitmentId: String?,
     ): BecalmResult<CommitmentParticipantRepository.RefreshStats> = withContext(ioDispatcher) {
         val useStoredCursor = since == null && personId == null && commitmentId == null
-        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(CURSOR_KEY).first() else null
+        val cursorKey = MirrorCursorKeys.commitmentParticipants(userId)
+        var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
         val startedFromScratch = useStoredCursor && cursor == null
         var totalFetched = 0
         var totalUpserted = 0
@@ -125,7 +124,7 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
             lastCursor = body.cursor
             cursor = body.cursor
             if (useStoredCursor) {
-                cursorStore.setCursor(CURSOR_KEY, body.cursor)
+                cursorStore.setCursor(cursorKey, body.cursor)
             }
         }
         if (startedFromScratch && !lastHasMore) {

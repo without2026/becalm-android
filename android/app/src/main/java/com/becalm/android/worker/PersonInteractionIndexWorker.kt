@@ -649,7 +649,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         }
 
         private fun CommitmentEntity.sourceEventIdForInteraction(): String? =
-            sourceRef?.trim()
+            sourceEventId?.trim()?.takeIf { it.isNotBlank() }
+                ?: sourceRef?.trim()
                 ?.takeIf { it.startsWith("raw:") }
                 ?.removePrefix("raw:")
                 ?.takeIf { it.isNotBlank() }
@@ -691,7 +692,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         val commitmentsById = commitments.associateBy { it.id }
         return commitmentParticipants.mapNotNull { participant ->
             val commitment = commitmentsById[participant.commitmentId] ?: return@mapNotNull null
-            val sourceEventId = commitment.sourceRef
+            val sourceEventId = commitment.sourceEventId?.trim()?.takeIf { it.isNotBlank() }
+                ?: commitment.sourceRef
                 ?.let { rawBySourceRef[commitment.sourceType to it]?.id }
                 ?: commitment.sourceRef
                     ?.trim()
@@ -756,19 +758,27 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             ): LearnedIdentityRules {
                 val personRules = linkedMapOf<String, LearnedPersonIdentityRule>()
                 identities.asSequence()
-                    .filter { it.userId == userId && it.identityType in AUTO_PERSON_IDENTITY_TYPES }
-                    .forEach { identity ->
+                    .filter {
+                        it.userId == userId &&
+                            it.verified &&
+                            it.identityType in AUTO_PERSON_IDENTITY_TYPES
+                    }
+                    .mapNotNull { identity ->
                         val normalized = normalizeIdentityForRule(identity.identityType, identity.normalizedValue)
-                            ?: return@forEach
+                            ?: return@mapNotNull null
                         val key = identityRuleKey(identity.identityType, normalized)
-                        val previous = personRules[key]
-                        if (previous == null || identity.confidence > previous.confidence) {
-                            personRules[key] = LearnedPersonIdentityRule(
+                        key to LearnedPersonIdentityRule(
                                 personId = identity.personId,
                                 identityType = identity.identityType,
                                 normalizedValue = normalized,
                                 confidence = identity.confidence,
                             )
+                    }
+                    .groupBy({ it.first }, { it.second })
+                    .forEach { (key, rules) ->
+                        val distinctPersonRules = rules.distinctBy { it.personId }
+                        if (distinctPersonRules.size == 1) {
+                            personRules[key] = distinctPersonRules.maxBy { it.confidence }
                         }
                     }
 

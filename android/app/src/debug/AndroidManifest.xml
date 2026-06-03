@@ -29,6 +29,8 @@
                 <action android:name="com.becalm.android.DEBUG_SEED_PROCESSING_STATUS_SMOKE" />
                 <action android:name="com.becalm.android.DEBUG_SEED_ACCOUNT_SWAP_SMOKE" />
                 <action android:name="com.becalm.android.DEBUG_SEED_PRIVACY_SMOKE" />
+                <action android:name="com.becalm.android.DEBUG_SEED_CORRECTION_SMOKE" />
+                <action android:name="com.becalm.android.DEBUG_REPORT_CORRECTION_SMOKE" />
             </intent-filter>
         </receiver>
 

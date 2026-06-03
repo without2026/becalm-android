@@ -6,8 +6,13 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.NoopSyncCursorStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.db.dao.NoopSourceEventAnchorDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.dao.SourceEventAnchorDao
+import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorOrigin
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
+import com.becalm.android.data.local.db.entity.stableSourceEventAnchorId
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceEventParticipantDto
 import com.becalm.android.domain.person.PersonIdentityResolver
@@ -41,6 +46,7 @@ public interface SourceEventParticipantRepository {
 @Singleton
 public class SourceEventParticipantRepositoryImpl @Inject constructor(
     private val personIndexDao: PersonIndexDao,
+    private val sourceEventAnchorDao: SourceEventAnchorDao = NoopSourceEventAnchorDao,
     private val apiProvider: Provider<RailwayApi>,
     private val cursorStore: SyncCursorStore,
     private val logger: Logger,
@@ -56,6 +62,7 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
         logger: Logger,
     ) : this(
         personIndexDao = personIndexDao,
+        sourceEventAnchorDao = NoopSourceEventAnchorDao,
         apiProvider = Provider { api },
         cursorStore = NoopSyncCursorStore,
         logger = logger,
@@ -66,7 +73,7 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
         sourceType: String?,
         since: Instant?,
     ): BecalmResult<SourceEventParticipantRepository.RefreshStats> = withContext(ioDispatcher) {
-        val cursorKey = sourceParticipantCursorKey(sourceType)
+        val cursorKey = MirrorCursorKeys.sourceEventParticipants(userId, sourceType)
         val useStoredCursor = since == null
         var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
         var totalFetched = 0
@@ -102,6 +109,7 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
                     BecalmError.Unknown(IllegalStateException("null body on page $pageIndex")),
                 )
             val participants = body.data.map { it.toEntity(userId) }
+            val anchors = body.data.mapNotNull { it.toSourceEventAnchorEntity(userId) }
             val mergedParticipants = if (participants.isEmpty()) {
                 emptyList()
             } else {
@@ -111,6 +119,9 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
                 )
                 participants.mergeWithLocalUserDecisions(existing)
             }.coalesceSourceEventParticipantPersons()
+            if (anchors.isNotEmpty()) {
+                sourceEventAnchorDao.upsertAll(anchors)
+            }
             if (mergedParticipants.isNotEmpty()) {
                 val incomingPersons = mergedParticipants.mapNotNull { it.toPersonEntityOrNull() }
                 val existingPersons = incomingPersons
@@ -185,6 +196,45 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
             resolutionStatus = resolutionStatus,
             createdAt = createdAt,
         )
+
+    private fun SourceEventParticipantDto.toSourceEventAnchorEntity(userId: String): SourceEventAnchorEntity? {
+        val now = Clock.System.now()
+        val normalizedSourceEventId = sourceEventId.trim().takeIf { it.isNotEmpty() }
+        val normalizedSourceRef = sourceRef?.trim()?.takeIf { it.isNotEmpty() }
+        val hasSourceBrief = !sourceConnectionId.isNullOrBlank() ||
+            !providerEventId.isNullOrBlank() ||
+            !conversationRef.isNullOrBlank() ||
+            !sourceEventTitle.isNullOrBlank() ||
+            !sourceEventSnippet.isNullOrBlank() ||
+            sourceEventOccurredAt != null
+        if (normalizedSourceEventId == null && normalizedSourceRef == null && providerEventId.isNullOrBlank()) return null
+        if (!hasSourceBrief) return null
+        return SourceEventAnchorEntity(
+            id = stableSourceEventAnchorId(
+                userId = userId,
+                sourceType = sourceType,
+                sourceEventId = normalizedSourceEventId,
+                localRawEventId = null,
+                sourceRef = normalizedSourceRef,
+                providerEventId = providerEventId,
+            ),
+            userId = userId,
+            sourceType = sourceType,
+            sourceOrigin = SourceEventAnchorOrigin.BACKEND,
+            sourceEventId = normalizedSourceEventId,
+            localRawEventId = null,
+            sourceConnectionId = sourceConnectionId,
+            sourceAccountKey = null,
+            providerEventId = providerEventId,
+            conversationRef = conversationRef,
+            sourceRef = normalizedSourceRef,
+            title = sourceEventTitle,
+            snippet = sourceEventSnippet,
+            occurredAt = sourceEventOccurredAt,
+            createdAt = createdAt,
+            updatedAt = now,
+        )
+    }
 
     private fun List<SourceEventParticipantEntity>.mergeWithLocalUserDecisions(
         existing: List<SourceEventParticipantEntity>,
@@ -297,5 +347,3 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
         private const val REFRESH_PAGE_CAP = 10
     }
 }
-
-private fun sourceParticipantCursorKey(sourceType: String?): String = "source_event_participants:${sourceType ?: "all"}"

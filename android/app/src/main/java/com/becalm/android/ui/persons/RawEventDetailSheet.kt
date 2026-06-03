@@ -17,12 +17,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
@@ -41,12 +48,17 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmSheetSkeleton
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
+import com.becalm.android.ui.components.BecalmTextField
+import com.becalm.android.ui.components.ContactRow
 import com.becalm.android.ui.components.EMAIL_SOURCE_TYPES
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.EventTitleText
 import com.becalm.android.ui.components.EvidenceCard
+import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.IngestionTimestamp
 import com.becalm.android.ui.components.isTakeDirection
 import com.becalm.android.ui.components.uiMessageStringResource
@@ -81,9 +93,13 @@ public fun RawEventDetailSheet(
     viewModel: RawEventDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val message = state.message?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(message, snackbarHostState, viewModel::onMessageShown)
 
     BecalmScaffold(
         title = stringResource(R.string.raw_event_detail_title),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         navigationIcon = {
             IconButton(onClick = { navController.popBackStack() }) {
                 Icon(
@@ -106,6 +122,8 @@ public fun RawEventDetailSheet(
             }
             state.sourceType != null -> RawEventDetailContent(
                 state = state,
+                onParticipantReassign = viewModel::onParticipantReassign,
+                onParticipantIgnore = viewModel::onParticipantIgnore,
                 modifier = Modifier.padding(padding),
             )
             else -> {
@@ -122,6 +140,8 @@ public fun RawEventDetailSheet(
 internal fun RawEventDetailContent(
     state: RawEventDetailUiState,
     modifier: Modifier = Modifier,
+    onParticipantReassign: (String, String) -> Unit = { _, _ -> },
+    onParticipantIgnore: (String) -> Unit = {},
 ) {
     val visibleExtractedCommitments = visibleRawEventCommitments(state.extractedCommitments)
 
@@ -158,6 +178,19 @@ internal fun RawEventDetailContent(
             }
         }
 
+        if (state.participantCorrections.isNotEmpty()) {
+            item {
+                RawEventParticipantCorrectionSection(
+                    participants = state.participantCorrections,
+                    choices = state.participantChoices,
+                    correctingParticipantIds = state.correctingParticipantIds,
+                    onParticipantReassign = onParticipantReassign,
+                    onParticipantIgnore = onParticipantIgnore,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
         if (visibleExtractedCommitments.isNotEmpty()) {
             item {
                 RawEventExtractionSection(
@@ -188,6 +221,180 @@ internal fun RawEventDetailContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RawEventParticipantCorrectionSection(
+    participants: List<RawEventParticipantCorrectionRow>,
+    choices: List<RawEventParticipantChoiceRow>,
+    correctingParticipantIds: Set<String>,
+    onParticipantReassign: (String, String) -> Unit,
+    onParticipantIgnore: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    EvidenceCard(
+        modifier = modifier.testTag("raw-event-person-corrections"),
+        contentPadding = PaddingValues(16.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = stringResource(R.string.raw_event_person_corrections_title),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary,
+            )
+            participants.forEach { participant ->
+                RawEventParticipantCorrectionRowContent(
+                    participant = participant,
+                    choices = choices.filterNot { it.personId == participant.currentPersonId },
+                    saving = participant.participantId in correctingParticipantIds,
+                    onParticipantReassign = onParticipantReassign,
+                    onParticipantIgnore = onParticipantIgnore,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RawEventParticipantCorrectionRowContent(
+    participant: RawEventParticipantCorrectionRow,
+    choices: List<RawEventParticipantChoiceRow>,
+    saving: Boolean,
+    onParticipantReassign: (String, String) -> Unit,
+    onParticipantIgnore: (String) -> Unit,
+) {
+    var editing by remember(participant.participantId) { mutableStateOf(false) }
+    var query by remember(participant.participantId) { mutableStateOf("") }
+    var showIgnoreConfirm by remember(participant.participantId) { mutableStateOf(false) }
+    val visibleChoices = choices
+        .filter { choice ->
+            query.isBlank() ||
+                choice.displayName.contains(query, ignoreCase = true) ||
+                choice.detail?.contains(query, ignoreCase = true) == true
+        }
+        .take(8)
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RawEventChoiceAvatar(seed = participant.displayName)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = participant.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                participant.detail?.let { detail ->
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            BecalmButton(
+                text = stringResource(R.string.raw_event_person_change_action),
+                enabled = !saving && choices.isNotEmpty(),
+                onClick = { editing = !editing },
+                variant = BecalmButtonVariant.Secondary,
+                modifier = Modifier.weight(1f),
+            )
+            BecalmButton(
+                text = stringResource(R.string.raw_event_person_ignore_action),
+                enabled = !saving,
+                loading = saving,
+                onClick = { showIgnoreConfirm = true },
+                variant = BecalmButtonVariant.Secondary,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (editing) {
+            BecalmTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = stringResource(R.string.raw_event_person_choice_label),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (visibleChoices.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.raw_event_person_no_choices),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    visibleChoices.forEach { choice ->
+                        ContactRow(
+                            headline = choice.displayName,
+                            metadata = choice.detail,
+                            onClick = {
+                                editing = false
+                                query = ""
+                                onParticipantReassign(participant.participantId, choice.personId)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("raw-event-person-choice-${participant.participantId}-${choice.personId}"),
+                        ) {
+                            RawEventChoiceAvatar(seed = choice.displayName)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showIgnoreConfirm) {
+        AlertDialog(
+            onDismissRequest = { showIgnoreConfirm = false },
+            title = { Text(text = stringResource(R.string.raw_event_person_ignore_confirm_title)) },
+            text = { Text(text = stringResource(R.string.raw_event_person_ignore_confirm_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showIgnoreConfirm = false
+                        onParticipantIgnore(participant.participantId)
+                    },
+                    enabled = !saving,
+                ) {
+                    Text(text = stringResource(R.string.raw_event_person_ignore_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showIgnoreConfirm = false }) {
+                    Text(text = stringResource(R.string.raw_event_person_cancel_action))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun RawEventChoiceAvatar(seed: String) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = seed.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
 }
 

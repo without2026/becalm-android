@@ -23,6 +23,7 @@ import dagger.hilt.components.SingletonComponent
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.first
 
 /**
  * Observable disconnect-side-effect summary used by SourceDetail unit tests.
@@ -85,54 +86,56 @@ public class DefaultSourceAdministrationPort @Inject constructor(
         }
     }
 
-    private suspend fun clearSourceCursor(sourceType: String): Boolean =
-        when (sourceType) {
+    private suspend fun clearSourceCursor(sourceType: String): Boolean {
+        val userId = userPrefsStore.observeCurrentUserId().first().orEmpty()
+        return when (sourceType) {
             SourceType.GMAIL -> {
                 syncCursorStore.setGmailHistoryId(null)
-                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
                 true
             }
             SourceType.OUTLOOK_MAIL -> {
                 syncCursorStore.clearCursor(OUTLOOK_MAIL_INBOX_CURSOR_KEY)
                 syncCursorStore.clearCursor(OUTLOOK_MAIL_SENT_CURSOR_KEY)
-                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
                 true
             }
             SourceType.NAVER_IMAP -> {
                 syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER_INBOX, null)
                 syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER_SENT, null)
-                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
                 true
             }
             SourceType.DAUM_IMAP -> {
                 syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM_INBOX, null)
                 syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM_SENT, null)
-                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
                 true
             }
             SourceType.VOICE -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE, null)
-                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
                 true
             }
             SourceType.CALL_RECORDING -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_CALL_RECORDING, null)
-                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
                 true
             }
             SourceType.MEETING -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, null)
-                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
                 true
             }
             SourceType.GOOGLE_CALENDAR,
             SourceType.OUTLOOK_CALENDAR,
             -> {
-                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, sourceType)
+                SourceMirrorCursorReset.clearForSourceType(syncCursorStore, userId, sourceType)
                 true
             }
             else -> false
         }
+    }
 
     private suspend fun clearSourceCredentials(sourceType: String): Boolean =
         when (sourceType) {

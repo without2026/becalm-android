@@ -6,10 +6,14 @@ import com.becalm.android.R
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentAgendaIntent
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.PersonEntity
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentParticipantRepository
@@ -252,6 +256,135 @@ class CommitmentLocalIntegrationTest {
     }
 
     @Test
+    fun `management screen reflects resolved source participant when commitment participant is missing`() = runTest {
+        db.personIndexDao().upsertPersons(
+            listOf(
+                person(
+                    id = "person-resolved",
+                    displayName = "김민지",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-resolved",
+                    sourceEventId = "raw-gmail-resolved",
+                    sourceRef = null,
+                    personId = "person-resolved",
+                    displayName = "김민지",
+                    resolutionStatus = "resolved",
+                ),
+            ),
+        )
+        db.commitmentDao().insertAll(
+            listOf(
+                commitment(
+                    id = "gmail-resolved-action",
+                    title = "자료 전달 확인",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-04-25T01:00:00Z"),
+                    sourceEventId = "raw-gmail-resolved",
+                    sourceRef = null,
+                ),
+            ),
+        )
+
+        commitmentRepository.observeManagementRowsForUser(USER_ID).test {
+            val rows = awaitItem()
+            assertEquals(listOf("gmail-resolved-action"), rows.map { it.id })
+            assertEquals("김민지", rows.single().counterpartyDisplayName)
+            cancelAndIgnoreRemainingEvents()
+        }
+        val participant = db.personIndexDao().findCommitmentParticipantsForUser(USER_ID).single()
+        assertEquals("gmail-resolved-action", participant.commitmentId)
+        assertEquals("person-resolved", participant.personId)
+    }
+
+    @Test
+    fun `management rows keep only latest schedule coordination agenda per email thread`() = runTest {
+        db.rawIngestionEventDao().insertAll(
+            listOf(
+                rawEvent(
+                    id = "raw-old",
+                    sourceRef = "ref-old-action",
+                    conversationRef = "gmail:thread-1",
+                    timestamp = Instant.parse("2026-05-06T09:00:00Z"),
+                ),
+                rawEvent(
+                    id = "raw-new",
+                    sourceRef = "ref-new-action",
+                    conversationRef = "gmail:thread-1",
+                    timestamp = Instant.parse("2026-05-06T10:00:00Z"),
+                ),
+                rawEvent(
+                    id = "raw-final-schedule",
+                    sourceRef = "ref-final-schedule",
+                    conversationRef = "gmail:thread-1",
+                    timestamp = Instant.parse("2026-05-06T10:00:00Z"),
+                ),
+            ),
+        )
+        db.commitmentDao().insertAll(
+            listOf(
+                commitment(
+                    id = "old-action",
+                    title = "가능한 미팅 시간 확인",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = null,
+                    agendaIntent = CommitmentAgendaIntent.SCHEDULE_COORDINATION,
+                    sourceEventId = "raw-old",
+                    sourceRef = "ref-old-action",
+                    sourceEventOccurredAt = Instant.parse("2026-05-06T09:00:00Z"),
+                    createdAt = Instant.parse("2026-05-06T09:01:00Z"),
+                ),
+                commitment(
+                    id = "new-action",
+                    title = "미팅 시간 확정 회신",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = null,
+                    agendaIntent = CommitmentAgendaIntent.SCHEDULE_COORDINATION,
+                    sourceEventId = "raw-new",
+                    sourceRef = "ref-new-action",
+                    sourceEventOccurredAt = Instant.parse("2026-05-06T10:00:00Z"),
+                    createdAt = Instant.parse("2026-05-06T10:01:00Z"),
+                ),
+            ),
+        )
+        db.personIndexDao().upsertCommitmentParticipants(
+            listOf(
+                commitmentParticipant("cp-old", "old-action"),
+                commitmentParticipant("cp-new", "new-action"),
+            ),
+        )
+
+        commitmentRepository.observeManagementRowsForUser(USER_ID).test {
+            assertEquals(listOf("new-action"), awaitItem().map { it.id })
+
+            db.commitmentDao().insert(
+                commitment(
+                    id = "final-schedule",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    title = "확정 미팅",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-05-07T09:00:00Z"),
+                    sourceEventId = "raw-final-schedule",
+                    sourceRef = "ref-final-schedule",
+                    sourceEventOccurredAt = Instant.parse("2026-05-06T10:00:00Z"),
+                    createdAt = Instant.parse("2026-05-06T10:02:00Z"),
+                ),
+            )
+
+            assertTrue(awaitItem().isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `CMT-003 EDIT-008 and MAN-004 detail sheet projects source and edit history from room`() = runTest {
         enrichmentRepository.upsert(
             PersonEnrichmentEntity(
@@ -368,11 +501,15 @@ class CommitmentLocalIntegrationTest {
         lastEditedAt: Instant? = null,
         quoteDisputedAt: Instant? = null,
         supersedesCommitmentId: String? = null,
+        agendaIntent: String? = null,
+        sourceEventId: String? = null,
+        sourceRef: String? = "ref-$id",
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = USER_ID,
         itemType = itemType,
         direction = "give",
+        agendaIntent = agendaIntent,
         counterpartyRaw = PERSON_REF,
         counterpartyRef = PERSON_REF,
         title = title,
@@ -385,7 +522,8 @@ class CommitmentLocalIntegrationTest {
         dueIsApproximate = dueIsApproximate,
         actionState = actionState,
         sourceType = sourceType,
-        sourceRef = "ref-$id",
+        sourceRef = sourceRef,
+        sourceEventId = sourceEventId,
         confidence = 0.9,
         commitmentState = CommitmentLifecycleLegacy.DRAFT,
         syncStatus = "synced",
@@ -397,6 +535,82 @@ class CommitmentLocalIntegrationTest {
         quoteDisputedAt = quoteDisputedAt,
         supersedesCommitmentId = supersedesCommitmentId,
     )
+
+    private fun rawEvent(
+        id: String,
+        sourceRef: String,
+        conversationRef: String,
+        timestamp: Instant,
+    ): RawIngestionEventEntity = RawIngestionEventEntity(
+        id = id,
+        userId = USER_ID,
+        clientEventId = "client-$id",
+        sourceType = SourceType.GMAIL,
+        sourceRef = sourceRef,
+        counterpartyRef = PERSON_REF,
+        eventTitle = "thread event",
+        conversationRef = conversationRef,
+        folder = "INBOX",
+        commitmentsExtractedCount = 1,
+        timestamp = timestamp,
+        syncStatus = "synced",
+    )
+
+    private fun commitmentParticipant(id: String, commitmentId: String): CommitmentParticipantEntity =
+        CommitmentParticipantEntity(
+            id = id,
+            userId = USER_ID,
+            commitmentId = commitmentId,
+            personId = "person-confirmed",
+            role = "counterparty",
+            evidence = "사용자가 상대방으로 확인",
+            confidence = 1.0,
+            createdAt = Instant.parse("2026-05-06T09:00:00Z"),
+        )
+
+    private fun person(id: String, displayName: String): PersonEntity =
+        PersonEntity(
+            id = id,
+            userId = USER_ID,
+            displayName = displayName,
+            kind = "person",
+            primaryEmail = null,
+            primaryPhone = null,
+            confidence = 1.0,
+            createdAt = Instant.parse("2026-04-18T05:00:00Z"),
+            updatedAt = Instant.parse("2026-04-18T05:00:00Z"),
+            archivedAt = null,
+        )
+
+    private fun sourceParticipant(
+        id: String,
+        sourceEventId: String,
+        sourceRef: String?,
+        personId: String,
+        displayName: String,
+        resolutionStatus: String,
+    ): SourceEventParticipantEntity =
+        SourceEventParticipantEntity(
+            id = id,
+            userId = USER_ID,
+            sourceEventId = sourceEventId,
+            sourceType = SourceType.GMAIL,
+            sourceRef = sourceRef,
+            personId = personId,
+            role = "counterparty",
+            relationToUser = "counterparty",
+            identityType = "name",
+            normalizedValue = displayName,
+            displayNameRaw = displayName,
+            emailRaw = null,
+            phoneRaw = null,
+            organizationRaw = null,
+            titleRaw = null,
+            evidence = displayName,
+            confidence = 0.95,
+            resolutionStatus = resolutionStatus,
+            createdAt = Instant.parse("2026-04-18T05:00:00Z"),
+        )
 
     private companion object {
         private const val USER_ID = "user-1"

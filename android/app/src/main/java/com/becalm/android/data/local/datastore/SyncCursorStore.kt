@@ -114,7 +114,7 @@ public data class ImapCursorState(val uidValidity: Long, val lastSeenUid: Long)
  * session state is removed.
  *
  * ## Source identifiers used for generic API
- * "calendar_events" | "commitments_cursor" | "outlook_mail" (legacy migration only) |
+ * "calendar_events" | "commitments_cursor" | "commitments_cursor:v2_include_unresolved" | "outlook_mail" (legacy migration only) |
  * "sms_mms" | "voice"
  */
 public interface SyncCursorStore {
@@ -127,7 +127,8 @@ public interface SyncCursorStore {
      *
      * Applicable to app-side opaque cursors such as:
      * - "calendar_events" — backend mirror pagination cursor
-     * - "commitments_cursor" — commitments feed pagination cursor
+     * - "commitments_cursor" — legacy commitments feed pagination cursor
+     * - "commitments_cursor:v2_include_unresolved" — commitments feed cursor after unresolved-counterparty rows became mirrorable
      * - "outlook_mail" — legacy migration key retained for upgrade cleanup only
      *
      * @param source Source identifier string, e.g. "google_calendar".

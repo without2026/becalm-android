@@ -15,6 +15,7 @@ internal class ImapRawEventMapper(
     fun toEntity(
         message: ImapMessage,
         userId: String,
+        accountIdentifier: String,
         mailboxKey: String,
         folderLabel: String,
     ): RawIngestionEventEntity {
@@ -23,6 +24,11 @@ internal class ImapRawEventMapper(
                 messageId = message.providerMessageId(),
                 inReplyTo = message.inReplyTo,
                 references = message.references,
+                sourceAccountKeyHash = imapSourceAccountKeyHash(
+                    userId = userId,
+                    provider = config.provider,
+                    accountIdentifier = accountIdentifier,
+                ),
             ),
         )
         val snippetResult = EmailSnippetBuilder.buildSnippet(
@@ -35,6 +41,7 @@ internal class ImapRawEventMapper(
             userId = userId,
             clientEventId = imapClientEventId(
                 provider = config.provider,
+                accountIdentifier = accountIdentifier,
                 folder = folderLabel,
                 providerMessageId = message.providerMessageId(),
             ),
@@ -43,6 +50,7 @@ internal class ImapRawEventMapper(
             counterpartyRef = message.counterpartyRef(mailboxKey),
             eventTitle = message.subject,
             eventSnippet = snippetResult.snippet,
+            conversationRef = message.conversationRef(),
             folder = folderLabel,
             timestamp = message.sentAt,
         )

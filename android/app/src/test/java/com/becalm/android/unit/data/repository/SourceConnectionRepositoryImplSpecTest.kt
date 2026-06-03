@@ -107,29 +107,6 @@ class SourceConnectionRepositoryImplSpecTest {
         coVerify(exactly = 0) { syncCursorStore.clearCursor(any()) }
     }
 
-    @Test
-    fun `ownership update keeps mirror cursors because source data is unchanged`() = runTest {
-        val subject = subject()
-        coEvery {
-            api.patchSourceConnection(
-                id = "conn-gmail",
-                request = any(),
-            )
-        } returns Response.success(SourceConnectionResponseDto(sourceConnection(status = "connected")))
-
-        val result = subject.setOwnership(
-            userId = "user-123",
-            connectionId = "conn-gmail",
-            ownership = "external",
-        )
-
-        assertTrue(result is BecalmResult.Success)
-        coVerify(exactly = 1) {
-            dao.upsert(match { it.id == "conn-gmail" && it.status == "connected" })
-        }
-        coVerify(exactly = 0) { syncCursorStore.clearCursor(any()) }
-    }
-
     private fun subject(): SourceConnectionRepositoryImpl =
         SourceConnectionRepositoryImpl(
             dao = dao,

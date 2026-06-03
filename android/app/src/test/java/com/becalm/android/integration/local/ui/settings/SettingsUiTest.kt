@@ -130,11 +130,10 @@ class SettingsUiTest {
     }
 
     @Test
-    fun `identity content exposes profile anchors and source ownership actions`() {
+    fun `identity content exposes profile anchors and source connection actions`() {
         var saveClicks = 0
         var addAnchorClicks = 0
         var archivedAnchor: String? = null
-        var ownershipChange: Pair<String, String>? = null
         var disconnectedConnection: String? = null
         var deletedConnection = 0
 
@@ -167,7 +166,6 @@ class SettingsUiTest {
                                 id = "conn-1",
                                 title = "Gmail",
                                 accountLabel = "work@example.com",
-                                ownership = "unknown",
                                 status = "connected",
                             ),
                         ),
@@ -179,7 +177,6 @@ class SettingsUiTest {
                     onAnchorValueChange = {},
                     onAddAnchor = { addAnchorClicks += 1 },
                     onArchiveAnchor = { archivedAnchor = it },
-                    onSetConnectionOwnership = { id, ownership -> ownershipChange = id to ownership },
                     onDisconnectConnection = { disconnectedConnection = it },
                     onRequestDeleteConnection = { deletedConnection += 1 },
                 )
@@ -201,11 +198,8 @@ class SettingsUiTest {
         composeRule.onAllNodesWithText("SPEAKER_01").assertCountEquals(0)
         composeRule.onNodeWithTag("settings-identity-list")
             .performScrollToNode(hasText("Gmail"))
-        composeRule.onNodeWithText(string(R.string.settings_identity_connection_shared)).assertExists()
-        composeRule.onNodeWithText(string(R.string.settings_identity_connection_delegated)).assertExists()
-        composeRule.onNodeWithText(string(R.string.settings_identity_connection_unknown)).assertExists()
+        composeRule.onNodeWithText("work@example.com").assertExists()
         composeRule.onNodeWithText(string(R.string.settings_identity_connection_status_connected)).assertExists()
-        composeRule.onNodeWithText(string(R.string.settings_identity_connection_self)).performClick()
         composeRule.onNodeWithTag("settings-identity-connection-disconnect-conn-1").performClick()
         composeRule.onNodeWithTag("settings-identity-connection-delete-conn-1").performClick()
 
@@ -213,7 +207,6 @@ class SettingsUiTest {
             assertEquals(1, saveClicks)
             assertEquals(1, addAnchorClicks)
             assertEquals("anchor-1", archivedAnchor)
-            assertEquals("conn-1" to "self", ownershipChange)
             assertEquals("conn-1", disconnectedConnection)
             assertEquals(1, deletedConnection)
         }
@@ -235,7 +228,6 @@ class SettingsUiTest {
                                 id = "conn-1",
                                 title = "Gmail",
                                 accountLabel = "work@example.com",
-                                ownership = "self",
                                 status = "connected",
                             ),
                         ),
@@ -247,7 +239,6 @@ class SettingsUiTest {
                     onAnchorValueChange = {},
                     onAddAnchor = {},
                     onArchiveAnchor = {},
-                    onSetConnectionOwnership = { _, _ -> },
                     onConfirmDeleteConnection = { confirmClicks += 1 },
                     onDismissDeleteConnection = { dismissClicks += 1 },
                 )

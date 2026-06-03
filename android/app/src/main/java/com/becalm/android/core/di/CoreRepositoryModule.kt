@@ -12,6 +12,8 @@ import com.becalm.android.data.repository.OnboardingActivationPreviewRepository
 import com.becalm.android.data.repository.OnboardingActivationPreviewRepositoryImpl
 import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
+import com.becalm.android.data.repository.PersonActionRepository
+import com.becalm.android.data.repository.PersonActionRepositoryImpl
 import com.becalm.android.data.repository.PersonMemoryRemoteRepository
 import com.becalm.android.data.repository.PersonMemoryRemoteRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -28,6 +30,8 @@ import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceArtifactRepositoryImpl
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepositoryImpl
+import com.becalm.android.data.repository.UserCorrectionRepository
+import com.becalm.android.data.repository.UserCorrectionRepositoryImpl
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -104,6 +108,12 @@ public abstract class CoreRepositoryModule {
 
     @Binds
     @Singleton
+    public abstract fun bindPersonActionRepository(
+        impl: PersonActionRepositoryImpl,
+    ): PersonActionRepository
+
+    @Binds
+    @Singleton
     public abstract fun bindPersonMemoryRemoteRepository(
         impl: PersonMemoryRemoteRepositoryImpl,
     ): PersonMemoryRemoteRepository
@@ -119,4 +129,10 @@ public abstract class CoreRepositoryModule {
     public abstract fun bindSourceArtifactRepository(
         impl: SourceArtifactRepositoryImpl,
     ): SourceArtifactRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindUserCorrectionRepository(
+        impl: UserCorrectionRepositoryImpl,
+    ): UserCorrectionRepository
 }

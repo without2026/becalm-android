@@ -14,10 +14,15 @@ public object CommitmentItemType {
 
 public object CommitmentScheduleStatus {
     public const val CONFIRMED: String = "confirmed"
+    public const val TENTATIVE: String = "tentative"
     public const val CHANGED: String = "changed"
     public const val POSTPONED: String = "postponed"
     public const val CANCELLED: String = "cancelled"
     public const val FOLLOW_UP: String = "follow_up"
+}
+
+public object CommitmentAgendaIntent {
+    public const val SCHEDULE_COORDINATION: String = "schedule_coordination"
 }
 
 public object CommitmentDecisionStatus {
@@ -53,6 +58,8 @@ public object CommitmentDecisionStatus {
  *   Null for non-action rows.
  * @property scheduleStatus Schedule change subtype. Non-null only when [itemType] is "schedule".
  * @property decisionStatus Decision subtype. Non-null only when [itemType] is "decision".
+ * @property agendaIntent Nullable agenda-state tag. `schedule_coordination` marks action rows
+ *   that represent meeting-time coordination rather than ordinary give/take promises.
  * @property counterpartyRaw Raw uncanonized counterparty identifier as extracted
  *   from the source event (phone number, email, or display name). Null when absent.
  * @property counterpartyRef Canonicalized counterparty identifier following the precedence
@@ -163,6 +170,8 @@ public object CommitmentDecisionStatus {
         // and the EDIT-007 audit-trail render. Rarely written, but the index is cheap given
         // how sparse the column will be (most rows are null). Spec: data-model.yml:219-225.
         Index(value = ["supersedes_commitment_id"], name = "idx_commitments_supersedes"),
+        Index(value = ["user_id", "agenda_intent", "action_state", "due_at"], name = "idx_commitments_agenda_intent_active"),
+        Index(value = ["user_id", "source_event_id"], name = "idx_commitments_user_source_event"),
     ],
 )
 public data class CommitmentEntity(
@@ -185,6 +194,9 @@ public data class CommitmentEntity(
 
     @ColumnInfo(name = "decision_status")
     val decisionStatus: String? = null,
+
+    @ColumnInfo(name = "agenda_intent")
+    val agendaIntent: String? = null,
 
     @ColumnInfo(name = "counterparty_raw")
     val counterpartyRaw: String?,
@@ -224,6 +236,9 @@ public data class CommitmentEntity(
 
     @ColumnInfo(name = "source_ref")
     val sourceRef: String?,
+
+    @ColumnInfo(name = "source_event_id")
+    val sourceEventId: String? = null,
 
     @ColumnInfo(name = "confidence", defaultValue = "0.0")
     val confidence: Double = 0.0,

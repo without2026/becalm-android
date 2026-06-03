@@ -50,6 +50,12 @@ public data class RawIngestionEventDto(
      */
     @field:Json(name = "source_ref") val sourceRef: String? = null,
 
+    /** Privacy-safe account scope for local IMAP thread state; raw account identifiers stay on-device. */
+    @field:Json(name = "source_account_key_hash") val sourceAccountKeyHash: String? = null,
+
+    /** Backend `source_events.provider_event_id` alias used by server-managed source mirrors. */
+    @field:Json(name = "provider_event_id") val providerEventId: String? = null,
+
     /** Email RFC 5322 Message-ID header, when available. */
     @field:Json(name = "message_id_header") val messageIdHeader: String? = null,
 
@@ -58,6 +64,18 @@ public data class RawIngestionEventDto(
 
     /** Email RFC 5322 References header, when available. */
     @field:Json(name = "references_header") val referencesHeader: String? = null,
+
+    /** Email sender header/address used by Railway to derive self-vs-counterparty direction. */
+    @field:Json(name = "sender_header") val senderHeader: String? = null,
+
+    /** Email To recipients. Required for reference-only filtering parity with backend-managed mail. */
+    @field:Json(name = "to_header") val toHeader: List<String>? = null,
+
+    /** Email Cc recipients. If the user is only here, backend extraction skips the row. */
+    @field:Json(name = "cc_header") val ccHeader: List<String>? = null,
+
+    /** Email Bcc recipients, present mostly for sent mail. */
+    @field:Json(name = "bcc_header") val bccHeader: List<String>? = null,
 
     /** Provider or server-derived conversation/thread reference. */
     @field:Json(name = "conversation_ref") val conversationRef: String? = null,
@@ -83,6 +101,9 @@ public data class RawIngestionEventDto(
      */
     @field:Json(name = "event_title") val eventTitle: String? = null,
 
+    /** Backend `source_events.title` alias used by server-managed source mirrors. */
+    @field:Json(name = "title") val sourceEventTitle: String? = null,
+
     /**
      * Voice: first ~200 chars of transcript (after STT).
      * Email: body_plain[:200] → Jsoup(html).text()[:200] → subject[:200], whitespace collapsed.
@@ -90,6 +111,9 @@ public data class RawIngestionEventDto(
      * Null for calendar events.
      */
     @field:Json(name = "event_snippet") val eventSnippet: String? = null,
+
+    /** Backend `source_events.snippet` alias used by server-managed source mirrors. */
+    @field:Json(name = "snippet") val sourceEventSnippet: String? = null,
 
     /** Voice only: MediaStore DURATION / 1000. Null for non-voice sources. */
     @field:Json(name = "duration_seconds") val durationSeconds: Int? = null,
@@ -115,6 +139,9 @@ public data class RawIngestionEventDto(
      * Defaults to 0 at upload time; updated after extraction runs.
      */
     @field:Json(name = "commitments_extracted_count") val commitmentsExtractedCount: Int? = null,
+
+    /** Backend `source_events.extracted_count` alias used by server-managed source mirrors. */
+    @field:Json(name = "extracted_count") val extractedCount: Int? = null,
 
     /**
      * Email-only extraction context sent to Railway / Vertex Gemini. This field is not stored
@@ -187,6 +214,12 @@ public data class SourceEventParticipantDto(
     @field:Json(name = "source_event_id") val sourceEventId: String,
     @field:Json(name = "source_type") val sourceType: String,
     @field:Json(name = "source_ref") val sourceRef: String? = null,
+    @field:Json(name = "source_connection_id") val sourceConnectionId: String? = null,
+    @field:Json(name = "provider_event_id") val providerEventId: String? = null,
+    @field:Json(name = "conversation_ref") val conversationRef: String? = null,
+    @field:Json(name = "source_event_title") val sourceEventTitle: String? = null,
+    @field:Json(name = "source_event_snippet") val sourceEventSnippet: String? = null,
+    @field:Json(name = "source_event_occurred_at") val sourceEventOccurredAt: Instant? = null,
     @field:Json(name = "person_id") val personId: String? = null,
     @field:Json(name = "role") val role: String,
     @field:Json(name = "relation_to_user") val relationToUser: String,
@@ -283,6 +316,16 @@ public data class BatchUploadResponse(
 
     /** Events that could not be processed. May be empty. */
     @field:Json(name = "failed") val failed: List<FailedEventDto>,
+
+    /** Per-event idempotency acknowledgement. Added without removing legacy counters. */
+    @field:Json(name = "acknowledgements") val acknowledgements: List<RawIngestionAcknowledgementDto> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+public data class RawIngestionAcknowledgementDto(
+    @field:Json(name = "client_event_id") val clientEventId: String,
+    @field:Json(name = "server_raw_event_id") val serverRawEventId: String? = null,
+    @field:Json(name = "status") val status: String,
 )
 
 /**

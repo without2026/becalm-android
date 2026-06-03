@@ -109,9 +109,6 @@ public fun SettingsIdentityScreen(
                 onAnchorValueChange = { resolvedViewModel?.onNewAnchorValueChange(it) },
                 onAddAnchor = { resolvedViewModel?.onAddAnchor() },
                 onArchiveAnchor = { resolvedViewModel?.onArchiveAnchor(it) },
-                onSetConnectionOwnership = { id, ownership ->
-                    resolvedViewModel?.onSetConnectionOwnership(id, ownership)
-                },
                 onDisconnectConnection = { id -> resolvedViewModel?.onDisconnectConnection(id) },
                 onRequestDeleteConnection = { id -> resolvedViewModel?.onRequestDeleteConnection(id) },
                 onConfirmDeleteConnection = { resolvedViewModel?.onConfirmDeleteConnection() },
@@ -132,7 +129,6 @@ internal fun SettingsIdentityContent(
     onAnchorValueChange: (String) -> Unit,
     onAddAnchor: () -> Unit,
     onArchiveAnchor: (String) -> Unit,
-    onSetConnectionOwnership: (String, String) -> Unit,
     onDisconnectConnection: (String) -> Unit = {},
     onRequestDeleteConnection: (String) -> Unit = {},
     onConfirmDeleteConnection: () -> Unit = {},
@@ -193,12 +189,10 @@ internal fun SettingsIdentityContent(
             }
         } else {
             items(state.connections, key = { it.id }) { connection ->
-                SettingsSourceOwnershipRow(
+                SettingsSourceConnectionRow(
                     connection = connection,
-                    updating = state.updatingConnectionId == connection.id,
                     disconnecting = connection.id in state.disconnectingConnectionIds,
                     deleting = connection.id in state.deletingConnectionIds,
-                    onOwnership = { ownership -> onSetConnectionOwnership(connection.id, ownership) },
                     onDisconnect = { onDisconnectConnection(connection.id) },
                     onDelete = { onRequestDeleteConnection(connection.id) },
                 )
@@ -363,18 +357,15 @@ private fun SettingsIdentityAnchorRow(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsSourceOwnershipRow(
+private fun SettingsSourceConnectionRow(
     connection: SourceConnectionOwnershipUi,
-    updating: Boolean,
     disconnecting: Boolean,
     deleting: Boolean,
-    onOwnership: (String) -> Unit,
     onDisconnect: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val busy = updating || disconnecting || deleting
+    val busy = disconnecting || deleting
     val disconnected = connection.status == "disconnected"
     QuietPanel(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -393,33 +384,6 @@ private fun SettingsSourceOwnershipRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (connection.ownership == "unknown") {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.settings_identity_connection_ownership_warning),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            listOf(
-                "self" to R.string.settings_identity_connection_self,
-                "shared" to R.string.settings_identity_connection_shared,
-                "delegated" to R.string.settings_identity_connection_delegated,
-                "unknown" to R.string.settings_identity_connection_unknown,
-            )
-                .forEachIndexed { index, option ->
-                    SegmentedButton(
-                        selected = connection.ownership == option.first,
-                        enabled = !busy && !disconnected,
-                        onClick = { onOwnership(option.first) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = 4),
-                    ) {
-                        Text(stringResource(option.second))
-                    }
-                }
-        }
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),

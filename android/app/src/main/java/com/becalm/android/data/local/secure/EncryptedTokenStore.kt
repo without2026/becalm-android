@@ -177,7 +177,10 @@ public class EncryptedTokenStore @Inject constructor(
         // Editor.clear() drops every entry atomically, so a future SupabaseSession field that
         // forgets to mirror itself into an explicit .remove() cannot silently survive a PIPA
         // right-to-erasure wipe.
-        prefs.edit().clear().apply()
+        val committed = prefs.edit().clear().commit()
+        if (!committed) {
+            Timber.w("EncryptedTokenStore: session clear commit returned false")
+        }
         Timber.d("EncryptedTokenStore: session cleared")
         cacheMutex.withLock {
             cachedSession = null
@@ -227,7 +230,10 @@ public class EncryptedTokenStore @Inject constructor(
     }
 
     private fun clearPersistedSessionForAuthorityMismatch(expectedIssuer: String) {
-        prefs.edit().clear().apply()
+        val committed = prefs.edit().clear().commit()
+        if (!committed) {
+            Timber.w("EncryptedTokenStore: auth issuer mismatch clear commit returned false")
+        }
         Timber.w("EncryptedTokenStore: cleared session for auth issuer mismatch, expected=%s", expectedIssuer)
         sessionChanges.tryEmit(null)
     }

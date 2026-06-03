@@ -484,6 +484,24 @@ public interface RawIngestionEventDao {
         """
         SELECT * FROM raw_ingestion_events
         WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND conversation_ref = :conversationRef
+          AND TRIM(COALESCE(conversation_ref, '')) != ''
+        ORDER BY timestamp ASC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findByConversationRefForUser(
+        userId: String,
+        sourceType: String,
+        conversationRef: String,
+        limit: Int,
+    ): List<RawIngestionEventEntity>
+
+    @Query(
+        """
+        SELECT * FROM raw_ingestion_events
+        WHERE user_id = :userId
         ORDER BY timestamp DESC
         """,
     )

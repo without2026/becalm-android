@@ -6,6 +6,8 @@ import com.becalm.android.data.repository.ProcessingStatusMessages
 internal fun localizedProcessingStatusMessage(message: String?): UiMessage? = when (message) {
     ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED ->
         UiMessage.resource(R.string.processing_status_source_sync_delayed)
+    ProcessingStatusMessages.SOURCE_SYNC_IMPORTING_MORE_PAGES ->
+        UiMessage.resource(R.string.processing_status_source_sync_importing_more_pages)
     ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED ->
         UiMessage.resource(R.string.processing_status_llm_daily_budget_exceeded)
     ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING ->

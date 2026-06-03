@@ -23,6 +23,7 @@ internal object CommitmentWire {
     const val ACTION_CANCELLED_UPPER: String = "CANCELLED"
 
     const val SCHEDULE_CONFIRMED: String = "confirmed"
+    const val SCHEDULE_TENTATIVE: String = "tentative"
     const val SCHEDULE_CHANGED: String = "changed"
     const val SCHEDULE_POSTPONED: String = "postponed"
     const val SCHEDULE_CANCELLED: String = "cancelled"
@@ -75,6 +76,7 @@ internal fun commitmentActionStateLabelRes(status: String?): Int? = when (status
 @StringRes
 internal fun commitmentScheduleStatusLabelRes(status: String?): Int? = when (status?.lowercase()) {
     CommitmentWire.SCHEDULE_CONFIRMED -> R.string.commitment_subtype_schedule_confirmed
+    CommitmentWire.SCHEDULE_TENTATIVE -> R.string.commitment_subtype_schedule_tentative
     CommitmentWire.SCHEDULE_CHANGED -> R.string.commitment_subtype_schedule_changed
     CommitmentWire.SCHEDULE_POSTPONED -> R.string.commitment_subtype_schedule_postponed
     CommitmentWire.SCHEDULE_CANCELLED -> R.string.commitment_subtype_schedule_cancelled

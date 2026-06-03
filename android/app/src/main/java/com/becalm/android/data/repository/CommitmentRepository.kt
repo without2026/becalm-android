@@ -110,7 +110,7 @@ public interface CommitmentRepository {
      * Delta-syncs commitments from Railway, upserts results into Room, and persists the cursor.
      *
      * Iterates pages until `hasMore=false` or a safety cap of 5 pages is consumed. The persisted
-     * cursor key is `"commitments_cursor"`.
+     * cursor key is user-scoped via [MirrorCursorKeys.commitments].
      *
      * @param since When non-null, only commitments updated after this instant are returned.
      */

@@ -1,6 +1,8 @@
 package com.becalm.android.data.auth
 
 import com.becalm.android.core.analytics.AmplitudeProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsAttributionStore
+import com.becalm.android.core.analytics.ProductAnalyticsEventQueue
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
@@ -12,6 +14,7 @@ import com.becalm.android.data.local.secure.OAuthCredentialStore
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.worker.ContentObserverBootstrap
+import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import com.becalm.android.worker.WorkScheduler
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -44,6 +47,9 @@ public class AuthFailureSessionInvalidatorImpl @Inject constructor(
     private val deviceKeyStore: DeviceKeyStore,
     private val imapCredentialStore: ImapCredentialStore,
     private val oauthCredentialStore: OAuthCredentialStore,
+    private val runtimeBootstrap: AuthenticatedRuntimeBootstrap,
+    private val productAnalyticsEventQueue: ProductAnalyticsEventQueue,
+    private val productAnalyticsAttributionStore: ProductAnalyticsAttributionStore,
     private val amplitudeAnalytics: AmplitudeProductAnalyticsClient,
     private val observability: ObservabilityClient,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -54,11 +60,14 @@ public class AuthFailureSessionInvalidatorImpl @Inject constructor(
         withContext(ioDispatcher) {
             runStep("cancelAllWorkers") { workScheduler.cancelAll() }
             runStep("stopContentObservers") { contentObserverBootstrap.stop() }
+            runStep("runtimeBootstrapReset") { runtimeBootstrap.resetForAuthBoundary() }
             runStep("imapCredentialClear") { imapCredentialStore.clearAll() }
             runStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() }
             runStep("sessionStoreClear") { sessionStore.clear() }
             runStep("tokenProviderInvalidate") { tokenProvider.invalidate() }
             runStep("deviceKeyClear") { deviceKeyStore.clear() }
+            runStep("productAnalyticsQueueClearAll") { productAnalyticsEventQueue.clearAll() }
+            runStep("productAnalyticsAttributionClear") { productAnalyticsAttributionStore.clearNotificationOpen() }
             runStep("currentUserIdClear") { userPrefsStore.setCurrentUserId(null) }
             runStep("analyticsScopeReset") {
                 amplitudeAnalytics.resetUserScope()

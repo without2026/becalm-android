@@ -8,8 +8,9 @@ import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.remote.api.RailwayApi
-import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
@@ -25,7 +26,8 @@ import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceSyncJobPollResult
 import com.becalm.android.data.repository.SourceSyncJobPoller
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.data.repository.toSourceSyncJobSnapshot
+import com.becalm.android.data.repository.UserCorrectionRepository
+import com.becalm.android.data.repository.toSnapshot
 import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
@@ -66,9 +68,11 @@ public class DefaultSourceSyncPort @Inject constructor(
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val sourceConnectionRepository: SourceConnectionRepository,
+    private val syncCursorStore: SyncCursorStore,
     private val selfIdentityRepository: SelfIdentityRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
+    private val userCorrectionRepository: UserCorrectionRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
@@ -129,38 +133,9 @@ public class DefaultSourceSyncPort @Inject constructor(
             sourceType = sourceType,
             error = BecalmError.Unauthorized,
         )
-        sourceStatusRepository.recordSyncStart(sourceType)
-        processingStatusRepository.recordScanning(sourceType)
-        val response = api.syncMailSource(provider = sourceType)
-        if (!response.isSuccessful) {
-            return onBackendSyncFailure(sourceType, response.toSyncError())
-        }
-        val body = response.body()
-            ?: return onBackendSyncFailure(sourceType, BecalmError.Unknown(IllegalStateException("null body")))
-        when (
-            val pollResult = SourceSyncJobPoller(
-                api = api,
-                logger = logger,
-            ).awaitTerminal(sourceType, body.toSourceSyncJobSnapshot())
-        ) {
-            is SourceSyncJobPollResult.Completed -> logger.d(
-                TAG,
-                "backend mail sync completed sourceType=$sourceType synced=${pollResult.synced}",
-            )
-	            is SourceSyncJobPollResult.Pending -> {
-	                processingStatusRepository.recordScanning(sourceType, pollResult.processingMessageCode())
-	                workScheduler.enqueueSourceRelationRefresh(
-	                    sourceType,
-	                    initialDelaySeconds = (pollResult.retryAfterSeconds ?: PENDING_BACKEND_REFRESH_DELAY_SECONDS)
-	                        .coerceAtLeast(PENDING_BACKEND_REFRESH_DELAY_SECONDS),
-	                )
-	                logger.d(TAG, "backend mail sync pending sourceType=$sourceType message=${pollResult.message}")
-	                return BecalmResult.Success(Unit)
-	            }
-            is SourceSyncJobPollResult.Failed -> return onBackendSyncFailure(
-                sourceType = sourceType,
-                error = pollResult.toSyncError(),
-            )
+        when (val connectionSync = syncBackendManagedConnections(userId, sourceType)) {
+            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, connectionSync.error)
+            is BecalmResult.Success -> if (!connectionSync.value) return BecalmResult.Success(Unit)
         }
         processingStatusRepository.recordUploading(sourceType)
         when (
@@ -169,6 +144,7 @@ public class DefaultSourceSyncPort @Inject constructor(
                 plan = SourceRelationRefreshPlan(
                     sourceType = sourceType,
                     rawSourceType = sourceType,
+                    resetMirrorCursorBeforeRefresh = true,
                 ),
             )
         ) {
@@ -190,48 +166,104 @@ public class DefaultSourceSyncPort @Inject constructor(
             sourceType = sourceType,
             error = BecalmError.Unauthorized,
         )
+        when (val connectionSync = syncBackendManagedConnections(userId, sourceType)) {
+            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, connectionSync.error)
+            is BecalmResult.Success -> if (!connectionSync.value) return BecalmResult.Success(Unit)
+        }
+        processingStatusRepository.recordUploading(sourceType)
+        when (
+            val refresh = relationRefreshCoordinator().refresh(
+                userId = userId,
+                plan = SourceRelationRefreshPlan(
+                    sourceType = sourceType,
+                    calendarRefresh = CalendarRelationRefresh(),
+                    resetMirrorCursorBeforeRefresh = true,
+                ),
+            )
+        ) {
+            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
+            is BecalmResult.Success -> {
+                processingStatusRepository.recordSynced(sourceType, refresh.value.changedCount)
+                logger.d(
+                    TAG,
+                    "relation refresh after backend calendar sync sourceType=$sourceType changed=${refresh.value.changedCount}",
+                )
+            }
+        }
+        logger.d(TAG, "manual sync delegated to backend calendar sourceType=$sourceType")
+        return finalizeBackendSyncSuccess(userId, sourceType)
+    }
+
+    private suspend fun syncBackendManagedConnections(
+        userId: String,
+        sourceType: String,
+    ): BecalmResult<Boolean> {
         sourceStatusRepository.recordSyncStart(sourceType)
         processingStatusRepository.recordScanning(sourceType)
-        when (val result = calendarEventRepository.triggerServerSync()) {
-            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, result.error)
-            is BecalmResult.Success -> {
-                val syncResponse = result.value
-                if (syncResponse.isAcceptedButNotComplete()) {
-                    processingStatusRepository.recordScanning(sourceType, syncResponse.processingMessageCode())
+        val connections = when (val refresh = sourceConnectionRepository.refresh(userId)) {
+            is BecalmResult.Success -> refresh.value.connectedBackendConnectionsFor(sourceType)
+            is BecalmResult.Failure -> return BecalmResult.Failure(refresh.error)
+        }
+        if (connections.isEmpty()) {
+            return BecalmResult.Failure(BecalmError.NotFound("source_connection/$sourceType"))
+        }
+        val jobs = mutableListOf<Pair<SourceConnectionEntity, com.becalm.android.data.remote.dto.SourceSyncJobResponse>>()
+        for (connection in connections) {
+            val response = api.syncSourceConnection(connection.id)
+            if (!response.isSuccessful) {
+                return BecalmResult.Failure(response.toSyncError("source_connection"))
+            }
+            val body = response.body()
+                ?: return BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null body")))
+            jobs += connection to body
+        }
+        for ((connection, body) in jobs) {
+            when (
+                val pollResult = SourceSyncJobPoller(
+                    api = api,
+                    logger = logger,
+                ).awaitTerminal(sourceType, body.toSnapshot())
+            ) {
+                is SourceSyncJobPollResult.Completed -> logger.d(
+                    TAG,
+                    "backend connection sync completed sourceType=$sourceType connectionId=${connection.id} synced=${pollResult.synced}",
+                )
+                is SourceSyncJobPollResult.Pending -> {
+                    if (pollResult.reasonCode == "provider_has_more_pages") {
+                        when (
+                            val refresh = relationRefreshCoordinator().refresh(
+                                userId = userId,
+                                plan = SourceRelationRefreshPlan(
+                                    sourceType = sourceType,
+                                    rawSourceType = sourceType,
+                                    resetMirrorCursorBeforeRefresh = true,
+                                ),
+                            )
+                        ) {
+                            is BecalmResult.Failure -> return BecalmResult.Failure(refresh.error)
+                            is BecalmResult.Success -> logger.d(
+                                TAG,
+                                "partial backend sync refresh sourceType=$sourceType connectionId=${connection.id} changed=${refresh.value.changedCount}",
+                            )
+                        }
+                    }
+                    processingStatusRepository.recordScanning(sourceType, pollResult.processingMessageCode())
                     workScheduler.enqueueSourceRelationRefresh(
                         sourceType,
-                        initialDelaySeconds = (syncResponse.retryAfterSeconds ?: PENDING_BACKEND_REFRESH_DELAY_SECONDS)
+                        initialDelaySeconds = (pollResult.retryAfterSeconds ?: PENDING_BACKEND_REFRESH_DELAY_SECONDS)
                             .coerceAtLeast(PENDING_BACKEND_REFRESH_DELAY_SECONDS),
+                        resetBeforeRefresh = true,
                     )
                     logger.d(
                         TAG,
-                        "backend calendar sync pending sourceType=$sourceType status=${syncResponse.status}",
+                        "backend connection sync pending sourceType=$sourceType connectionId=${connection.id} message=${pollResult.message}",
                     )
-                    return BecalmResult.Success(Unit)
+                    return BecalmResult.Success(false)
                 }
-                processingStatusRepository.recordUploading(sourceType)
-                when (
-                    val refresh = relationRefreshCoordinator().refresh(
-                        userId = userId,
-                        plan = SourceRelationRefreshPlan(
-                            sourceType = sourceType,
-                            calendarRefresh = CalendarRelationRefresh(),
-                        ),
-                    )
-                ) {
-                    is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
-                    is BecalmResult.Success -> {
-                        processingStatusRepository.recordSynced(sourceType, refresh.value.changedCount)
-                        logger.d(
-                            TAG,
-                            "relation refresh after backend calendar sync sourceType=$sourceType changed=${refresh.value.changedCount}",
-                        )
-                    }
-                }
-                logger.d(TAG, "manual sync delegated to backend calendar sourceType=$sourceType")
-                return finalizeBackendSyncSuccess(userId, sourceType)
+                is SourceSyncJobPollResult.Failed -> return BecalmResult.Failure(pollResult.toSyncError())
             }
         }
+        return BecalmResult.Success(true)
     }
 
     private fun relationRefreshCoordinator(): SourceRelationRefreshCoordinator =
@@ -242,6 +274,8 @@ public class DefaultSourceSyncPort @Inject constructor(
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
             scheduleEventLinkRepository = scheduleEventLinkRepository,
+            userCorrectionRepository = userCorrectionRepository,
+            syncCursorStore = syncCursorStore,
             workScheduler = workScheduler,
             logger = logger,
         )
@@ -294,9 +328,9 @@ public class DefaultSourceSyncPort @Inject constructor(
         return BecalmResult.Failure(error)
     }
 
-    private fun <T> Response<T>.toSyncError(): BecalmError = when (code()) {
+    private fun <T> Response<T>.toSyncError(resource: String = "mail_source"): BecalmError = when (code()) {
         401 -> BecalmError.Unauthorized
-        404 -> BecalmError.NotFound("mail_source")
+        404 -> BecalmError.NotFound(resource)
         422 -> BecalmError.Validation(null, message())
         429 -> BecalmError.RateLimited(headers().get("Retry-After")?.toLongOrNull())
         in 500..599 -> BecalmError.ServerError(code(), errorBody()?.string())
@@ -395,15 +429,25 @@ public class DefaultSourceSyncPort @Inject constructor(
     private fun SourceSyncJobPollResult.Pending.processingMessageCode(): String? =
         reasonCode.sourceSyncProcessingMessageCode()
 
-    private fun CalendarSyncResponse.isAcceptedButNotComplete(): Boolean =
-        !jobId.isNullOrBlank() && accepted && status?.lowercase() != "succeeded"
+    private fun List<SourceConnectionEntity>.connectedBackendConnectionsFor(sourceType: String): List<SourceConnectionEntity> =
+        filter { connection ->
+            connection.status != "disconnected" && connection.toBackendSourceType() == sourceType
+        }
 
-    private fun CalendarSyncResponse.processingMessageCode(): String? =
-        errorCode.sourceSyncProcessingMessageCode()
+    private fun SourceConnectionEntity.toBackendSourceType(): String? =
+        when {
+            provider == "google" && capability == "mail" -> SourceType.GMAIL
+            provider == "outlook" && capability == "mail" -> SourceType.OUTLOOK_MAIL
+            provider == "google" && capability == "calendar" -> SourceType.GOOGLE_CALENDAR
+            provider == "outlook" && capability == "calendar" -> SourceType.OUTLOOK_CALENDAR
+            else -> null
+        }
 
     private fun String?.sourceSyncProcessingMessageCode(): String? =
         when (this) {
             "backpressure_delayed" -> ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED
+            "provider_has_more_pages" -> ProcessingStatusMessages.SOURCE_SYNC_IMPORTING_MORE_PAGES
+            "llm_rate_limited_retrying" -> ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING
             else -> null
         }
 

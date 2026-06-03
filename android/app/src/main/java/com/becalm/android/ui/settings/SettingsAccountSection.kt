@@ -3,6 +3,8 @@ package com.becalm.android.ui.settings
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +47,7 @@ internal fun SettingsAccountSection(
             title = stringResource(R.string.settings_identity_row_title),
             subtitle = stringResource(R.string.settings_identity_row_subtitle),
             onClick = onIdentityClick,
+            leadingIcon = Icons.Outlined.Person,
             rowTestTag = "settings-identity-row",
         )
         Spacer(modifier = Modifier.height(12.dp))

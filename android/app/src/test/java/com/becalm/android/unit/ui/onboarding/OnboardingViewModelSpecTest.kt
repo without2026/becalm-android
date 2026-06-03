@@ -59,6 +59,7 @@ import com.becalm.android.ui.onboarding.PipaConsentEvent
 import com.becalm.android.ui.onboarding.RecordingPathSelection
 import com.becalm.android.ui.onboarding.StepStatus
 import com.becalm.android.ui.onboarding.ONBOARDING_INTRO_PAGE_COUNT
+import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
@@ -109,6 +110,7 @@ class OnboardingViewModelSpecTest {
     private val firstMemoryRepository: FirstMemoryRepository = mockk(relaxed = true)
     private val onboardingActivationPreviewRepository: OnboardingActivationPreviewRepository = mockk(relaxed = true)
     private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
+    private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
 
     @Before
@@ -132,7 +134,7 @@ class OnboardingViewModelSpecTest {
         coEvery { sessionStore.load() } returns null
         every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
-        coEvery { calendarEventRepository.triggerServerSync() } returns
+        coEvery { calendarEventRepository.triggerServerSync(any(), any()) } returns
             BecalmResult.Success(CalendarSyncResponse(synced = 0, status = "succeeded"))
         coEvery { calendarEventRepository.refreshSince(any(), any(), any(), any()) } returns
             BecalmResult.Success(CalendarEventRepository.RefreshStats(0, 0, false, null))
@@ -728,6 +730,31 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
+    fun `ONB outlook status refresh success triggers immediate backend sync`() = runTest {
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL) } returns flowOf(true)
+        coEvery { emailOAuthConnector.refreshConnectionStatus(EmailOAuthProvider.OUTLOOK_MAIL) } returns
+            EmailOAuthResult.Connected
+        coEvery { sourceSyncPort.requestManualSync(SourceType.OUTLOOK_MAIL) } returns BecalmResult.Success(Unit)
+        val viewModel = buildViewModel()
+
+        viewModel.emailConnectEvents.test {
+            viewModel.refreshEmailProviderConnection(EmailPipaProvider.OUTLOOK_MAIL)
+            advanceUntilIdle()
+
+            assertEquals(EmailConnectEvent.Syncing(EmailPipaProvider.OUTLOOK_MAIL), awaitItem())
+            assertEquals(EmailConnectEvent.Connected(EmailPipaProvider.OUTLOOK_MAIL), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.OUTLOOK_MAIL) }
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.OUTLOOK_MAIL, any()) }
+        assertEquals(
+            StepStatus.COMPLETE,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_OUTLOOK_MAIL),
+        )
+    }
+
+    @Test
     fun `calendar status refresh success emits connected event for browser callback return`() = runTest {
         coEvery {
             calendarOAuthConnector.refreshConnectionStatus(CalendarOAuthProvider.GOOGLE_CALENDAR)
@@ -815,11 +842,11 @@ class OnboardingViewModelSpecTest {
 	    }
 
 	    @Test
-	    fun `calendar status refresh keeps step in progress when server sync is still running`() = runTest {
+	    fun `calendar status refresh completes onboarding step when preview sync continues in background`() = runTest {
 	        coEvery {
 	            calendarOAuthConnector.refreshConnectionStatus(CalendarOAuthProvider.GOOGLE_CALENDAR)
 	        } returns CalendarOAuthResult.Connected
-	        coEvery { calendarEventRepository.triggerServerSync() } returns
+	        coEvery { calendarEventRepository.triggerServerSync(any(), any()) } returns
 	            BecalmResult.Success(CalendarSyncResponse(synced = 0, status = "pending", accepted = true))
 	        val viewModel = buildViewModel()
 
@@ -828,17 +855,14 @@ class OnboardingViewModelSpecTest {
 	            advanceUntilIdle()
 
 	            assertEquals(CalendarConnectEvent.Syncing(CalendarOAuthProvider.GOOGLE_CALENDAR), awaitItem())
-	            expectNoEvents()
+	            assertEquals(CalendarConnectEvent.Connected(CalendarOAuthProvider.GOOGLE_CALENDAR), awaitItem())
 	            cancelAndIgnoreRemainingEvents()
 	        }
 
 	        assertEquals(
-	            StepStatus.IN_PROGRESS,
+	            StepStatus.COMPLETE,
 	            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GOOGLE_CALENDAR),
 	        )
-	        coVerify(exactly = 0) {
-	            sourceStatusRepository.recordSyncSuccess(SourceType.GOOGLE_CALENDAR, any())
-	        }
 	    }
 
     @Test
@@ -957,6 +981,7 @@ class OnboardingViewModelSpecTest {
         coVerify(exactly = 1) { userPrefsStore.setEmailSourceConnected(EmailPipaProvider.NAVER_IMAP, true) }
         coVerify(exactly = 1) { sourceStatusRepository.clear(com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP) }
         verify(exactly = 1) { appRuntimeSyncCoordinator.refresh() }
+        verify(exactly = 1) { workScheduler.enqueueExpedited(com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP) }
         assertEquals(
             StepStatus.COMPLETE,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_IMAP),
@@ -1624,38 +1649,6 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `onboarding source ownership update writes repository and refreshes self anchors`() = runTest {
-        val viewModel = buildViewModel()
-        coEvery {
-            sourceConnectionRepository.setOwnership("user-123", "conn-gmail", "self", null)
-        } returns BecalmResult.Success(sourceConnection(id = "conn-gmail", ownership = "self"))
-
-        viewModel.onSetSourceConnectionOwnership("conn-gmail", "self")
-        advanceUntilIdle()
-
-        coVerify(exactly = 1) {
-            sourceConnectionRepository.setOwnership("user-123", "conn-gmail", "self", null)
-        }
-        coVerify(atLeast = 1) { selfIdentityRepository.refresh("user-123") }
-        assertEquals(null, viewModel.uiState.value.updatingSourceOwnershipId)
-        assertEquals(null, viewModel.uiState.value.error)
-    }
-
-    @Test
-    fun `source ownership update exception resets row loading and keeps setup retryable`() = runTest {
-        val viewModel = buildViewModel()
-        coEvery {
-            sourceConnectionRepository.setOwnership("user-123", "conn-gmail", "self", null)
-        } throws IllegalStateException("patch failed")
-
-        viewModel.onSetSourceConnectionOwnership("conn-gmail", "self")
-        advanceUntilIdle()
-
-        assertEquals(null, viewModel.uiState.value.updatingSourceOwnershipId)
-        assertEquals(R.string.settings_identity_error_update_connection, viewModel.uiState.value.error?.resId)
-    }
-
-    @Test
     fun `setup completion does not block on unknown source ownership during first run`() = runTest {
         coEvery { userProfileRepository.find("user-123") } returns userProfile(
             displayName = "민홍",
@@ -1730,6 +1723,7 @@ class OnboardingViewModelSpecTest {
         firstMemoryRepository = firstMemoryRepository,
         onboardingActivationPreviewRepository = onboardingActivationPreviewRepository,
         rawIngestionRepository = rawIngestionRepository,
+        sourceSyncPort = sourceSyncPort,
         workScheduler = workScheduler,
     )
 

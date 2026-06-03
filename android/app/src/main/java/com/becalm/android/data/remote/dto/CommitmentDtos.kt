@@ -44,6 +44,9 @@ public data class CommitmentDto(
     /** Decision status subtype. Non-null only when item_type == "decision". */
     @field:Json(name = "decision_status") val decisionStatus: String? = null,
 
+    /** Agenda-state tag. `schedule_coordination` marks meeting-time coordination action rows. */
+    @field:Json(name = "agenda_intent") val agendaIntent: String? = null,
+
     /**
      * Raw uncanonized counterparty identifier as extracted from the source event.
      * May be a phone number, email address, or display name.
@@ -117,6 +120,9 @@ public data class CommitmentDto(
 
     /** Source-system reference linking back to the originating raw event. */
     @field:Json(name = "source_ref") val sourceRef: String? = null,
+
+    /** Durable source_events/raw_ingestion_events primary key for exact original-evidence lookup. */
+    @field:Json(name = "source_event_id") val sourceEventId: String? = null,
 
     /**
      * LLM confidence score for this extraction, in [0.0, 1.0].

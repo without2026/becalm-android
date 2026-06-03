@@ -3,6 +3,7 @@ package com.becalm.android.ui.commitments
 import com.becalm.android.core.util.KST
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkRelationType
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
@@ -10,6 +11,7 @@ import com.becalm.android.data.local.db.entity.ScheduleEventLinkStatus
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.actions.toPersonActionItemUi
 import com.becalm.android.ui.components.formatDayBadgeLabel
 import com.becalm.android.ui.components.isGiveDirection
 import com.becalm.android.ui.components.isTakeDirection
@@ -18,29 +20,33 @@ import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 
 internal object CommitmentManagementProjector {
-	    fun buildUiState(
-	        current: CommitmentUiState,
-	        rows: List<CommitmentManagementRow>,
-	        scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
-	        filter: CommitmentFilter = current.filter,
-	        loading: Boolean = current.loading,
-	        now: Instant,
-	    ): CommitmentUiState {
-	        val effectiveFilter = filter.takeUnless { it == CommitmentFilter.SCHEDULE } ?: CommitmentFilter.ALL
-	        val commitmentRows = rows.filterNot { it.itemType == CommitmentItemType.SCHEDULE }
-	        val projectedRows = applyFilter(commitmentRows, scheduleLinks, effectiveFilter, now)
-	        val activeRows = projectedRows.filterNot(::isTerminalRow)
-	        return current.copy(
-	            filter = effectiveFilter,
-	            items = projectedRows,
-	            activeItems = activeRows,
-	            scheduleUpcomingItems = emptyList(),
-	            schedulePastSection = CommitmentSectionUiState(
-	                count = 0,
-	                items = emptyList(),
-	                expanded = false,
-	                dimmed = true,
-	            ),
+    fun buildUiState(
+        current: CommitmentUiState,
+        rows: List<CommitmentManagementRow>,
+        scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
+        actionRows: List<PersonActionItemCacheEntity> = emptyList(),
+        filter: CommitmentFilter = current.filter,
+        loading: Boolean = current.loading,
+        now: Instant,
+    ): CommitmentUiState {
+        val effectiveFilter = filter.takeUnless { it == CommitmentFilter.SCHEDULE } ?: CommitmentFilter.ALL
+        val commitmentRows = rows.filterNot { it.itemType == CommitmentItemType.SCHEDULE }
+        val projectedRows = applyFilter(commitmentRows, scheduleLinks, effectiveFilter, now)
+        val activeRows = projectedRows.filterNot(::isTerminalRow)
+        return current.copy(
+            filter = effectiveFilter,
+            items = projectedRows,
+            topActions = actionRows
+                .map { it.toPersonActionItemUi() }
+                .take(COMMITMENT_ACTION_VISIBLE_LIMIT),
+            activeItems = activeRows,
+            scheduleUpcomingItems = emptyList(),
+            schedulePastSection = CommitmentSectionUiState(
+                count = 0,
+                items = emptyList(),
+                expanded = false,
+                dimmed = true,
+            ),
             confirmedSection = buildDueSectionState(
                 rows = activeRows,
                 bucket = CommitmentDueBucket.CONFIRMED,
@@ -122,10 +128,10 @@ internal object CommitmentManagementProjector {
                     isTakeDirection(it.row.direction) &&
                     !it.state.isClosed()
             }
-	            CommitmentFilter.SCHEDULE -> emptyList()
-	            CommitmentFilter.CLOSED -> rowsWithState.filter {
-	                it.row.itemType == CommitmentItemType.ACTION && it.state.isClosed()
-	            }
+            CommitmentFilter.SCHEDULE -> emptyList()
+            CommitmentFilter.CLOSED -> rowsWithState.filter {
+                it.row.itemType == CommitmentItemType.ACTION && it.state.isClosed()
+            }
         }
         return filtered
             .sortedForDisplay(now)
@@ -195,6 +201,7 @@ internal object CommitmentManagementProjector {
             direction = direction,
             scheduleStatus = scheduleStatus,
             decisionStatus = decisionStatus,
+            agendaIntent = agendaIntent,
             derivedStatus = direction?.let { state.name },
             actionState = state,
             dueAt = dueAt,
@@ -269,8 +276,10 @@ internal object CommitmentManagementProjector {
             CommitmentDueBucket.PAST
         } else {
             CommitmentDueBucket.CONFIRMED
-        }
     }
+}
+
+private const val COMMITMENT_ACTION_VISIBLE_LIMIT = 3
 
     fun buildSectionState(
         rows: List<CommitmentRow>,

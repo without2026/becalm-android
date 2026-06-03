@@ -3,7 +3,6 @@ package com.becalm.android.worker.ingestion
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.imap.ImapMessage
-import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 
 internal data class ImapRawEventResolution(
@@ -17,7 +16,6 @@ internal suspend fun resolveImapRawEventIds(
     sourceType: String,
     provider: String,
     folderLabel: String,
-    emailBodyRepository: EmailBodyRepository,
     rawIngestionRepository: RawIngestionRepository,
     toEntity: (ImapMessage) -> RawIngestionEventEntity,
 ): BecalmResult<ImapRawEventResolution> {
@@ -25,17 +23,6 @@ internal suspend fun resolveImapRawEventIds(
     val pendingInserts = mutableListOf<Pair<Int, RawIngestionEventEntity>>()
 
     messages.forEachIndexed { index, message ->
-        val existingBody = emailBodyRepository.findByProviderMessage(
-            userId = userId,
-            sourceType = sourceType,
-            folder = folderLabel,
-            providerMessageId = message.providerMessageId(),
-        )
-        if (existingBody != null) {
-            rawEventIds[index] = existingBody.rawEventId
-            return@forEachIndexed
-        }
-
         val legacyRawEvent = rawIngestionRepository.findByClientEventId(
             userId = userId,
             clientEventId = message.legacyImapClientEventId(provider, folderLabel),

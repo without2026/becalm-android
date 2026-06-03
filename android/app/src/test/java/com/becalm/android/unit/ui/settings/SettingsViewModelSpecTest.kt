@@ -9,6 +9,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.domain.reminder.CommitmentReminderReconciler
 import com.becalm.android.ui.settings.SettingsViewModel
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
@@ -42,6 +43,7 @@ class SettingsViewModelSpecTest {
     private val authRepository: AuthRepository = mockk(relaxed = true)
     private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
+    private val commitmentReminderReconciler: CommitmentReminderReconciler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
@@ -178,6 +180,7 @@ class SettingsViewModelSpecTest {
         authRepository = authRepository,
         rawIngestionRepository = rawIngestionRepository,
         workScheduler = workScheduler,
+        commitmentReminderReconciler = commitmentReminderReconciler,
         logger = logger,
     )
 

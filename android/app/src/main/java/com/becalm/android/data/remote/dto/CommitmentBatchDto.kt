@@ -61,6 +61,9 @@ public data class CommitmentBatchPayloadDto(
     /** Decision subtype for decision rows, null otherwise. */
     @field:Json(name = "decision_status") val decisionStatus: String? = null,
 
+    /** Agenda-state tag. `schedule_coordination` marks meeting-time coordination action rows. */
+    @field:Json(name = "agenda_intent") val agendaIntent: String? = null,
+
     /** Raw uncanonized counterparty identifier; may be phone / email / display name. */
     @field:Json(name = "counterparty_raw") val counterpartyRaw: String? = null,
 
@@ -107,6 +110,9 @@ public data class CommitmentBatchPayloadDto(
 
     /** Source-system reference linking back to the originating raw event. */
     @field:Json(name = "source_ref") val sourceRef: String? = null,
+
+    /** Durable source_events/raw_ingestion_events primary key for exact original-evidence lookup. */
+    @field:Json(name = "source_event_id") val sourceEventId: String? = null,
 
     /** LLM confidence score in [0.0, 1.0]. */
     @field:Json(name = "confidence") val confidence: Double,

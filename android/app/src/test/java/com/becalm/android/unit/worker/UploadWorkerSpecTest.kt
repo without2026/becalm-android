@@ -294,6 +294,7 @@ class UploadWorkerSpecTest {
                     rawUploadBatchSizes += (args?.firstOrNull() as? List<RawIngestionEventEntity>).orEmpty().size
                     rawUploadResult
                 }
+                "recordServerAcknowledgements" -> BecalmResult.Success(Unit)
                 "markSynced" -> {
                     rawMarkSyncedCalls += 1
                     @Suppress("UNCHECKED_CAST")

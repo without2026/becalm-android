@@ -18,7 +18,7 @@ import com.becalm.android.ui.theme.becalmColors
 @Composable
 public fun RelationshipCard(
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(16.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val becalmColors = MaterialTheme.becalmColors
@@ -37,7 +37,7 @@ public fun RelationshipCard(
 @Composable
 public fun EvidenceCard(
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(12.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val becalmColors = MaterialTheme.becalmColors

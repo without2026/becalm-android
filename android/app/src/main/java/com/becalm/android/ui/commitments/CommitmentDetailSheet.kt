@@ -1,9 +1,9 @@
 package com.becalm.android.ui.commitments
 
-import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -49,6 +49,7 @@ import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.SheetCloseRow
 import com.becalm.android.ui.components.uiMessageStringResource
@@ -97,7 +98,7 @@ public fun CommitmentDetailSheet(
     managementViewModel: CommitmentManagementViewModel? = null,
     stateOverride: DetailUiState? = null,
     effectsOverride: Flow<CommitmentDetailEffect>? = null,
-    onRemind: (() -> Unit)? = null,
+    onReminderToggle: ((Boolean) -> Unit)? = null,
     onFollowUp: (() -> Unit)? = null,
     onComplete: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
@@ -109,7 +110,7 @@ public fun CommitmentDetailSheet(
         detailViewModel
     }
     val resolvedManagementViewModel = if (
-        onRemind == null || onFollowUp == null || onComplete == null || onCancel == null
+        onReminderToggle == null || onFollowUp == null || onComplete == null || onCancel == null
     ) {
         managementViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<CommitmentManagementViewModel>()
     } else {
@@ -165,9 +166,8 @@ public fun CommitmentDetailSheet(
                     meetingTranscript = state.meetingTranscript,
                     actionButtons = state.actionButtons,
                     counterpartyDisplayName = state.counterpartyDisplayName,
-                    onRemind = onRemind ?: {
-                        requireNotNull(resolvedManagementViewModel).onRemind(commitmentId)
-                        onDismiss()
+                    onReminderToggle = onReminderToggle ?: { enabled ->
+                        requireNotNull(resolvedManagementViewModel).onToggleReminder(commitmentId, enabled)
                     },
                     onFollowUp = onFollowUp ?: {
                         requireNotNull(resolvedManagementViewModel).onFollowUp(commitmentId)
@@ -207,7 +207,7 @@ internal fun DetailSheetContent(
     meetingTranscript: MeetingTranscriptPresentation? = null,
     actionButtons: CommitmentDetailActionState,
     counterpartyDisplayName: String?,
-    onRemind: () -> Unit,
+    onReminderToggle: (Boolean) -> Unit,
     onFollowUp: () -> Unit,
     onComplete: () -> Unit,
     onCancel: () -> Unit,
@@ -245,40 +245,58 @@ internal fun DetailSheetContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 3. Quote section (read-only; disputed badge if applicable)
-        SectionLabel(text = stringResource(R.string.commitment_detail_quote_label))
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = quote,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        if (history.disputeRaisedAt != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = stringResource(
-                    R.string.commitment_detail_disputed_label_fmt,
-                    CommitmentDetailFormatter.formatShortKst(history.disputeRaisedAt),
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
+        // 3. Source section — keep source title close to quote so users can verify provenance.
+        val hasSourceEvidence = source.sourceLabel != null ||
+            (!source.isManual && !source.sourceType.isNullOrBlank())
+        if (hasSourceEvidence) {
+            EvidenceCard(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionLabel(text = stringResource(R.string.commitment_detail_source_label))
+                    if (!source.isManual && !source.sourceType.isNullOrBlank()) {
+                        EventSourceBadge(sourceType = source.sourceType)
+                    }
+                    source.sourceLabel?.let { label ->
+                        Text(
+                            text = commitmentStringResource(label),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // 4. Quote section (read-only; disputed badge if applicable)
+        EvidenceCard(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionLabel(text = stringResource(R.string.commitment_detail_quote_label))
+                Text(
+                    text = quote,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (history.disputeRaisedAt != null) {
+                    Text(
+                        text = stringResource(
+                            R.string.commitment_detail_disputed_label_fmt,
+                            CommitmentDetailFormatter.formatShortKst(history.disputeRaisedAt),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-
-        // 4. Source section — manual vs LLM-extracted diverge per MAN-004
-        if (!source.isManual && !source.sourceType.isNullOrBlank()) {
-            EventSourceBadge(sourceType = source.sourceType)
-            Spacer(modifier = Modifier.height(6.dp))
-        }
-        Text(
-            text = source.sourceLabel?.let { commitmentStringResource(it) }.orEmpty(),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
 
         // 5. Counterparty line
         if (counterpartyDisplayName != null) {
@@ -355,12 +373,12 @@ internal fun DetailSheetContent(
         }
 
         // 7. Action button strip
-        if (actionButtons.availableActions.isNotEmpty() || actionButtons.editEnabled) {
+        if (actionButtons.availableActions.isNotEmpty() || actionButtons.editEnabled || actionButtons.reminderToggleVisible) {
             ActionButtonRow(
                 actionState = actionState,
                 isDeleted = entity.deletedAt != null,
                 actionButtons = actionButtons,
-                onRemind = onRemind,
+                onReminderToggle = onReminderToggle,
                 onFollowUp = onFollowUp,
                 onComplete = onComplete,
                 onCancel = onCancel,
@@ -409,14 +427,14 @@ private fun ActionButtonRow(
     actionState: CommitmentState,
     isDeleted: Boolean,
     actionButtons: CommitmentDetailActionState,
-    onRemind: () -> Unit,
+    onReminderToggle: (Boolean) -> Unit,
     onFollowUp: () -> Unit,
     onComplete: () -> Unit,
     onCancel: () -> Unit,
     onEdit: () -> Unit,
 ) {
     // Enable gates per plan §task description "CMT-003 matrix":
-    //   [리마인드] — PENDING only
+    //   [알림]   — due_at이 확정된 action/schedule에서 on/off 토글
     //   [팔로업]  — PENDING / REMINDED
     //   [완료]   — PENDING / REMINDED / FOLLOWED_UP / OVERDUE
     //   [취소]   — PENDING / REMINDED / FOLLOWED_UP / OVERDUE
@@ -426,9 +444,25 @@ private fun ActionButtonRow(
             add(
                 CommitmentDetailActionSpec(
                     kind = CommitmentDetailActionKind.REMIND,
-                    labelRes = R.string.commitment_action_remind,
+                    label = stringResource(R.string.commitment_action_remind),
                     testTag = "commitment-detail-remind",
-                    onClick = onRemind,
+                    onClick = { onReminderToggle(true) },
+                ),
+            )
+        }
+        if (actionButtons.reminderToggleVisible) {
+            add(
+                CommitmentDetailActionSpec(
+                    kind = CommitmentDetailActionKind.REMINDER_TOGGLE,
+                    label = stringResource(
+                        if (actionButtons.reminderEnabled) {
+                            R.string.commitment_action_reminder_on
+                        } else {
+                            R.string.commitment_action_reminder_off
+                        },
+                    ),
+                    testTag = "commitment-detail-reminder-toggle",
+                    onClick = { onReminderToggle(!actionButtons.reminderEnabled) },
                 ),
             )
         }
@@ -436,7 +470,7 @@ private fun ActionButtonRow(
             add(
                 CommitmentDetailActionSpec(
                     kind = CommitmentDetailActionKind.FOLLOW_UP,
-                    labelRes = R.string.commitment_action_follow_up,
+                    label = stringResource(R.string.commitment_action_follow_up),
                     testTag = "commitment-detail-follow-up",
                     onClick = onFollowUp,
                 ),
@@ -446,7 +480,7 @@ private fun ActionButtonRow(
             add(
                 CommitmentDetailActionSpec(
                     kind = CommitmentDetailActionKind.COMPLETE,
-                    labelRes = R.string.commitment_action_complete,
+                    label = stringResource(R.string.commitment_action_complete),
                     testTag = "commitment-detail-complete",
                     onClick = onComplete,
                 ),
@@ -456,7 +490,7 @@ private fun ActionButtonRow(
             add(
                 CommitmentDetailActionSpec(
                     kind = CommitmentDetailActionKind.CANCEL,
-                    labelRes = R.string.commitment_action_cancel,
+                    label = stringResource(R.string.commitment_action_cancel),
                     testTag = "commitment-detail-cancel",
                     onClick = onCancel,
                 ),
@@ -470,7 +504,7 @@ private fun ActionButtonRow(
         ?: if (editEnabled) {
             CommitmentDetailActionSpec(
                 kind = CommitmentDetailActionKind.EDIT,
-                labelRes = R.string.commitment_action_edit,
+                label = stringResource(R.string.commitment_action_edit),
                 testTag = "commitment-detail-edit",
                 onClick = onEdit,
             )
@@ -479,14 +513,14 @@ private fun ActionButtonRow(
         }
     val secondary = actions.filter { action ->
         action != primary &&
-            action.kind in setOf(CommitmentDetailActionKind.REMIND, CommitmentDetailActionKind.FOLLOW_UP)
+            action.kind in setOf(CommitmentDetailActionKind.REMIND, CommitmentDetailActionKind.REMINDER_TOGGLE, CommitmentDetailActionKind.FOLLOW_UP)
     }
     val overflow = buildList {
         if (editEnabled && primary?.kind != CommitmentDetailActionKind.EDIT) {
             add(
                 CommitmentDetailActionSpec(
                     kind = CommitmentDetailActionKind.EDIT,
-                    labelRes = R.string.commitment_action_edit,
+                    label = stringResource(R.string.commitment_action_edit),
                     testTag = "commitment-detail-edit",
                     onClick = onEdit,
                 ),
@@ -504,7 +538,7 @@ private fun ActionButtonRow(
     ) {
         primary?.let { action ->
             BecalmButton(
-                text = stringResource(action.labelRes),
+                text = action.label,
                 onClick = action.onClick,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -519,7 +553,7 @@ private fun ActionButtonRow(
             ) {
                 secondary.forEach { action ->
                     BecalmButton(
-                        text = stringResource(action.labelRes),
+                        text = action.label,
                         onClick = action.onClick,
                         modifier = Modifier
                             .weight(1f)
@@ -544,7 +578,7 @@ private fun ActionButtonRow(
                         ) {
                             overflow.forEach { action ->
                                 DropdownMenuItem(
-                                    text = { Text(text = stringResource(action.labelRes)) },
+                                    text = { Text(text = action.label) },
                                     onClick = {
                                         overflowExpanded = false
                                         action.onClick()
@@ -562,6 +596,7 @@ private fun ActionButtonRow(
 
 private enum class CommitmentDetailActionKind {
     REMIND,
+    REMINDER_TOGGLE,
     FOLLOW_UP,
     COMPLETE,
     CANCEL,
@@ -570,7 +605,7 @@ private enum class CommitmentDetailActionKind {
 
 private data class CommitmentDetailActionSpec(
     val kind: CommitmentDetailActionKind,
-    @StringRes val labelRes: Int,
+    val label: String,
     val testTag: String,
     val onClick: () -> Unit,
 )
@@ -624,6 +659,7 @@ private fun subtypeLabel(entity: CommitmentEntity): String? = when (entity.itemT
     }
     CommitmentItemType.SCHEDULE -> when (entity.scheduleStatus) {
         CommitmentScheduleStatus.CONFIRMED -> stringResource(R.string.commitment_subtype_schedule_confirmed)
+        CommitmentScheduleStatus.TENTATIVE -> stringResource(R.string.commitment_subtype_schedule_tentative)
         CommitmentScheduleStatus.CHANGED -> stringResource(R.string.commitment_subtype_schedule_changed)
         CommitmentScheduleStatus.POSTPONED -> stringResource(R.string.commitment_subtype_schedule_postponed)
         CommitmentScheduleStatus.CANCELLED -> stringResource(R.string.commitment_subtype_schedule_cancelled)

@@ -1558,6 +1558,495 @@ private val MIGRATION_30_31 = object : Migration(30, 31) {
     }
 }
 
+// ─── Migration 31 → 32 (commitments agenda intent) ───────────────────────────
+//
+// Mirrors backend `commitments.agenda_intent`. `schedule_coordination` action rows are
+// meeting-time coordination state, so Android can route them to the Schedule tab and
+// keep the ordinary promise feed limited to give/take work items.
+private val MIGRATION_31_32 = object : Migration(31, 32) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(
+            db = db,
+            tableName = "commitments",
+            columnName = "agenda_intent",
+            definition = "TEXT",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_agenda_intent_active` " +
+                "ON `commitments` (`user_id`, `agenda_intent`, `action_state`, `due_at`)",
+        )
+    }
+}
+
+// ─── Migration 32 → 33 (schedule row tombstones) ────────────────────────────
+//
+// Keeps user-deleted calendar/meeting projection rows hidden locally while the
+// source provider fact remains intact and syncable through Railway.
+private val MIGRATION_32_33 = object : Migration(32, 33) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `schedule_row_tombstones` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `row_type` TEXT NOT NULL,
+                `source_event_id` TEXT NOT NULL,
+                `source_type` TEXT,
+                `source_ref` TEXT,
+                `deleted_at` INTEGER NOT NULL,
+                `sync_status` TEXT NOT NULL DEFAULT 'pending',
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_schedule_row_tombstones_user_id_source_event_id` " +
+                "ON `schedule_row_tombstones` (`user_id`, `source_event_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_schedule_row_tombstones_user_id_sync_status` " +
+                "ON `schedule_row_tombstones` (`user_id`, `sync_status`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_schedule_row_tombstones_user_id_source_type_source_ref` " +
+                "ON `schedule_row_tombstones` (`user_id`, `source_type`, `source_ref`)",
+        )
+    }
+}
+
+// ─── Migration 33 → 34 (commitment source-event anchor) ─────────────────────
+//
+// Backend commitments already carry source_event_id as the durable raw/source event PK.
+// Android previously stored only source_ref, which is provider-local and can fail to join
+// when raw source-event mirroring is paged or stale. Persisting the PK lets detail and
+// person projections anchor commitments to the exact original evidence row.
+private val MIGRATION_33_34 = object : Migration(33, 34) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(
+            db = db,
+            tableName = "commitments",
+            columnName = "source_event_id",
+            definition = "TEXT",
+        )
+        db.execSQL(
+            """
+            UPDATE `commitments`
+            SET `source_event_id` = (
+                SELECT `raw`.`id`
+                FROM `raw_ingestion_events` AS `raw`
+                WHERE `raw`.`user_id` = `commitments`.`user_id`
+                  AND `raw`.`source_type` = `commitments`.`source_type`
+                  AND `raw`.`source_ref` = `commitments`.`source_ref`
+                ORDER BY `raw`.`timestamp` DESC
+                LIMIT 1
+            )
+            WHERE (`source_event_id` IS NULL OR TRIM(`source_event_id`) = '')
+              AND `source_ref` IS NOT NULL
+              AND TRIM(`source_ref`) != ''
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_user_source_event` " +
+                "ON `commitments` (`user_id`, `source_event_id`)",
+        )
+    }
+}
+
+// ─── Migration 34 → 35 (normalized source-event anchors) ────────────────────
+//
+// Gmail/Google Calendar source rows are backend-originated while IMAP/voice/meeting rows
+// can originate on-device. UI joins must not assume `raw_ingestion_events.id`,
+// `source_events.id`, provider ids, and `commitments.source_ref` are interchangeable.
+// This read model preserves all known ids so People/Schedule/Commitment projections can
+// recover titles and match review actions even when one mirror is paged or stale.
+private val MIGRATION_34_35 = object : Migration(34, 35) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `source_event_anchors` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_origin` TEXT NOT NULL,
+                `source_event_id` TEXT,
+                `local_raw_event_id` TEXT,
+                `source_connection_id` TEXT,
+                `source_account_key` TEXT,
+                `provider_event_id` TEXT,
+                `conversation_ref` TEXT,
+                `source_ref` TEXT,
+                `title` TEXT,
+                `snippet` TEXT,
+                `occurred_at` INTEGER,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_source_event_anchors_user_source_event` " +
+                "ON `source_event_anchors` (`user_id`, `source_type`, `source_event_id`)",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `idx_source_event_anchors_user_local_raw` " +
+                "ON `source_event_anchors` (`user_id`, `local_raw_event_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_event_anchors_user_source_ref` " +
+                "ON `source_event_anchors` (`user_id`, `source_type`, `source_ref`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_event_anchors_user_provider_event` " +
+                "ON `source_event_anchors` (`user_id`, `provider_event_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_event_anchors_user_occurred` " +
+                "ON `source_event_anchors` (`user_id`, `occurred_at`)",
+        )
+        db.execSQL(
+            """
+            INSERT OR REPLACE INTO `source_event_anchors` (
+                `id`,
+                `user_id`,
+                `source_type`,
+                `source_origin`,
+                `source_event_id`,
+                `local_raw_event_id`,
+                `source_connection_id`,
+                `source_account_key`,
+                `provider_event_id`,
+                `conversation_ref`,
+                `source_ref`,
+                `title`,
+                `snippet`,
+                `occurred_at`,
+                `created_at`,
+                `updated_at`
+            )
+            SELECT
+                `user_id` || ':' || `source_type` || ':' || `id`,
+                `user_id`,
+                `source_type`,
+                CASE
+                    WHEN `source_type` IN ('gmail', 'outlook_mail', 'google_calendar', 'outlook_calendar')
+                    THEN 'backend'
+                    ELSE 'android_local'
+                END,
+                CASE
+                    WHEN `source_type` IN ('gmail', 'outlook_mail', 'google_calendar', 'outlook_calendar')
+                    THEN `id`
+                    ELSE NULL
+                END,
+                `id`,
+                NULL,
+                NULL,
+                `source_ref`,
+                `conversation_ref`,
+                `source_ref`,
+                `event_title`,
+                `event_snippet`,
+                `timestamp`,
+                CAST(strftime('%s', 'now') AS INTEGER) * 1000,
+                CAST(strftime('%s', 'now') AS INTEGER) * 1000
+            FROM `raw_ingestion_events`
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT OR REPLACE INTO `source_event_anchors` (
+                `id`,
+                `user_id`,
+                `source_type`,
+                `source_origin`,
+                `source_event_id`,
+                `local_raw_event_id`,
+                `source_connection_id`,
+                `source_account_key`,
+                `provider_event_id`,
+                `conversation_ref`,
+                `source_ref`,
+                `title`,
+                `snippet`,
+                `occurred_at`,
+                `created_at`,
+                `updated_at`
+            )
+            SELECT
+                `user_id` || ':' || `source_type` || ':' || COALESCE(`source_event_id`, `source_ref`, `id`),
+                `user_id`,
+                `source_type`,
+                'backend',
+                `source_event_id`,
+                (
+                    SELECT `raw`.`id`
+                    FROM `raw_ingestion_events` AS `raw`
+                    WHERE `raw`.`user_id` = `commitments`.`user_id`
+                      AND `raw`.`source_type` = `commitments`.`source_type`
+                      AND (
+                          (`commitments`.`source_event_id` IS NOT NULL AND `raw`.`id` = `commitments`.`source_event_id`)
+                          OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`id` = `commitments`.`source_ref`)
+                          OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`source_ref` = `commitments`.`source_ref`)
+                      )
+                    ORDER BY `raw`.`timestamp` DESC
+                    LIMIT 1
+                ),
+                NULL,
+                NULL,
+                COALESCE(
+                    (
+                        SELECT `raw`.`source_ref`
+                        FROM `raw_ingestion_events` AS `raw`
+                        WHERE `raw`.`user_id` = `commitments`.`user_id`
+                          AND `raw`.`source_type` = `commitments`.`source_type`
+                          AND (
+                              (`commitments`.`source_event_id` IS NOT NULL AND `raw`.`id` = `commitments`.`source_event_id`)
+                              OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`id` = `commitments`.`source_ref`)
+                              OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`source_ref` = `commitments`.`source_ref`)
+                          )
+                        ORDER BY `raw`.`timestamp` DESC
+                        LIMIT 1
+                    ),
+                    `source_ref`
+                ),
+                (
+                    SELECT `raw`.`conversation_ref`
+                    FROM `raw_ingestion_events` AS `raw`
+                    WHERE `raw`.`user_id` = `commitments`.`user_id`
+                      AND `raw`.`source_type` = `commitments`.`source_type`
+                      AND (
+                          (`commitments`.`source_event_id` IS NOT NULL AND `raw`.`id` = `commitments`.`source_event_id`)
+                          OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`id` = `commitments`.`source_ref`)
+                          OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`source_ref` = `commitments`.`source_ref`)
+                      )
+                    ORDER BY `raw`.`timestamp` DESC
+                    LIMIT 1
+                ),
+                `source_ref`,
+                COALESCE(`source_event_title`, `title`),
+                (
+                    SELECT `raw`.`event_snippet`
+                    FROM `raw_ingestion_events` AS `raw`
+                    WHERE `raw`.`user_id` = `commitments`.`user_id`
+                      AND `raw`.`source_type` = `commitments`.`source_type`
+                      AND (
+                          (`commitments`.`source_event_id` IS NOT NULL AND `raw`.`id` = `commitments`.`source_event_id`)
+                          OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`id` = `commitments`.`source_ref`)
+                          OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`source_ref` = `commitments`.`source_ref`)
+                      )
+                    ORDER BY `raw`.`timestamp` DESC
+                    LIMIT 1
+                ),
+                COALESCE(
+                    (
+                        SELECT `raw`.`timestamp`
+                        FROM `raw_ingestion_events` AS `raw`
+                        WHERE `raw`.`user_id` = `commitments`.`user_id`
+                          AND `raw`.`source_type` = `commitments`.`source_type`
+                          AND (
+                              (`commitments`.`source_event_id` IS NOT NULL AND `raw`.`id` = `commitments`.`source_event_id`)
+                              OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`id` = `commitments`.`source_ref`)
+                              OR (`commitments`.`source_ref` IS NOT NULL AND `raw`.`source_ref` = `commitments`.`source_ref`)
+                          )
+                        ORDER BY `raw`.`timestamp` DESC
+                        LIMIT 1
+                    ),
+                    `source_event_occurred_at`
+                ),
+                CAST(strftime('%s', 'now') AS INTEGER) * 1000,
+                CAST(strftime('%s', 'now') AS INTEGER) * 1000
+            FROM `commitments`
+            WHERE (`source_event_id` IS NOT NULL AND TRIM(`source_event_id`) != '')
+               OR (`source_ref` IS NOT NULL AND TRIM(`source_ref`) != '')
+               OR (`source_event_title` IS NOT NULL AND TRIM(`source_event_title`) != '')
+               OR (`title` IS NOT NULL AND TRIM(`title`) != '')
+            """.trimIndent(),
+        )
+    }
+}
+
+private val MIGRATION_35_36 = object : Migration(35, 36) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `user_corrections` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `domain` TEXT NOT NULL,
+                `action` TEXT NOT NULL,
+                `target_type` TEXT NOT NULL,
+                `target_id` TEXT NOT NULL,
+                `source_event_id` TEXT,
+                `commitment_id` TEXT,
+                `from_person_id` TEXT,
+                `to_person_id` TEXT,
+                `conflict_key` TEXT NOT NULL,
+                `idempotency_key` TEXT NOT NULL,
+                `target_fingerprint` TEXT,
+                `payload_json` TEXT NOT NULL DEFAULT '{}',
+                `status` TEXT NOT NULL DEFAULT 'active',
+                `sync_status` TEXT NOT NULL DEFAULT 'pending',
+                `failure_reason` TEXT,
+                `client_created_at` INTEGER NOT NULL,
+                `applied_at` INTEGER,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_user_corrections_user_idempotency` " +
+                "ON `user_corrections` (`user_id`, `idempotency_key`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_user_corrections_user_sync_updated` " +
+                "ON `user_corrections` (`user_id`, `sync_status`, `updated_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_user_corrections_user_conflict_status` " +
+                "ON `user_corrections` (`user_id`, `conflict_key`, `status`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_user_corrections_user_source_event` " +
+                "ON `user_corrections` (`user_id`, `source_event_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_user_corrections_user_commitment` " +
+                "ON `user_corrections` (`user_id`, `commitment_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_user_corrections_user_updated` " +
+                "ON `user_corrections` (`user_id`, `updated_at`)",
+        )
+    }
+}
+
+private val MIGRATION_36_37 = object : Migration(36, 37) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_action_item_cache` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `person_id` TEXT,
+                `person_display_name` TEXT,
+                `person_sort_key` TEXT,
+                `surfaces_csv` TEXT NOT NULL,
+                `action_kind` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
+                `primary_verb` TEXT NOT NULL,
+                `short_reason` TEXT NOT NULL,
+                `commitment_id` TEXT,
+                `calendar_event_id` TEXT,
+                `source_event_id` TEXT,
+                `source_type` TEXT,
+                `source_ref` TEXT,
+                `due_at` INTEGER,
+                `due_hint` TEXT,
+                `due_is_approximate` INTEGER NOT NULL,
+                `stale_after` INTEGER,
+                `urgency_score` REAL NOT NULL,
+                `importance_score` REAL NOT NULL,
+                `confidence` REAL NOT NULL,
+                `reason_codes_csv` TEXT NOT NULL,
+                `input_watermark` INTEGER NOT NULL,
+                `server_watermark` INTEGER NOT NULL,
+                `computed_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                `snoozed_until` INTEGER,
+                `completed_at` INTEGER,
+                `dismissed_at` INTEGER,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_action_cache_user_status_urgency` " +
+                "ON `person_action_item_cache` (`user_id`, `status`, `urgency_score`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_action_cache_user_person_status` " +
+                "ON `person_action_item_cache` (`user_id`, `person_id`, `status`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_action_cache_user_updated` " +
+                "ON `person_action_item_cache` (`user_id`, `updated_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_action_cache_user_watermark` " +
+                "ON `person_action_item_cache` (`user_id`, `server_watermark`)",
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_action_mutation_queue` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `action_item_id` TEXT NOT NULL,
+                `client_mutation_id` TEXT NOT NULL,
+                `mutation_kind` TEXT NOT NULL,
+                `payload_json` TEXT NOT NULL,
+                `sync_status` TEXT NOT NULL,
+                `attempt_count` INTEGER NOT NULL,
+                `last_error_code` TEXT,
+                `last_error_client_action` TEXT,
+                `next_attempt_at` INTEGER,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_action_mutation_queue_user_sync` " +
+                "ON `person_action_mutation_queue` (`user_id`, `sync_status`, `updated_at`)",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_action_mutation_queue_user_mutation` " +
+                "ON `person_action_mutation_queue` (`user_id`, `client_mutation_id`)",
+        )
+    }
+}
+
+private val MIGRATION_37_38 = object : Migration(37, 38) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_action_sync_state` (
+                `user_id` TEXT NOT NULL,
+                `surface_key` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `server_watermark` INTEGER NOT NULL,
+                `recompute_state` TEXT,
+                `capacity_state` TEXT,
+                `last_synced_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`user_id`, `surface_key`, `status`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_action_sync_state_user_updated` " +
+                "ON `person_action_sync_state` (`user_id`, `updated_at`)",
+        )
+    }
+}
+
+private val MIGRATION_38_39 = object : Migration(38, 39) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(db, "person_action_item_cache", "primary_evidence_kind", "TEXT")
+        addColumnIfMissing(db, "person_action_item_cache", "primary_evidence_id", "TEXT")
+        addColumnIfMissing(db, "person_action_item_cache", "primary_evidence_source_ref", "TEXT")
+        addColumnIfMissing(db, "person_action_item_cache", "primary_evidence_occurred_at", "INTEGER")
+        addColumnIfMissing(db, "person_action_item_cache", "primary_evidence_label", "TEXT")
+        addColumnIfMissing(db, "person_action_item_cache", "primary_evidence_quote", "TEXT")
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1602,4 +2091,12 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_28_29,
     MIGRATION_29_30,
     MIGRATION_30_31,
+    MIGRATION_31_32,
+    MIGRATION_32_33,
+    MIGRATION_33_34,
+    MIGRATION_34_35,
+    MIGRATION_35_36,
+    MIGRATION_36_37,
+    MIGRATION_37_38,
+    MIGRATION_38_39,
 )

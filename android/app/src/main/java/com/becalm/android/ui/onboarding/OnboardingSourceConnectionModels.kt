@@ -88,7 +88,6 @@ public data class OnboardingSourceOwnershipUi(
     val id: String,
     val title: String,
     val accountLabel: String,
-    val ownership: String,
     val status: String,
     val provider: String = "",
     val capability: String = "",

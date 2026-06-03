@@ -163,6 +163,232 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertEquals("email", patchSlot.captured.identityType)
         assertEquals(CUSTOMER_EMAIL, patchSlot.captured.normalizedValue)
         assertEquals("resolved", patchSlot.captured.resolutionStatus)
+
+        val identities = db.personIndexDao().findIdentitiesForMemory(USER_ID, personId)
+        assertTrue(
+            identities.any {
+                it.identityType == "email" &&
+                    it.normalizedValue == CUSTOMER_EMAIL &&
+                    it.verified
+            },
+        )
+        assertTrue(
+            identities.any {
+                it.identityType == "alias" &&
+                    it.normalizedValue == "customer" &&
+                    it.rawValue == "Customer" &&
+                    it.verified
+            },
+        )
+    }
+
+    @Test
+    fun `manual match closes already queued participants with same email`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-cascade-email-1", snippet = "첫 메일입니다."))
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-cascade-email-2", snippet = "후속 메일입니다."))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-cascade-email-1",
+                    sourceEventId = "raw-cascade-email-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-cascade-email-1",
+                    displayName = "Customer",
+                ).copy(
+                    identityType = "email",
+                    normalizedValue = CUSTOMER_EMAIL,
+                    emailRaw = CUSTOMER_EMAIL,
+                ),
+                sourceParticipant(
+                    id = "participant-cascade-email-2",
+                    sourceEventId = "raw-cascade-email-2",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-cascade-email-2",
+                    displayName = "Customer",
+                ).copy(
+                    identityType = "email",
+                    normalizedValue = CUSTOMER_EMAIL,
+                    emailRaw = CUSTOMER_EMAIL,
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+        assertEquals(2, db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).size)
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-cascade-email-1",
+            interactionKind = "email",
+            personAnchor = CUSTOMER_EMAIL,
+            nickname = "Customer",
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+
+        newWorker().doWork()
+
+        val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first()
+        assertEquals(
+            setOf("raw:raw-cascade-email-1", "raw:raw-cascade-email-2"),
+            interactions.map { it.sourceRef }.toSet(),
+        )
+    }
+
+    @Test
+    fun `manual match cascades to same email thread when follow up has no greeting name`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-thread-1",
+                snippet = "안녕하세요 Customer님, 첫 메일입니다.",
+                conversationRef = "gmail-thread-customer",
+            ),
+        )
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-thread-2",
+                snippet = "네, 확인했습니다.",
+                conversationRef = "gmail-thread-customer",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-thread-1",
+                    sourceEventId = "raw-thread-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-thread-1",
+                    displayName = "Customer",
+                ),
+                sourceParticipant(
+                    id = "participant-thread-2",
+                    sourceEventId = "raw-thread-2",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-thread-2",
+                    displayName = CUSTOMER_EMAIL,
+                ).copy(
+                    identityType = "email",
+                    normalizedValue = CUSTOMER_EMAIL,
+                    emailRaw = CUSTOMER_EMAIL,
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+        assertEquals(2, db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).size)
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-thread-1",
+            interactionKind = "email",
+            personAnchor = CUSTOMER_EMAIL,
+            nickname = "Customer",
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+
+        newWorker().doWork()
+
+        val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first()
+        assertEquals(setOf("raw:raw-thread-1", "raw:raw-thread-2"), interactions.map { it.sourceRef }.toSet())
+    }
+
+    @Test
+    fun `manual match does not cascade email thread when follow up has conflicting email`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-thread-conflict-1",
+                snippet = "안녕하세요 Customer님, 첫 메일입니다.",
+                conversationRef = "gmail-thread-conflict",
+            ),
+        )
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-thread-conflict-2",
+                snippet = "다른 담당자입니다.",
+                conversationRef = "gmail-thread-conflict",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-thread-conflict-1",
+                    sourceEventId = "raw-thread-conflict-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-thread-conflict-1",
+                    displayName = "Customer",
+                ).copy(
+                    identityType = "email",
+                    normalizedValue = CUSTOMER_EMAIL,
+                    emailRaw = CUSTOMER_EMAIL,
+                ),
+                sourceParticipant(
+                    id = "participant-thread-conflict-2",
+                    sourceEventId = "raw-thread-conflict-2",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-thread-conflict-2",
+                    displayName = "Other",
+                ).copy(
+                    identityType = "email",
+                    normalizedValue = "other@example.com",
+                    emailRaw = "other@example.com",
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+        assertEquals(2, db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).size)
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-thread-conflict-1",
+            interactionKind = "email",
+            personAnchor = CUSTOMER_EMAIL,
+            nickname = "Customer",
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(
+            listOf("raw:raw-thread-conflict-2"),
+            db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).map { it.sourceRef },
+        )
     }
 
     @Test
@@ -352,6 +578,10 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             listOf("raw:raw-relation-1", "raw:raw-relation-2"),
             interactions.map { it.sourceRef }.sorted(),
         )
+        val aggregate = db.personIndexDao().observeAggregates(USER_ID, limit = 10).first()
+            .single { it.personId == personId }
+        assertEquals(2, aggregate.eventCount)
+        assertEquals(0, aggregate.pendingCommitmentCount)
     }
 
     @Test
@@ -388,7 +618,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
                     displayName = "SPEAKER_02",
                 ).copy(
                     role = "speaker",
-                    relationToUser = "participant",
+                    relationToUser = "counterparty",
                     identityType = "speaker_label",
                     normalizedValue = "SPEAKER_02",
                     confidence = 0.0,
@@ -839,16 +1069,22 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             ioDispatcher = dispatcher,
         )
 
-    private fun rawEvent(id: String, snippet: String): RawIngestionEventEntity =
+    private fun rawEvent(
+        id: String,
+        snippet: String,
+        sourceRef: String = "gmail-$id",
+        conversationRef: String? = null,
+    ): RawIngestionEventEntity =
         RawIngestionEventEntity(
             id = id,
             userId = USER_ID,
             clientEventId = "client-$id",
             sourceType = SourceType.GMAIL,
-            sourceRef = "gmail-$id",
+            sourceRef = sourceRef,
             counterpartyRef = null,
             eventTitle = "예약 알림",
             eventSnippet = snippet,
+            conversationRef = conversationRef,
             folder = "INBOX",
             timestamp = Instant.parse("2026-04-29T00:00:00Z"),
             syncStatus = "synced",

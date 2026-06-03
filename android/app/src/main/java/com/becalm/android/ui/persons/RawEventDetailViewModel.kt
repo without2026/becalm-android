@@ -11,10 +11,15 @@ import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.NoopSourceEventAnchorDao
+import com.becalm.android.data.local.db.dao.SourceEventAnchorDao
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceOriginalResolver
+import com.becalm.android.data.repository.NoopUserCorrectionRepository
+import com.becalm.android.data.repository.UserCorrectionRepository
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
@@ -71,8 +76,12 @@ public data class RawEventDetailUiState(
     val attachmentCount: Int = 0,
     val commitmentsExtractedCount: Int = 0,
     val syncStatus: String? = null,
+    val participantCorrections: List<RawEventParticipantCorrectionRow> = emptyList(),
+    val participantChoices: List<RawEventParticipantChoiceRow> = emptyList(),
+    val correctingParticipantIds: Set<String> = emptySet(),
     val loading: Boolean = true,
     val error: UiMessage? = null,
+    val message: UiMessage? = null,
 )
 
 public data class RawEventCommitmentSummary(
@@ -82,6 +91,25 @@ public data class RawEventCommitmentSummary(
     val direction: String?,
     val status: String?,
     val quote: String,
+)
+
+public data class RawEventParticipantCorrectionRow(
+    val participantId: String,
+    val sourceEventId: String,
+    val currentPersonId: String?,
+    val displayName: String,
+    val detail: String?,
+    val role: String,
+    val resolutionStatus: String,
+    val confidence: Double,
+)
+
+public data class RawEventParticipantChoiceRow(
+    val personId: String,
+    val displayName: String,
+    val detail: String?,
+    val identityType: String?,
+    val normalizedValue: String?,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -107,7 +135,9 @@ internal const val ARG_EVENT_ID = "event_id"
 public class RawEventDetailViewModel @Inject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
     private val sourceOriginalResolver: SourceOriginalResolver,
+    private val sourceEventAnchorDao: SourceEventAnchorDao = NoopSourceEventAnchorDao,
     private val projectionPort: RawEventDetailProjectionPort,
+    private val userCorrectionRepository: UserCorrectionRepository = NoopUserCorrectionRepository,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
@@ -134,6 +164,94 @@ public class RawEventDetailViewModel @Inject constructor(
 
     // ─── Private ──────────────────────────────────────────────────────────────
 
+    public fun onMessageShown() {
+        _uiState.value = _uiState.value.copy(message = null)
+    }
+
+    public fun onParticipantReassign(participantId: String, choicePersonId: String) {
+        val currentState = _uiState.value
+        val participant = currentState.participantCorrections.firstOrNull { it.participantId == participantId } ?: return
+        val choice = currentState.participantChoices.firstOrNull { it.personId == choicePersonId } ?: return
+        if (participantId in currentState.correctingParticipantIds) return
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                markCorrectionFinished(
+                    participantId = participantId,
+                    message = UiMessage.resource(R.string.raw_event_person_correction_failed),
+                )
+                return@launch
+            }
+            markCorrectionStarted(participantId)
+            val result = userCorrectionRepository.submitParticipantReassign(
+                userId = userId,
+                participantId = participant.participantId,
+                sourceEventId = participant.sourceEventId,
+                fromPersonId = participant.currentPersonId,
+                toPersonId = choice.personId,
+                identityType = choice.identityType,
+                normalizedValue = choice.normalizedValue,
+                displayNameRaw = choice.displayName,
+            )
+            when (result) {
+                is com.becalm.android.core.result.BecalmResult.Success -> {
+                    markCorrectionFinished(
+                        participantId = participantId,
+                        message = UiMessage.resource(R.string.raw_event_person_correction_saved),
+                    )
+                    loadEvent()
+                }
+                is com.becalm.android.core.result.BecalmResult.Failure -> {
+                    logger.w(TAG, "participant reassign failed: ${result.error}")
+                    markCorrectionFinished(
+                        participantId = participantId,
+                        message = UiMessage.resource(R.string.raw_event_person_correction_failed),
+                    )
+                }
+            }
+        }
+    }
+
+    public fun onParticipantIgnore(participantId: String) {
+        val currentState = _uiState.value
+        val participant = currentState.participantCorrections.firstOrNull { it.participantId == participantId } ?: return
+        if (participantId in currentState.correctingParticipantIds) return
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                markCorrectionFinished(
+                    participantId = participantId,
+                    message = UiMessage.resource(R.string.raw_event_person_correction_failed),
+                )
+                return@launch
+            }
+            markCorrectionStarted(participantId)
+            val result = userCorrectionRepository.submitParticipantIgnore(
+                userId = userId,
+                participantId = participant.participantId,
+                sourceEventId = participant.sourceEventId,
+                fromPersonId = participant.currentPersonId,
+                displayNameRaw = participant.displayName,
+            )
+            when (result) {
+                is com.becalm.android.core.result.BecalmResult.Success -> {
+                    markCorrectionFinished(
+                        participantId = participantId,
+                        message = UiMessage.resource(R.string.raw_event_person_correction_saved),
+                    )
+                    loadEvent()
+                }
+                is com.becalm.android.core.result.BecalmResult.Failure -> {
+                    logger.w(TAG, "participant ignore failed: ${result.error}")
+                    markCorrectionFinished(
+                        participantId = participantId,
+                        message = UiMessage.resource(R.string.raw_event_person_correction_failed),
+                    )
+                }
+            }
+        }
+    }
+
     private fun loadEvent() {
         viewModelScope.launch {
             val userId = userPrefsStore.observeCurrentUserId().first()
@@ -144,6 +262,8 @@ public class RawEventDetailViewModel @Inject constructor(
             }
 
             val entity = rawIngestionRepository.findById(id = eventId, userId = userId)
+                ?: sourceEventAnchorDao.findBestForEventRef(userId = userId, eventRef = eventId)
+                    ?.toSyntheticRawEvent()
             logger.d(TAG, "loadEvent id=%08x found=${entity != null}".format(eventId.hashCode()))
             if (entity == null) {
                 _uiState.value = RawEventDetailProjector.notFoundState()
@@ -154,6 +274,8 @@ public class RawEventDetailViewModel @Inject constructor(
                 val commitmentQuotes = projectionPort.loadCommitmentQuotes(userId, entity)
                 val extractedCommitments = projectionPort.loadCommitmentSummaries(userId, entity)
                 val attendeesRaw = projectionPort.loadCalendarAttendeesRaw(userId, entity)
+                val participantCorrections = projectionPort.loadParticipantCorrections(userId, entity)
+                val participantChoices = projectionPort.loadParticipantCorrectionChoices(userId)
                 val sourceOriginal = sourceOriginalResolver.resolve(userId, entity)
                 RawEventDetailProjector.buildLoadedState(
                     entity = entity,
@@ -162,12 +284,51 @@ public class RawEventDetailViewModel @Inject constructor(
                     commitmentQuotes = commitmentQuotes,
                     extractedCommitments = extractedCommitments,
                     attendeesRaw = attendeesRaw,
+                ).copy(
+                    participantCorrections = participantCorrections,
+                    participantChoices = participantChoices,
+                    correctingParticipantIds = _uiState.value.correctingParticipantIds
+                        .intersect(participantCorrections.mapTo(mutableSetOf()) { it.participantId }),
+                    message = _uiState.value.message,
                 )
             }
             _uiState.value = loadedState
             trackHistoricalItemViewed(entity)
         }
     }
+
+    private fun markCorrectionStarted(participantId: String) {
+        _uiState.value = _uiState.value.copy(
+            correctingParticipantIds = _uiState.value.correctingParticipantIds + participantId,
+            message = null,
+        )
+    }
+
+    private fun markCorrectionFinished(participantId: String, message: UiMessage?) {
+        _uiState.value = _uiState.value.copy(
+            correctingParticipantIds = _uiState.value.correctingParticipantIds - participantId,
+            message = message,
+        )
+    }
+
+    private fun SourceEventAnchorEntity.toSyntheticRawEvent(): RawIngestionEventEntity =
+        RawIngestionEventEntity(
+            id = sourceEventId ?: localRawEventId ?: id,
+            userId = userId,
+            clientEventId = sourceEventId ?: localRawEventId ?: id,
+            sourceType = sourceType,
+            sourceRef = sourceRef ?: providerEventId,
+            counterpartyRef = null,
+            eventTitle = title,
+            eventSnippet = snippet,
+            durationSeconds = null,
+            location = null,
+            conversationRef = conversationRef,
+            folder = null,
+            commitmentsExtractedCount = 0,
+            timestamp = occurredAt ?: Clock.System.now(),
+            syncStatus = "synced",
+        )
 
     private fun trackHistoricalItemViewed(entity: RawIngestionEventEntity) {
         productAnalytics.track(

@@ -7,6 +7,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.domain.reminder.CommitmentReminderReconciler
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -81,6 +82,7 @@ public class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val rawIngestionRepository: RawIngestionRepository,
     private val workScheduler: WorkScheduler,
+    private val commitmentReminderReconciler: CommitmentReminderReconciler,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -235,7 +237,16 @@ public class SettingsViewModel @Inject constructor(
             successLog = "notifications toggled to $enabled",
             failureMessage = UiMessage.resource(R.string.settings_error_notifications_toggle_failed),
             write = { userPrefsStore.setNotificationsEnabled(enabled) },
-            onSuccess = { state -> state.copy(notificationsEnabled = enabled, error = null) },
+            onSuccess = { state ->
+                if (enabled) {
+                    viewModelScope.launch {
+                        userPrefsStore.observeCurrentUserId().first()?.let { userId ->
+                            commitmentReminderReconciler.reconcileUser(userId)
+                        }
+                    }
+                }
+                state.copy(notificationsEnabled = enabled, error = null)
+            },
         )
     }
 

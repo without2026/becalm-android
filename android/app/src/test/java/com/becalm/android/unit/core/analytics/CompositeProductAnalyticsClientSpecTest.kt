@@ -159,5 +159,9 @@ class CompositeProductAnalyticsClientSpecTest {
         override suspend fun remove(eventIds: Set<String>) {
             queued.removeAll { it.eventId in eventIds }
         }
+
+        override suspend fun clearAll() {
+            queued.clear()
+        }
     }
 }

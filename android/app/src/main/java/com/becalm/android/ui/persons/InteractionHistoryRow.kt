@@ -90,6 +90,13 @@ internal fun SourceEventCardRow(
             if (card.commitmentsExtractedCount > 0) {
                 CommitmentsExtractedBadge(count = card.commitmentsExtractedCount)
             }
+            if (card.rawEventId != null) {
+                Text(
+                    text = stringResource(R.string.person_detail_open_source),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
     }
 }

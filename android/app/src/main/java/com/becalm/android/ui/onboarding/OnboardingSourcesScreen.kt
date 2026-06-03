@@ -94,7 +94,6 @@ public fun SettingsSourceConnectionsScreen(
     onConnectSource: ((OnboardingSourceProvider, Activity) -> Unit)? = null,
     onPersistEmailConsent: (suspend (EmailPipaProvider) -> Boolean)? = null,
     onRefreshSource: ((OnboardingSourceProvider) -> Unit)? = null,
-    onSourceOwnership: ((String, String) -> Unit)? = null,
     onNavigateDone: (() -> Unit)? = null,
     onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
 ) {
@@ -110,7 +109,6 @@ public fun SettingsSourceConnectionsScreen(
         onConnectSource = onConnectSource,
         onPersistEmailConsent = onPersistEmailConsent,
         onRefreshSource = onRefreshSource,
-        onSourceOwnership = onSourceOwnership,
         onNavigateComplete = onNavigateDone,
         onLaunchPendingIntent = onLaunchPendingIntent,
     )
@@ -140,9 +138,6 @@ internal fun SourceConnectionsScreen(
     onSelfAliasChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
     sourceOwnerships: List<OnboardingSourceOwnershipUi>? = null,
-    sourceOwnershipsReady: Boolean? = null,
-    updatingSourceOwnershipId: String? = null,
-    onSourceOwnership: ((String, String) -> Unit)? = null,
     onConnectSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     onSkipSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     includedProviders: Set<OnboardingSourceProvider>? = null,
@@ -200,10 +195,6 @@ internal fun SourceConnectionsScreen(
     }
     val refreshSource = onRefreshSource ?: { provider ->
         requireNotNull(resolvedViewModel).refreshSourceProviderConnection(provider)
-    }
-    val updateSourceOwnership = onSourceOwnership ?: { id, ownership ->
-        resolvedViewModel?.onSetSourceConnectionOwnership(id, ownership)
-        Unit
     }
     val navigateComplete = onNavigateComplete ?: when (entryPoint) {
         SourceConnectionsEntryPoint.Setup -> {
@@ -295,15 +286,8 @@ internal fun SourceConnectionsScreen(
     } else {
         emptyList()
     }).filterForProviders(if (includedProviders == null) null else effectiveIncludedProviders)
-    val effectiveSourceOwnershipsReady = sourceOwnershipsReady ?: if (entryPoint == SourceConnectionsEntryPoint.Settings) {
-        state.sourceOwnershipsLoaded && !state.sourceOwnershipLoadFailed
-    } else {
-        true
-    }
-    val effectiveUpdatingSourceOwnershipId = updatingSourceOwnershipId
-        ?: if (entryPoint == SourceConnectionsEntryPoint.Settings) state.updatingSourceOwnershipId else null
     val existingConnectionProviders = if (entryPoint == SourceConnectionsEntryPoint.Settings) {
-        state.sourceOwnerships.mapNotNull(OnboardingSourceOwnershipUi::toSourceProvider).toSet()
+        effectiveSourceOwnerships.mapNotNull(OnboardingSourceOwnershipUi::toSourceProvider).toSet()
     } else {
         emptySet()
     }
@@ -375,10 +359,7 @@ internal fun SourceConnectionsScreen(
         if (focusedSettingsItem != null) {
             FocusedSettingsSourceConnectionContent(
                 item = focusedSettingsItem,
-                sourceOwnerships = effectiveSourceOwnerships,
-                sourceOwnershipsReady = effectiveSourceOwnershipsReady,
-                updatingSourceOwnershipId = effectiveUpdatingSourceOwnershipId,
-                onSourceOwnership = updateSourceOwnership,
+                connectedAccounts = effectiveSourceOwnerships,
                 onConnect = { connectProvider(focusedSettingsItem.provider) },
                 continueLabel = stringResource(SourceConnectionCopy.continueLabelRes(entryPoint, hasIncomplete)),
                 onContinue = onContinue,
@@ -405,10 +386,7 @@ internal fun SourceConnectionsScreen(
                 onSelfPhoneChange = onSelfPhoneChange,
                 onSelfAliasChange = onSelfAliasChange,
                 onSaveSelfIdentity = onSaveSelfIdentity,
-                sourceOwnerships = effectiveSourceOwnerships,
-                sourceOwnershipsReady = effectiveSourceOwnershipsReady,
-                updatingSourceOwnershipId = effectiveUpdatingSourceOwnershipId,
-                onSourceOwnership = updateSourceOwnership,
+                connectedAccounts = effectiveSourceOwnerships,
                 onConnectSetupItem = onConnectSetupItem ?: {},
                 onSkipSetupItem = onSkipSetupItem ?: {},
                 continueEnabled = !state.isCompleting,
@@ -425,10 +403,7 @@ internal fun SourceConnectionsScreen(
 @Composable
 private fun FocusedSettingsSourceConnectionContent(
     item: SourceConnectionItemUi,
-    sourceOwnerships: List<OnboardingSourceOwnershipUi>,
-    sourceOwnershipsReady: Boolean,
-    updatingSourceOwnershipId: String?,
-    onSourceOwnership: (String, String) -> Unit,
+    connectedAccounts: List<OnboardingSourceOwnershipUi>,
     onConnect: () -> Unit,
     continueLabel: String,
     onContinue: () -> Unit,
@@ -436,8 +411,6 @@ private fun FocusedSettingsSourceConnectionContent(
     continueLoading: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val sourceOwnershipGateOpen = (sourceOwnershipsReady || sourceOwnerships.isEmpty()) &&
-        sourceOwnerships.none { it.ownership == "unknown" }
     LazyColumn(
         modifier = modifier.testTag("source-connections-list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
@@ -454,36 +427,23 @@ private fun FocusedSettingsSourceConnectionContent(
                 onConnect = onConnect,
             )
         }
-        if (sourceOwnerships.isNotEmpty()) {
-            item(key = "source-ownership-title") {
+        if (connectedAccounts.isNotEmpty()) {
+            item(key = "connected-accounts-title") {
                 Text(
                     text = stringResource(R.string.settings_identity_connections_section),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            if (!sourceOwnershipGateOpen) {
-                item(key = "source-ownership-required") {
-                    Text(
-                        text = stringResource(R.string.onb_setup_source_ownership_required),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            items(sourceOwnerships, key = { ownership -> ownership.id }) { ownership ->
-                SourceOwnershipSetupRow(
-                    item = ownership,
-                    updating = updatingSourceOwnershipId == ownership.id,
-                    onOwnership = { value -> onSourceOwnership(ownership.id, value) },
-                )
+            items(connectedAccounts, key = { account -> account.id }) { account ->
+                SourceConnectedAccountRow(item = account)
             }
         }
         item(key = "settings-source-story-done") {
             BecalmButton(
                 text = continueLabel,
                 onClick = onContinue,
-                enabled = continueEnabled && sourceOwnershipGateOpen,
+                enabled = continueEnabled,
                 loading = continueLoading,
                 modifier = Modifier
                     .fillMaxWidth()

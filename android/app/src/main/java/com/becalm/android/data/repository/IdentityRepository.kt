@@ -20,7 +20,6 @@ import com.becalm.android.data.remote.dto.SelfIdentityAnchorCreateRequestDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorDto
 import com.becalm.android.data.remote.dto.SelfIdentityAnchorPatchRequestDto
 import com.becalm.android.data.remote.dto.SourceConnectionDto
-import com.becalm.android.data.remote.dto.SourceConnectionPatchRequestDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.dto.UserProfileDto
 import java.io.IOException
@@ -91,12 +90,6 @@ public data class OnboardingSelfIdentityCommit(
 public interface SourceConnectionRepository {
     public fun observeAll(userId: String): Flow<List<SourceConnectionEntity>>
     public suspend fun refresh(userId: String): BecalmResult<List<SourceConnectionEntity>>
-    public suspend fun setOwnership(
-        userId: String,
-        connectionId: String,
-        ownership: String,
-        linkedSelfAnchorId: String? = null,
-    ): BecalmResult<SourceConnectionEntity>
     public suspend fun disconnectConnection(
         userId: String,
         connectionId: String,
@@ -351,35 +344,6 @@ public class SourceConnectionRepositoryImpl @Inject constructor(
         } catch (t: Throwable) {
             t.rethrowIfCancellation()
             logger.e(TAG, "source connections refresh failed", t)
-            BecalmResult.Failure(BecalmError.Unknown(t))
-        }
-    }
-
-    override suspend fun setOwnership(
-        userId: String,
-        connectionId: String,
-        ownership: String,
-        linkedSelfAnchorId: String?,
-    ): BecalmResult<SourceConnectionEntity> = withContext(ioDispatcher) {
-        try {
-            val response = api.patchSourceConnection(
-                id = connectionId,
-                request = SourceConnectionPatchRequestDto(
-                    ownership = ownership,
-                    linkedSelfAnchorId = linkedSelfAnchorId,
-                ),
-            )
-            if (!response.isSuccessful) return@withContext BecalmResult.Failure(response.toIdentityError("source_connection"))
-            val entity = response.body()?.data?.toEntity(userId)
-                ?: return@withContext BecalmResult.Failure(BecalmError.NotFound("source_connection"))
-            dao.upsert(entity)
-            BecalmResult.Success(entity)
-        } catch (e: IOException) {
-            logger.w(TAG, "source connection ownership update network failure", e)
-            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
-        } catch (t: Throwable) {
-            t.rethrowIfCancellation()
-            logger.e(TAG, "source connection ownership update failed", t)
             BecalmResult.Failure(BecalmError.Unknown(t))
         }
     }

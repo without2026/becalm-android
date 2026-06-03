@@ -21,7 +21,8 @@ class SourceExtractionInputAdapterSpecTest {
                 {
                   "message_id": "<message@example.com>",
                   "in_reply_to": "<parent@example.com>",
-                  "references": "<root@example.com> <parent@example.com>"
+                  "references": "<root@example.com> <parent@example.com>",
+                  "source_account_key_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 }
             """.trimIndent(),
             folder = "SENT",
@@ -55,6 +56,7 @@ class SourceExtractionInputAdapterSpecTest {
         assertEquals("<message@example.com>", dto.messageIdHeader)
         assertEquals("<parent@example.com>", dto.inReplyToHeader)
         assertEquals("<root@example.com> <parent@example.com>", dto.referencesHeader)
+        assertEquals("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", dto.sourceAccountKeyHash)
         assertEquals(true, dto.hasListUnsubscribe)
         assertEquals(true, dto.hasListId)
         assertEquals(true, dto.autoSubmitted)

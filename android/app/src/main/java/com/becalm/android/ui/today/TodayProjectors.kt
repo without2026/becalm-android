@@ -4,6 +4,7 @@ import com.becalm.android.R
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkRelationType
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
@@ -13,6 +14,7 @@ import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.isActive
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
+import com.becalm.android.ui.actions.toPersonActionItemUi
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.components.isCalendarSource
 import com.becalm.android.ui.main.buildSourceStatusUiMap
@@ -39,7 +41,7 @@ internal object TodayTimelineProjector {
             .groupBy { it.calendarEventId.orEmpty() }
             .mapValues { (_, rows) -> rows.map { it.sourceType }.distinct() }
         val visibleCommitments = commitments.filterNot { row ->
-            row.itemType != CommitmentItemType.SCHEDULE ||
+            !row.isDisplayableAgendaRow() ||
                 row.id in absorbedCommitmentIds ||
                 CommitmentDisplayPolicy.shouldHideNonPersonLifecycleItem(
                     itemType = row.itemType,
@@ -59,6 +61,13 @@ internal object TodayTimelineProjector {
             )
     }
 
+    private fun TodayCommitmentRow.isDisplayableAgendaRow(): Boolean =
+        when (itemType) {
+            CommitmentItemType.SCHEDULE -> direction.isNullOrBlank() &&
+                scheduleStatus in DISPLAYABLE_SCHEDULE_STATUSES
+            else -> false
+        }
+
     private fun TodayCommitmentRow.toTimelineItem(): TimelineItem.Commitment =
         TimelineItem.Commitment(
             id = id,
@@ -67,12 +76,10 @@ internal object TodayTimelineProjector {
             direction = direction,
             sourceType = sourceType,
             scheduleStatus = scheduleStatus,
-            rowTreatment = if (itemType == CommitmentItemType.SCHEDULE) {
-                TodayCommitmentRowTreatment.SCHEDULE
-            } else {
-                TodayCommitmentRowTreatment.ACTION
-            },
+            rowTreatment = TodayCommitmentRowTreatment.SCHEDULE,
             counterpartyDisplayName = counterpartyDisplayName?.take(COUNTERPARTY_DISPLAY_MAX),
+            sourceTitle = sourceTitle,
+            quote = quote,
             dueAt = dueAt,
             dueIsApproximate = dueIsApproximate,
             dueHint = dueHint,
@@ -85,6 +92,8 @@ internal object TodayTimelineProjector {
         if (!attendeesRaw.isNullOrBlank()) {
             TimelineItem.Meeting(
                 id = id,
+                sourceType = sourceType,
+                sourceRef = sourceRef,
                 title = title,
                 attendeesRaw = attendeesRaw,
                 relatedSourceTypes = relatedSourceTypes,
@@ -97,6 +106,8 @@ internal object TodayTimelineProjector {
         } else {
             TimelineItem.CalendarEvent(
                 id = id,
+                sourceType = sourceType,
+                sourceRef = sourceRef,
                 title = title,
                 relatedSourceTypes = relatedSourceTypes,
                 location = location,
@@ -119,6 +130,15 @@ internal object TodayTimelineProjector {
                 ScheduleEventLinkResolutionChoice.SOURCE,
             )
     }
+
+    private val DISPLAYABLE_SCHEDULE_STATUSES = setOf(
+        CommitmentScheduleStatus.CONFIRMED,
+        CommitmentScheduleStatus.TENTATIVE,
+        CommitmentScheduleStatus.CHANGED,
+        CommitmentScheduleStatus.POSTPONED,
+        CommitmentScheduleStatus.CANCELLED,
+        CommitmentScheduleStatus.FOLLOW_UP,
+    )
 }
 
 internal object TodaySyncProjector {
@@ -144,6 +164,8 @@ internal object TodaySyncProjector {
             loading = false,
             timeline = timeline,
             personFocus = emptyList(),
+            scheduleActions = snapshot.scheduleActions
+                .map { it.toPersonActionItemUi() },
             scheduleRangeFilter = snapshot.rangeFilter,
             today = snapshot.today,
             scheduleConflictReviewItems = buildScheduleConflictReviewItems(
