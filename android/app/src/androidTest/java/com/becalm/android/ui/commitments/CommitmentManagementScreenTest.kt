@@ -5,9 +5,6 @@ package com.becalm.android.ui.commitments
 import android.content.Context
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -121,89 +118,6 @@ class CommitmentManagementScreenTest {
     }
 
     @Test
-    fun commitment_management_schedule_filter_shows_timeline_rows_and_detail_tap() {
-        var openedDetailId: String? = null
-        var pastExpanded by mutableStateOf(false)
-
-        composeTestRule.setContent {
-            BecalmTheme {
-                val pullState = rememberPullRefreshState(refreshing = false, onRefresh = {})
-                val currentSchedule = scheduleRow(
-                    id = "schedule-1",
-                    title = "Schedule change",
-                    dueAt = Instant.parse("2026-05-04T01:30:00Z"),
-                    counterpartyDisplayName = "Carol Park",
-                    scheduleTimelineTiming = ScheduleTimelineTiming(
-                        dayLabel = "D-0",
-                        timeLabel = "10:30",
-                        isUntimed = false,
-                    ),
-                )
-                val untimedSchedule = scheduleRow(
-                    id = "schedule-untimed",
-                    title = "Pick a time",
-                    dueAt = null,
-                    counterpartyDisplayName = null,
-                    scheduleTimelineTiming = ScheduleTimelineTiming(
-                        dayLabel = null,
-                        timeLabel = null,
-                        isUntimed = true,
-                    ),
-                )
-                val pastSchedule = scheduleRow(
-                    id = "schedule-past",
-                    title = "Past meeting",
-                    dueAt = Instant.parse("2026-05-03T01:30:00Z"),
-                    counterpartyDisplayName = "Dana Lee",
-                    scheduleTimelineTiming = ScheduleTimelineTiming(
-                        dayLabel = "D+1",
-                        timeLabel = "10:30",
-                        isUntimed = false,
-                    ),
-                )
-                CommitmentManagementScreenContent(
-                    state = CommitmentUiState(
-                        loading = false,
-                        items = listOf(pastSchedule, currentSchedule, untimedSchedule),
-                        scheduleUpcomingItems = listOf(currentSchedule, untimedSchedule),
-                        schedulePastSection = CommitmentSectionUiState(
-                            count = 1,
-                            items = listOf(pastSchedule),
-                            expanded = pastExpanded,
-                            dimmed = true,
-                        ),
-                        filter = CommitmentFilter.SCHEDULE,
-                    ),
-                    snackbarHostState = SnackbarHostState(),
-                    pullState = pullState,
-                    onFilterChange = {},
-                    onMessageScreenshotImport = {},
-                    onMeetingAudioImport = {},
-                    onOpenDetail = { openedDetailId = it },
-                    onTogglePastSection = { pastExpanded = !pastExpanded },
-                )
-            }
-        }
-
-        composeTestRule.onNodeWithTag("commitment-schedule-timeline").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("commitment-schedule-card-schedule-1").assertIsDisplayed()
-        composeTestRule.onNodeWithText("D-0").assertIsDisplayed()
-        composeTestRule.onNodeWithText("10:30").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Carol Park").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Pick a time").assertIsDisplayed()
-        composeTestRule.onAllNodesWithText("Past meeting").assertCountEquals(0)
-        composeTestRule.onNodeWithText(string(R.string.commitment_section_past_fmt, 1)).assertIsDisplayed()
-        composeTestRule.onAllNodesWithText(string(R.string.today_untimed_section)).assertCountEquals(2)
-
-        composeTestRule.onNodeWithTag("commitment-schedule-past-header").performClick()
-        composeTestRule.onNodeWithText("Past meeting").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("commitment-schedule-card-schedule-1").performClick()
-        composeTestRule.runOnIdle {
-            assertEquals("schedule-1", openedDetailId)
-        }
-    }
-
-    @Test
     // spec: MSG-001
     // spec: MAN-001
     // spec: MAN-003
@@ -262,7 +176,6 @@ class CommitmentManagementScreenTest {
         title: String,
         dueAt: Instant? = Instant.parse("2026-04-24T01:00:00Z"),
         counterpartyDisplayName: String? = "Carol Park",
-        scheduleTimelineTiming: ScheduleTimelineTiming? = null,
     ): CommitmentRow = CommitmentRow(
         id = id,
         itemType = "schedule",
@@ -277,7 +190,6 @@ class CommitmentManagementScreenTest {
         dueHint = null,
         counterpartyDisplayName = counterpartyDisplayName,
         isManual = false,
-        scheduleTimelineTiming = scheduleTimelineTiming,
     )
 
     private fun string(resId: Int, vararg args: Any): String =

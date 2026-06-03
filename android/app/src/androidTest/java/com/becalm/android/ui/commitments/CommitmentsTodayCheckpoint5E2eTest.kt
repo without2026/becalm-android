@@ -191,7 +191,7 @@ class CommitmentsTodayCheckpoint5E2eTest {
                         editEnabled = true,
                     ),
                     counterpartyDisplayName = "Alice Kim",
-                    onRemind = {},
+                    onReminderToggle = {},
                     onFollowUp = {},
                     onComplete = { completeCount += 1 },
                     onCancel = { cancelCount += 1 },
