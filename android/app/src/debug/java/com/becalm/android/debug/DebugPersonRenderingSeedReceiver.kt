@@ -30,6 +30,8 @@ import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.PersonActionRepository
+import com.becalm.android.data.repository.MirrorCursorKeys
 import com.becalm.android.data.repository.SourceMirrorCursorReset
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.person.PersonIdentityResolver
@@ -53,6 +55,7 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
     @Inject lateinit var sessionStore: SupabaseSessionStore
     @Inject lateinit var databaseProvider: BeCalmDatabaseProvider
     @Inject lateinit var processingStatusRepository: ProcessingStatusRepository
+    @Inject lateinit var personActionRepository: PersonActionRepository
     @Inject lateinit var sourceStatusRepository: SourceStatusRepository
     @Inject lateinit var syncCursorStore: SyncCursorStore
     @Inject lateinit var workScheduler: WorkScheduler
@@ -71,6 +74,7 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
                 ACTION_SEED_PRIVACY_SMOKE,
                 ACTION_SEED_CORRECTION_SMOKE,
                 ACTION_REPORT_CORRECTION_SMOKE,
+                ACTION_REFRESH_PERSON_ACTIONS_E2E,
             )
         ) return
         val pending = goAsync()
@@ -89,6 +93,7 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
                     ACTION_SEED_PRIVACY_SMOKE -> seedPrivacySmoke()
                     ACTION_SEED_CORRECTION_SMOKE -> seedCorrectionSmoke(intent)
                     ACTION_REPORT_CORRECTION_SMOKE -> reportCorrectionSmoke(intent)
+                    ACTION_REFRESH_PERSON_ACTIONS_E2E -> refreshPersonActionsE2e(intent)
                 }
             }.onSuccess {
                 Timber.i("Debug action completed action=${intent.action}")
@@ -155,6 +160,39 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         Timber.i(
             "Debug Clova audio E2E enqueued rawEventId=$rawEventId " +
                 "sourceType=$sourceType durationSeconds=$durationSeconds sourceRef=$sourceRef",
+        )
+    }
+
+    private suspend fun refreshPersonActionsE2e(intent: Intent) {
+        val userId = ensureE2eSession(intent)
+        val surface = intent.getStringExtra(EXTRA_SURFACE)?.takeIf { it.isNotBlank() } ?: "person"
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
+
+        val db = databaseProvider.current()
+        clearPersonActionRowsForUser(db, userId)
+        val result = personActionRepository.refresh(userId = userId, surface = surface)
+        val actionCount = db.countRows(
+            "SELECT COUNT(*) FROM person_action_item_cache WHERE user_id = ?",
+            arrayOf(userId),
+        )
+        val syncStateCount = db.countRows(
+            "SELECT COUNT(*) FROM person_action_sync_state WHERE user_id = ?",
+            arrayOf(userId),
+        )
+        val summary = when (result) {
+            is com.becalm.android.core.result.BecalmResult.Success ->
+                "success fetched=${result.value.fetched} deleted=${result.value.deleted} " +
+                    "recomputeState=${result.value.recomputeState.orEmpty()}"
+            is com.becalm.android.core.result.BecalmResult.Failure ->
+                "failure error=${result.error::class.simpleName}"
+        }
+        Timber.i(
+            "Debug person action E2E refresh $summary surface=$surface " +
+                "userHash=${userId.shortHash()} cachedActions=$actionCount syncStates=$syncStateCount",
         )
     }
 
@@ -1137,11 +1175,55 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         now: Instant,
     ) {
         val rawEventId = "qa-account-swap-raw-$personId"
+        val providerSourceRef = "qa-account-swap-mail:$personId"
+        db.rawIngestionEventDao().upsertSyncedFromServer(
+            listOf(
+                RawIngestionEventEntity(
+                    id = rawEventId,
+                    userId = userId,
+                    clientEventId = "qa-account-swap-client-$personId",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = providerSourceRef,
+                    counterpartyRef = email,
+                    eventTitle = "Account swap proof for $displayName",
+                    eventSnippet = "Only the current account should render this relationship.",
+                    folder = "INBOX",
+                    commitmentsExtractedCount = 0,
+                    timestamp = now,
+                    syncStatus = "synced",
+                ),
+            ),
+        )
         db.personIndexDao().upsertPersons(
             listOf(person(personId, displayName, email, null, now, userId = userId)),
         )
         db.personIndexDao().upsertIdentities(
             listOf(identity(personId, "email", email, displayName, SourceType.GMAIL, now, true, userId = userId)),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = UUID.nameUUIDFromBytes("qa-account-swap-participant:$userId:$personId".toByteArray()).toString(),
+                    userId = userId,
+                    sourceEventId = rawEventId,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = providerSourceRef,
+                    personId = personId,
+                    role = "counterparty",
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    normalizedValue = email,
+                    displayNameRaw = displayName,
+                    emailRaw = email,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "Synthetic account-swap source participant.",
+                    confidence = 1.0,
+                    resolutionStatus = "resolved",
+                    createdAt = now,
+                ),
+            ),
         )
         db.personIndexDao().upsertInteractions(
             listOf(
@@ -1220,16 +1302,21 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
             "SELECT COUNT(*) FROM commitment_participants WHERE user_id = ?",
             arrayOf(userId),
         )
-        val rawCursorPresent = syncCursorStore.observeCursor("raw_ingestion_events:$sourceType").first() != null
+        val calendarEventCount = db.countRows(
+            "SELECT COUNT(*) FROM calendar_events WHERE user_id = ? AND source_type = ?",
+            arrayOf(userId, sourceType),
+        )
+        val rawCursorPresent = syncCursorStore.observeCursor(MirrorCursorKeys.rawEvents(userId, sourceType)).first() != null
         val sourceParticipantCursorPresent =
-            syncCursorStore.observeCursor("source_event_participants:$sourceType").first() != null
-        val commitmentCursorPresent = syncCursorStore.observeCursor("commitments_cursor").first() != null
-        val commitmentParticipantCursorPresent = syncCursorStore.observeCursor("commitment_participants").first() != null
+            syncCursorStore.observeCursor(MirrorCursorKeys.sourceEventParticipants(userId, sourceType)).first() != null
+        val commitmentCursorPresent = syncCursorStore.observeCursor(MirrorCursorKeys.commitments(userId)).first() != null
+        val commitmentParticipantCursorPresent =
+            syncCursorStore.observeCursor(MirrorCursorKeys.commitmentParticipants(userId)).first() != null
         Timber.i(
             "Debug staging mirror smoke report sourceType=$sourceType " +
                 "userHash=${userId.shortHash()} rawCount=$rawCount " +
                 "sourceParticipantCount=$sourceParticipantCount commitmentCount=$commitmentCount " +
-                "commitmentParticipantCount=$commitmentParticipantCount " +
+                "commitmentParticipantCount=$commitmentParticipantCount calendarEventCount=$calendarEventCount " +
                 "rawCursorPresent=$rawCursorPresent " +
                 "sourceParticipantCursorPresent=$sourceParticipantCursorPresent " +
                 "commitmentCursorPresent=$commitmentCursorPresent " +
@@ -1264,6 +1351,7 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         sql.execSQL("DELETE FROM commitments WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM commitment_participants WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM source_event_participants WHERE user_id = ?", args)
+        runCatching { sql.execSQL("DELETE FROM calendar_events WHERE user_id = ?", args) }
         sql.execSQL("DELETE FROM person_interactions WHERE user_id = ?", args)
         runCatching { sql.execSQL("DELETE FROM unmatched_person_interactions WHERE user_id = ?", args) }
         runCatching { sql.execSQL("DELETE FROM person_index_dirty_sources WHERE user_id = ?", args) }
@@ -1284,6 +1372,7 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         sql.execSQL("DELETE FROM commitments WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM commitment_participants WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM source_event_participants WHERE user_id = ?", args)
+        runCatching { sql.execSQL("DELETE FROM calendar_events WHERE user_id = ?", args) }
         sql.execSQL("DELETE FROM person_interactions WHERE user_id = ?", args)
         runCatching { sql.execSQL("DELETE FROM unmatched_person_interactions WHERE user_id = ?", args) }
         runCatching { sql.execSQL("DELETE FROM person_index_dirty_sources WHERE user_id = ?", args) }
@@ -1295,6 +1384,14 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         runCatching { sql.execSQL("DELETE FROM person_action_sync_state WHERE user_id = ?", args) }
         runCatching { sql.execSQL("DELETE FROM person_action_mutation_queue WHERE user_id = ?", args) }
         sql.execSQL("DELETE FROM persons_enrichment")
+    }
+
+    private fun clearPersonActionRowsForUser(db: BeCalmDatabase, userId: String) {
+        val sql = db.openHelper.writableDatabase
+        val args = arrayOf(userId)
+        runCatching { sql.execSQL("DELETE FROM person_action_item_cache WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_action_sync_state WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_action_mutation_queue WHERE user_id = ?", args) }
     }
 
     private fun clearCorrectionSmokeRows(db: BeCalmDatabase, userId: String) {
@@ -1673,9 +1770,11 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         const val ACTION_SEED_PRIVACY_SMOKE = "com.becalm.android.DEBUG_SEED_PRIVACY_SMOKE"
         const val ACTION_SEED_CORRECTION_SMOKE = "com.becalm.android.DEBUG_SEED_CORRECTION_SMOKE"
         const val ACTION_REPORT_CORRECTION_SMOKE = "com.becalm.android.DEBUG_REPORT_CORRECTION_SMOKE"
+        const val ACTION_REFRESH_PERSON_ACTIONS_E2E = "com.becalm.android.DEBUG_REFRESH_PERSON_ACTIONS_E2E"
         const val EXTRA_AUDIO_PATH = "audio_path"
         const val EXTRA_DURATION_SECONDS = "duration_seconds"
         const val EXTRA_SOURCE_TYPE = "source_type"
+        const val EXTRA_SURFACE = "surface"
         const val EXTRA_EVENT_TITLE = "event_title"
         const val EXTRA_COUNTERPARTY_REF = "counterparty_ref"
         const val EXTRA_USER_ID = "user_id"

@@ -186,5 +186,6 @@ private fun ServerBackedTriggerResult.Pending.processingStatusMessage(): String 
         "backpressure_delayed" -> ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED
         "provider_has_more_pages" -> ProcessingStatusMessages.SOURCE_SYNC_IMPORTING_MORE_PAGES
         "llm_rate_limited_retrying" -> ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING
+        "llm_processing_retrying" -> ProcessingStatusMessages.LLM_PROCESSING_RETRYING
         else -> message
     }

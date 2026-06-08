@@ -1,14 +1,17 @@
 id: relation-ui-schema
 title: Relation UI Schema Contract
-status: draft
-owner: android
-updated_at: 2026-05-04
+status: target_with_backend_person_action_feed
+owner: android-backend
+updated_at: 2026-06-03
+superseded_by: next-action-projection.spec.yml
 
 purpose: >
   Align BeCalm Android UI with the backend relation-intelligence schema. The UI
   must render person-centered relationship memory from canonical person/relation
-  tables instead of legacy person_ref grouping, while preserving local-first
-  behavior and source evidence inspection.
+  tables instead of legacy person_ref grouping, while preserving hybrid source
+  ingress and source evidence inspection. The primary three-tab UI renders
+  backend-computed PersonActionItem cache rows first; relation timelines are
+  evidence/history, not the default first-screen product surface.
 
 canonical_tables:
   persons:
@@ -103,7 +106,7 @@ canonical_tables:
       - "If multiple participants exist, show the primary counterparty first and collapse the rest behind compact chips."
 
   person_interactions:
-    ui_role: "Person detail timeline projection"
+    ui_role: "Person detail evidence/history projection"
     primary_key: interaction_id
     rendered_as:
       - "Person detail timeline row"
@@ -122,7 +125,7 @@ canonical_tables:
       - direction
       - confidence
     ui_rules:
-      - "This is the primary UI feed for Person detail."
+      - "This feeds collapsed evidence/history in Person detail. PersonDetail first viewport is owned by backend PersonActionItem cache."
       - "interaction_type controls row component: email, call, meeting, calendar, commitment, manual."
       - "Rows are sorted occurred_at descending."
       - "Duplicate evidence is collapsed before rendering. Prefer original email/call/meeting over duplicate calendar evidence when overlap is strong."
@@ -130,10 +133,10 @@ canonical_tables:
 
 screen_contracts:
   persons_list:
-    data_source: "Room person_interactions aggregate joined with persons/person_identities/persons_enrichment"
+    data_source: "Room person_action_item_cache where surfaces contains 'person', populated from GET /v1/person_action_items; persons/person_identities/persons_enrichment provide labels; person_interactions aggregate feeds secondary history/search"
     key: person_id
     scope:
-      default: "Only resolved persons with at least one interaction are shown."
+      default: "Only resolved persons with an active person-surface next action are shown in the primary list."
       search: "Search includes resolved persons plus full local contacts when READ_CONTACTS is granted."
       contact_only_rows: "Contact-only rows may appear in search results but not in the default People list until an interaction or manual note exists."
     sections:
@@ -146,10 +149,10 @@ screen_contracts:
     row_content:
       - "display_name"
       - "secondary identity or company/title if available"
-      - "latest interaction snippet"
-      - "channel/source marks"
-      - "open loop count"
-      - "last interaction time"
+      - "top next action title"
+      - "primary verb"
+      - "due label"
+      - "one-line reason"
     empty_state:
       title: "아직 관계 기록이 없어요"
       body: "메일, 통화, 미팅이 연결되면 사람별 기억이 여기에 쌓입니다."
@@ -158,9 +161,10 @@ screen_contracts:
       - "The list does not group by raw person_ref."
       - "Raw UUIDs, source refs, and table names are never visible."
       - "Contacts without interactions are searchable, not listed by default."
+      - "History-only people appear in search or a collapsed secondary section, not as the first-screen primary list."
 
   person_detail:
-    data_source: "Room person_interactions by person_id plus persons/person_identities/commitment_participants/source_event_participants"
+    data_source: "Room person_action_item_cache by person_id, populated from GET /v1/person_action_items?person_id=:person_id, plus persons/person_identities/commitment_participants/source_event_participants/person_interactions"
     key: person_id
     header:
       fields:
@@ -172,7 +176,12 @@ screen_contracts:
         - "Review open loops"
         - "Add note/manual commitment"
         - "Manage match/aliases"
+    first_viewport:
+      primary: "PersonNextMovePanel"
+      secondary: "PersonContextSummary"
+      evidence: "CollapsedSourceTimeline"
     timeline:
+      default_state: "collapsed"
       card_unit: "source_event"
       row_types:
         email:
@@ -202,27 +211,29 @@ screen_contracts:
       - meeting
       - commitment
     invariants:
-      - "Timeline is built from person_interactions first."
+      - "Next move is built from backend-computed person_action_item_cache first."
+      - "Timeline is built from person_interactions as evidence/history."
       - "Legacy raw/commitment/calendar person_ref fallback queries are not part of the PersonDetail primary path."
       - "Referenced-only interactions are visually quieter and clearly labeled."
       - "Each primary card represents one source event. Commitments extracted from that source render inside the card."
       - "Source counts in the header are source-type counts only, not open/done status counts."
 
-  next_action_connector:
-    purpose: "Show that one source event led to a simple next interaction."
-    scope: "Lightweight source-to-source continuity, not a complex workflow graph."
+  person_action_connector:
+    purpose: "Link a backend person action item to the source evidence that produced it."
+    scope: "Evidence connector for PersonActionItem, not a separate workflow graph."
     examples:
       - "Email asks for a reply, next_action='이메일 답신'."
       - "Email says '전화로 자세히 얘기하자', and a later call with the same person is linked as the next action."
       - "Meeting creates a follow-up email, the email appears as the next card link."
     data_requirements:
+      - "person_action_item_id"
       - "source_event_id"
       - "next_source_event_id when a real following source exists"
       - "next_action_type: email_reply | call | meeting | schedule | manual_follow_up | none"
       - "confidence"
-    storage_rule: "Do not add a next_action table in MVP. Compute next action connectors in the UI projection from adjacent source-event cards and lightweight source/commitment overlap."
+    storage_rule: "Backend PersonActionItem owns generated action rows. Connectors are bounded evidence links derived from person_action_item_evidence_refs and adjacent source/commitment overlap."
     ui_rules:
-      - "Render connector text between cards, not as a large card."
+      - "Render connector text inside evidence drill-down or between collapsed history cards, not as a first-screen history feed."
       - "If no next action exists, end the interaction turn quietly."
       - "Do not imply that BeCalm performed the action unless the user explicitly approved it."
 
@@ -270,11 +281,11 @@ screen_contracts:
       - "Person reassignment opens the matching/participant flow and updates relation rows or local manual match state."
 
   commitments_feed:
-    data_source: "Open commitments joined with commitment_participants, persons, and source evidence"
-    key: commitment_id
+    data_source: "Room person_action_item_cache where surfaces contains 'commitment', populated from GET /v1/person_action_items?surface=commitment, joined with commitments/commitment_participants/persons/source evidence for drill-down"
+    key: person_action_item_id
     scope:
-      default: "Open only. Completed/cancelled hidden by default."
-      completed_filter: "A filter may include completed/cancelled history."
+      default: "Backend active person action items only."
+      completed_filter: "A secondary history/evidence view may include completed/cancelled/dismissed rows."
     sort:
       primary: "Due proximity from today"
       order:
@@ -282,22 +293,22 @@ screen_contracts:
         - "Today: D-day"
         - "Upcoming: D-1, D-2, D-5, ..."
         - "No due date: latest source interaction first"
-    card_unit: "commitment with source-event context"
+    card_unit: "person action item with bounded commitment/source evidence"
     card_content:
       - "person display name"
-      - "source event title/source type"
-      - "내가 해야 할 일 or 상대가 해야 할 일 or schedule label"
-      - "commitment title"
+      - "primary verb"
+      - "next action title"
       - "due label"
-      - "evidence quote"
+      - "one-line reason"
+      - "bounded evidence handle"
     invariants:
-      - "This feed is not grouped by person."
+      - "This feed is not a source history feed."
       - "The card remains relationship-aware by showing linked people."
       - "Completed items do not appear unless the user selects the completed/history filter."
 
   today:
-    data_source: "Today-relevant open commitments and today's schedule interactions"
-    key: "timeline row id"
+    data_source: "Room person_action_item_cache where surfaces contains 'schedule', populated from GET /v1/person_action_items?surface=schedule, plus compact calendar agenda evidence"
+    key: "person_action_item_id or calendar_event_id"
     scope:
       - "오늘 처리해야 할 내가 해야 할 일"
       - "오늘 확인해야 할 상대가 해야 할 일"

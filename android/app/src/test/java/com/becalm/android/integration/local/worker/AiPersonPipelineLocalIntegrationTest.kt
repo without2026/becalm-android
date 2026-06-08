@@ -13,6 +13,8 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.BatchUploadResponse
+import com.becalm.android.data.remote.dto.ExtractionStorageRefDto
+import com.becalm.android.data.remote.dto.ExtractionUploadPrepareResponse
 import com.becalm.android.data.remote.dto.ScheduleStatus
 import com.becalm.android.data.remote.dto.SourceExtractedParticipantDto
 import com.becalm.android.data.remote.dto.SourceType
@@ -40,6 +42,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -102,6 +105,34 @@ class AiPersonPipelineLocalIntegrationTest {
     @Test
     fun `Vertex voice response is persisted and kept as a person review candidate`() = runTest {
         db.rawIngestionEventDao().insert(aiVoiceRawEvent())
+        coEvery {
+            sourceExtractionApi.prepareCommitmentExtractionUpload(any())
+        } returns Response.success(
+            ExtractionUploadPrepareResponse(
+                rawEventId = RAW_ID,
+                jobId = "job-ai-voice-1",
+                bucket = "source-extraction-test",
+                path = "voice/raw-ai-voice-1.m4a",
+                contentType = "audio/m4a",
+                mediaKind = "audio",
+                signedUploadUrl = "https://upload.example.test/raw-ai-voice-1",
+                uploadToken = "upload-token",
+                uploadContentType = "audio/m4a",
+                storageRef = ExtractionStorageRefDto(
+                    bucket = "source-extraction-test",
+                    path = "voice/raw-ai-voice-1.m4a",
+                    contentType = "audio/m4a",
+                    rawEventId = RAW_ID,
+                    mediaKind = "audio",
+                ),
+            ),
+        )
+        coEvery {
+            sourceExtractionApi.uploadExtractionMediaToSignedUrl(any(), any())
+        } returns Response.success("".toResponseBody(null))
+        coEvery {
+            sourceExtractionApi.createCommitmentExtractionJob(any())
+        } returns Response.success(aiVoiceResponse())
         coEvery {
             sourceExtractionApi.commitmentExtract(
                 audio = any(),

@@ -58,10 +58,11 @@ public class RoomBackedRawEventDetailProjectionPort @Inject constructor(
         userId: String,
         event: RawIngestionEventEntity,
     ): List<String> {
+        val sourceRefs = event.commitmentSourceRefs()
         return commitmentDao.findQuotesBySourceEventForUser(
             userId = userId,
             sourceEventId = event.id,
-            sourceRef = event.sourceRef,
+            sourceRefs = sourceRefs.ifEmpty { listOf(event.id) },
         )
     }
 

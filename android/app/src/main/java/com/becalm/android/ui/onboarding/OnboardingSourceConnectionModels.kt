@@ -74,6 +74,15 @@ internal val SourceConnectionState.isBusy: Boolean
         this == SourceConnectionState.PendingExternalAuth ||
         this == SourceConnectionState.Syncing
 
+internal fun sourceConnectionStateForStatus(status: String): SourceConnectionState =
+    when (status) {
+        "connected", "synced" -> SourceConnectionState.Connected
+        "connecting" -> SourceConnectionState.Connecting
+        "syncing" -> SourceConnectionState.Syncing
+        "failed", "needs_reauth" -> SourceConnectionState.Failed
+        else -> SourceConnectionState.Idle
+    }
+
 public data class SourceConnectionItemUi(
     val provider: OnboardingSourceProvider,
     val category: SourceConnectionCategory,

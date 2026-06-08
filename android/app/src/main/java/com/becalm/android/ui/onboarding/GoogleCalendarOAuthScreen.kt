@@ -64,7 +64,7 @@ public fun GoogleCalendarOAuthScreen(
     val errorCopyByCode = mapOf(
         "not_implemented" to stringResource(R.string.onb_gcal_error_unavailable),
         "oauth_not_configured" to stringResource(R.string.onb_gcal_error_unavailable),
-        "browser_unavailable" to stringResource(R.string.onb_gcal_error_unknown),
+        "browser_unavailable" to stringResource(R.string.onb_oauth_error_browser_unavailable),
         "oauth_timeout" to stringResource(R.string.onb_gcal_error_unknown),
         "unknown" to stringResource(R.string.onb_gcal_error_unknown),
     )

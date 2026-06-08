@@ -33,7 +33,12 @@ class PersonMemoryMarkdownSpecTest {
         assertTrue(markdown.contains("- email: jane@acme.com"))
         assertTrue(markdown.contains("### Decisions"))
         assertTrue(markdown.contains("- Renewal discount approved (decision, approved). [commitment:commitment-decision, 2026-05-05]"))
+        assertTrue(markdown.contains("## Next Action Context"))
+        assertTrue(markdown.contains("Highest priority candidate: I owe them: Send revised terms"))
+        assertTrue(markdown.contains("## Do Not Infer Beyond"))
         assertTrue(markdown.contains("## Local Voice Evidence"))
+        assertFalse(markdown.contains("## Work Context"))
+        assertFalse(markdown.contains("## Recent Interactions"))
         assertFalse(markdown.contains("Acme CEO\n-")) // role/title must not appear as identity alias.
 
         val result = PersonMemoryMarkdownValidator.validate(
@@ -108,8 +113,8 @@ class PersonMemoryMarkdownSpecTest {
     @Test
     fun `validator rejects factual bullets without source refs`() {
         val markdown = PersonMemoryMarkdownBuilder.build(input()).replace(
-            "- Works with Acme as CEO. [raw:raw-1, 2026-05-05]",
-            "- Works with Acme as CEO.",
+            "- I owe them: Send revised terms (action, pending, due Friday). [commitment:commitment-1, 2026-05-05]",
+            "- I owe them: Send revised terms (action, pending, due Friday).",
         )
 
         val result = PersonMemoryMarkdownValidator.validate(
@@ -198,9 +203,14 @@ class PersonMemoryMarkdownSpecTest {
         listOf(
             "# Person Memory",
             "## Identity",
-            "## Profile",
-            "## Work Context",
-            "## Recent Interactions",
+            "## Open Loops",
+            "## Waiting On",
+            "## Upcoming Touchpoints",
+            "## Stale Relationship Signal",
+            "## Next Action Context",
+            "## Communication Preferences",
+            "## Do Not Infer Beyond",
+            "## High Signal History",
             "## Matching Notes",
             "## Local Voice Evidence",
             "## Evidence References",
@@ -261,6 +271,8 @@ class PersonMemoryMarkdownSpecTest {
                     status = "pending",
                     quote = "Please send revised terms by Friday",
                     occurredAt = Instant.parse("2026-05-05T00:00:00Z"),
+                    direction = "give",
+                    dueHint = "Friday",
                 ),
                 PersonMemoryCommitment(
                     commitmentId = "commitment-decision",

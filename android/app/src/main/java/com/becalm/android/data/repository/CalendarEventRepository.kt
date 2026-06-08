@@ -185,6 +185,11 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         val useStoredCursor = since == null && rangeStart == null && rangeEnd == null
         val cursorKey = MirrorCursorKeys.calendarEvents(userId)
         var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
+        if (cursor != null && dao.countForUser(userId) == 0) {
+            cursorStore.clearCursor(cursorKey)
+            cursor = null
+            logger.d(TAG, "refreshSince discarded stale calendar cursor for empty local mirror")
+        }
         val sinceStr: String? = since?.toString()
 
         var totalFetched = 0

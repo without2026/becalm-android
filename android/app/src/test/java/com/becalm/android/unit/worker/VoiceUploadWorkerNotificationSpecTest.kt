@@ -25,6 +25,9 @@ import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.BatchUploadResponse
+import com.becalm.android.data.remote.dto.ExtractionStorageRefDto
+import com.becalm.android.data.remote.dto.ExtractionUploadPrepareRequest
+import com.becalm.android.data.remote.dto.ExtractionUploadPrepareResponse
 import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
@@ -137,29 +140,11 @@ class VoiceUploadWorkerNotificationSpecTest {
         every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(true)
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
-        coEvery {
-            sourceExtractionApi.commitmentExtract(
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                processingConfirmed = any(),
-            )
-        } returns Response.error(
-            502,
-            """{"error":"output_truncated","message":"too long"}""".toResponseBody("application/json".toMediaType()),
+        stubPreparedAudioExtraction(
+            Response.error(
+                502,
+                """{"error":"output_truncated","message":"too long"}""".toResponseBody("application/json".toMediaType()),
+            ),
         )
 
         val result = buildWorker().doWork()
@@ -198,34 +183,16 @@ class VoiceUploadWorkerNotificationSpecTest {
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
         coEvery { rawIngestionEventDao.update(capture(updatedSlot)) } returns 1
-        coEvery {
-            sourceExtractionApi.commitmentExtract(
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                processingConfirmed = any(),
-            )
-        } returns Response.success(
-            SourceExtractionResponse(
-                rawEventId = "raw-1",
-                items = emptyList(),
-                sourceEventParticipants = emptyList(),
-                model = "gemini-2.5-flash",
-                region = "us-central1",
-                rawModelText = """{"items":[],"source_event_participants":[]}""",
+        stubPreparedAudioExtraction(
+            Response.success(
+                SourceExtractionResponse(
+                    rawEventId = "raw-1",
+                    items = emptyList(),
+                    sourceEventParticipants = emptyList(),
+                    model = "gemini-2.5-flash",
+                    region = "us-central1",
+                    rawModelText = """{"items":[],"source_event_participants":[]}""",
+                ),
             ),
         )
 
@@ -265,29 +232,11 @@ class VoiceUploadWorkerNotificationSpecTest {
         every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
-        coEvery {
-            sourceExtractionApi.commitmentExtract(
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                processingConfirmed = any(),
-            )
-        } returns Response.error(
-            422,
-            """{"error":"invalid_audio","message":"invalid"}""".toResponseBody("application/json".toMediaType()),
+        stubPreparedAudioExtraction(
+            Response.error(
+                422,
+                """{"error":"invalid_audio","message":"invalid"}""".toResponseBody("application/json".toMediaType()),
+            ),
         )
 
         val result = buildWorker().doWork()
@@ -321,6 +270,7 @@ class VoiceUploadWorkerNotificationSpecTest {
             processingConfirmedAt = Instant.parse("2026-04-23T00:00:00Z"),
         )
         val audioPart = slot<MultipartBody.Part>()
+        val prepareSlot = slot<ExtractionUploadPrepareRequest>()
         every { parsedUri.lastPathSegment } returns "/data/data/com.becalm.android/files/qa/clova/meeting.wav"
         every { contentResolver.getType(parsedUri) } returns null
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
@@ -328,43 +278,28 @@ class VoiceUploadWorkerNotificationSpecTest {
         every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
-        coEvery {
-            sourceExtractionApi.commitmentExtract(
-                capture(audioPart),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                processingConfirmed = any(),
-            )
-        } returns Response.success(
-            SourceExtractionResponse(
-                rawEventId = "raw-1",
-                items = emptyList(),
-                sourceEventParticipants = emptyList(),
-                model = "clova-speech+gemini-2.5-flash",
-                region = "us-central1",
-                rawModelText = """{"items":[],"source_event_participants":[]}""",
+        stubPreparedAudioExtraction(
+            response = Response.success(
+                SourceExtractionResponse(
+                    rawEventId = "raw-1",
+                    items = emptyList(),
+                    sourceEventParticipants = emptyList(),
+                    model = "clova-speech+gemini-2.5-flash",
+                    region = "us-central1",
+                    rawModelText = """{"items":[],"source_event_participants":[]}""",
+                ),
             ),
+            prepareSlot = prepareSlot,
+            uploadPartSlot = audioPart,
         )
 
         val result = buildWorker().doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals("audio/wav", prepareSlot.captured.contentType)
         assertEquals("audio/wav", audioPart.captured.body.contentType().toString())
         assertEquals(
-            "form-data; name=\"audio\"; filename=\"meeting.wav\"",
+            "form-data; name=\"file\"; filename=\"meeting.wav\"",
             audioPart.captured.headers?.get("Content-Disposition"),
         )
         val firstWrite = Buffer()
@@ -394,38 +329,20 @@ class VoiceUploadWorkerNotificationSpecTest {
         every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
-        coEvery {
-            sourceExtractionApi.commitmentExtract(
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                processingConfirmed = any(),
-            )
-        } returns Response.success(
-            202,
-            SourceExtractionResponse(
-                rawEventId = "raw-1",
-                items = emptyList(),
-                sourceEventParticipants = emptyList(),
-                model = "pending",
-                region = "pending",
-                rawModelText = null,
-                jobId = "job-1",
-                status = "pending",
-                retryAfterSeconds = 12,
+        stubPreparedAudioExtraction(
+            Response.success(
+                202,
+                SourceExtractionResponse(
+                    rawEventId = "raw-1",
+                    items = emptyList(),
+                    sourceEventParticipants = emptyList(),
+                    model = "pending",
+                    region = "pending",
+                    rawModelText = null,
+                    jobId = "job-1",
+                    status = "pending",
+                    retryAfterSeconds = 12,
+                ),
             ),
         )
 
@@ -466,31 +383,13 @@ class VoiceUploadWorkerNotificationSpecTest {
         every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
-        coEvery {
-            sourceExtractionApi.commitmentExtract(
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                processingConfirmed = any(),
-            )
-        } returns Response.error(
-            429,
-            """
-                {"error":"llm_daily_budget_exceeded","message":"Daily model budget exceeded"}
-            """.trimIndent().toResponseBody("application/json".toMediaType()),
+        stubPreparedAudioExtraction(
+            Response.error(
+                429,
+                """
+                    {"error":"llm_daily_budget_exceeded","message":"Daily model budget exceeded"}
+                """.trimIndent().toResponseBody("application/json".toMediaType()),
+            ),
         )
 
         val result = buildWorker().doWork()
@@ -692,6 +591,56 @@ class VoiceUploadWorkerNotificationSpecTest {
                 any(),
             )
         }
+    }
+
+    private fun stubPreparedAudioExtraction(
+        response: Response<SourceExtractionResponse>,
+        prepareSlot: io.mockk.CapturingSlot<ExtractionUploadPrepareRequest>? = null,
+        uploadPartSlot: io.mockk.CapturingSlot<MultipartBody.Part>? = null,
+    ) {
+        if (prepareSlot == null) {
+            coEvery { sourceExtractionApi.prepareCommitmentExtractionUpload(any()) } answers {
+                preparedAudioUploadResponse(firstArg<ExtractionUploadPrepareRequest>())
+            }
+        } else {
+            coEvery { sourceExtractionApi.prepareCommitmentExtractionUpload(capture(prepareSlot)) } answers {
+                preparedAudioUploadResponse(firstArg<ExtractionUploadPrepareRequest>())
+            }
+        }
+        if (uploadPartSlot == null) {
+            coEvery { sourceExtractionApi.uploadExtractionMediaToSignedUrl(any(), any()) } returns
+                Response.success("{}".toResponseBody("application/json".toMediaType()))
+        } else {
+            coEvery { sourceExtractionApi.uploadExtractionMediaToSignedUrl(any(), capture(uploadPartSlot)) } returns
+                Response.success("{}".toResponseBody("application/json".toMediaType()))
+        }
+        coEvery { sourceExtractionApi.createCommitmentExtractionJob(any()) } returns response
+    }
+
+    private fun preparedAudioUploadResponse(
+        request: ExtractionUploadPrepareRequest,
+    ): Response<ExtractionUploadPrepareResponse> {
+        val contentType = request.contentType
+        return Response.success(
+            ExtractionUploadPrepareResponse(
+                rawEventId = request.rawEventId,
+                jobId = "job-1",
+                bucket = "extraction-jobs",
+                path = "user-1/job-1/audio.m4a",
+                contentType = contentType,
+                mediaKind = "audio",
+                signedUploadUrl = "https://storage.example/upload/sign/extraction-jobs/path?token=signed-token",
+                uploadToken = "signed-token",
+                uploadContentType = contentType,
+                storageRef = ExtractionStorageRefDto(
+                    bucket = "extraction-jobs",
+                    path = "user-1/job-1/audio.m4a",
+                    contentType = contentType,
+                    rawEventId = request.rawEventId,
+                    mediaKind = "audio",
+                ),
+            ),
+        )
     }
 
     private fun buildWorker(inputData: Data = defaultInputData()): VoiceUploadWorker = VoiceUploadWorker(

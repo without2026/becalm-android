@@ -1,5 +1,5 @@
 /**
- * Semantic color extension for BeCalm's warm frosted relationship design language.
+ * Semantic color extension for BeCalm's ink-mist relationship design language.
  *
  * This file defines [BecalmColors], a data class that holds all tokens that do
  * not map cleanly to Material3 ColorScheme slots: glass surface primitives,
@@ -10,7 +10,7 @@
  * [LocalBecalmColors] CompositionLocal. The theme provides the correct instance
  * (dark or light) through [BecalmTheme].
  *
- * Source of truth: design token spec §2.
+ * Source of truth: `becalm-v4-ux-inkmist-soft.html`.
  */
 package com.becalm.android.ui.theme
 
@@ -42,8 +42,8 @@ public data class BecalmStateColors(
 // ─── Direction pair ───────────────────────────────────────────────────────────
 
 /**
- * Border + fill pair for a directional cast (give = warm amber, take = cool
- * slate). Text color is inherited from the parent commitment state; these colors
+ * Border + fill pair for a directional cast (give = muted tan, take = cool
+ * blue). Text color is inherited from the parent commitment state; these colors
  * are layered on top, not replacing it.
  */
 @Immutable
@@ -78,10 +78,10 @@ public data class BecalmColors(
     /** Outer drop-shadow fill for elevated surfaces. */
     val glassOuterShadowElevated: Color,
 
-    // ── Canvas warm washes ───────────────────────────────────────────────────
+    // ── Canvas washes ────────────────────────────────────────────────────────
     /** Solid canvas background. Always pass as `containerColor` on root Scaffold. */
     val canvasBackground: Color,
-    /** Center stop of primary warm wash. */
+    /** Center stop of the optional root wash. */
     val ambientGlowCore: Color,
     /** Outer stop of primary wash. */
     val ambientGlowEdge: Color,
@@ -89,7 +89,7 @@ public data class BecalmColors(
     // ── Commitment action states ──────────────────────────────────────────────
     /** Neutral / not-yet-acted-on state. */
     val actionStatePending: BecalmStateColors,
-    /** Reminder has been sent. Amber cast signals attention. */
+    /** Reminder has been sent. Muted give cast signals attention. */
     val actionStateReminded: BecalmStateColors,
     /** Follow-up sent — slightly brighter than pending. */
     val actionStateFollowedUp: BecalmStateColors,
@@ -97,15 +97,15 @@ public data class BecalmColors(
     val actionStateCompleted: BecalmStateColors,
 
     // ── Direction cast ────────────────────────────────────────────────────────
-    /** Give commitment, warm low-chroma cast. */
+    /** Give commitment, muted tan cast. */
     val directionGive: BecalmDirectionColors,
     /** Take commitment, muted relationship-memory cast. */
     val directionTake: BecalmDirectionColors,
 
     // ── D-N urgency badges ────────────────────────────────────────────────────
-    /** D-0: due today — amber urgency. */
+    /** D-0: due today. */
     val dayBadgeToday: BecalmStateColors,
-    /** D-1..D-3: due soon — softer honey-gold. */
+    /** D-1..D-3: due soon. */
     val dayBadgeSoon: BecalmStateColors,
     /** D-4+: upcoming neutral. */
     val dayBadgeUpcoming: BecalmStateColors,
@@ -124,145 +124,145 @@ public data class BecalmColors(
 // ─── Dark instance ────────────────────────────────────────────────────────────
 
 internal val BecalmDarkColors = BecalmColors(
-    glassPanelFill = Color(0x1FF8F1E8),
-    glassPanelFillSdkLegacy = Color(0x2EF8F1E8),
-    glassPanelFillElevated = Color(0x2EF8F1E8),
-    glassPanelFillElevatedLegacy = Color(0x40F8F1E8),
-    glassBorder = Color(0x24F8F1E8),
-    glassInsetElevated = Color(0x1AF8F1E8),
-    glassOuterShadow = Color(0x6619120B),
-    glassOuterShadowElevated = Color(0x8019120B),
+    glassPanelFill = Color(0xF2172033),
+    glassPanelFillSdkLegacy = Color(0xFF172033),
+    glassPanelFillElevated = Color(0xFF172033),
+    glassPanelFillElevatedLegacy = Color(0xFF172033),
+    glassBorder = Color(0x66334054),
+    glassInsetElevated = Color(0x1AFFFFFF),
+    glassOuterShadow = Color(0x66111118),
+    glassOuterShadowElevated = Color(0x80111118),
 
-    canvasBackground = Color(0xFF17130F),
-    ambientGlowCore = Color(0x334C2F0F),
+    canvasBackground = Color(0xFF111827),
+    ambientGlowCore = Color.Transparent,
     ambientGlowEdge = Color.Transparent,
 
     actionStatePending = BecalmStateColors(
-        fill = Color(0x1FF8F1E8),
-        border = Color(0x40F8F1E8),
-        text = Color(0xFFEDE5D8),
+        fill = Color(0xFF172033),
+        border = Color(0x66334054),
+        text = Color(0xFFF6F8FB),
     ),
     actionStateReminded = BecalmStateColors(
-        fill = Color(0x26D19138),
-        border = Color(0x66D19138),
-        text = Color(0xFFF1DEC2),
+        fill = Color(0x4DC0967A),
+        border = Color(0x99C0967A),
+        text = Color(0xFFF2EDE7),
     ),
     actionStateFollowedUp = BecalmStateColors(
-        fill = Color(0x26F8F1E8),
-        border = Color(0x40F8F1E8),
-        text = Color(0xFFE8E1D7),
+        fill = Color(0x4D6589A1),
+        border = Color(0x996589A1),
+        text = Color(0xFFECF0F4),
     ),
     actionStateCompleted = BecalmStateColors(
-        fill = Color(0x12F8F1E8),
-        border = Color(0x24F8F1E8),
-        text = Color(0x99C8BAAA),
+        fill = Color(0x337E948A),
+        border = Color(0x667E948A),
+        text = Color(0xCCEDF1EF),
     ),
 
     directionGive = BecalmDirectionColors(
-        fill = Color(0x1FD19138),
-        border = Color(0x4DD19138),
+        fill = Color(0x33C0967A),
+        border = Color(0x80C0967A),
     ),
     directionTake = BecalmDirectionColors(
-        fill = Color(0x1F8AA07E),
-        border = Color(0x4D8AA07E),
+        fill = Color(0x336589A1),
+        border = Color(0x806589A1),
     ),
 
     dayBadgeToday = BecalmStateColors(
-        fill = Color(0x33D19138),
-        border = Color(0x66D19138),
-        text = Color(0xFFF1DEC2),
+        fill = Color(0x4DBC8071),
+        border = Color(0x99BC8071),
+        text = Color(0xFFF3ECEA),
     ),
     dayBadgeSoon = BecalmStateColors(
-        fill = Color(0x26F1DEC2),
-        border = Color(0x40D19138),
-        text = Color(0xFFE8C894),
+        fill = Color(0x33C0967A),
+        border = Color(0x80C0967A),
+        text = Color(0xFFF2EDE7),
     ),
     dayBadgeUpcoming = BecalmStateColors(
-        fill = Color(0x12F8F1E8),
-        border = Color(0x24F8F1E8),
-        text = Color(0xB3C8BAAA),
+        fill = Color(0x33202A3C),
+        border = Color(0x66334054),
+        text = Color(0xCCB8C0D0),
     ),
     dayBadgeOverdue = BecalmStateColors(
-        fill = Color(0x33E08A80),
-        border = Color(0x66E08A80),
-        text = Color(0xFFFFB7AE),
+        fill = Color(0x4DBC8071),
+        border = Color(0x99BC8071),
+        text = Color(0xFFFFC7BD),
     ),
 
-    sourceStatusOk = Color(0xFFC8BAAA),
-    sourceStatusStale = Color(0xFFD19138),
-    sourceStatusError = Color(0xFFE08A80),
+    sourceStatusOk = Color(0xFF7E948A),
+    sourceStatusStale = Color(0xFFC0967A),
+    sourceStatusError = Color(0xFFBC8071),
 )
 
 // ─── Light instance ───────────────────────────────────────────────────────────
 
 internal val BecalmLightColors = BecalmColors(
-    glassPanelFill = Color(0xB8FCFAF5),
-    glassPanelFillSdkLegacy = Color(0xD1FCFAF5),
-    glassPanelFillElevated = Color(0xD1FCFAF5),
-    glassPanelFillElevatedLegacy = Color(0xE6FCFAF5),
-    glassBorder = Color(0x66B8AC9E),
-    glassInsetElevated = Color(0x80FCFAF5),
-    glassOuterShadow = Color(0x2419120B),
-    glassOuterShadowElevated = Color(0x3319120B),
+    glassPanelFill = Color(0xFFFFFFFF),
+    glassPanelFillSdkLegacy = Color(0xFFFFFFFF),
+    glassPanelFillElevated = Color(0xFFFFFFFF),
+    glassPanelFillElevatedLegacy = Color(0xFFFFFFFF),
+    glassBorder = Color(0xFFE5E9F0),
+    glassInsetElevated = Color(0xFFFFFFFF),
+    glassOuterShadow = Color(0x0A000000),
+    glassOuterShadowElevated = Color(0x1A000000),
 
-    canvasBackground = Color(0xFFF4F0E9),
-    ambientGlowCore = Color(0x33F1DEC2),
+    canvasBackground = Color(0xFFFFFFFF),
+    ambientGlowCore = Color.Transparent,
     ambientGlowEdge = Color.Transparent,
 
     actionStatePending = BecalmStateColors(
-        fill = Color(0x99FCFAF5),
-        border = Color(0x66B8AC9E),
-        text = Color(0xFF453D35),
+        fill = Color(0xFFFFFFFF),
+        border = Color(0xFFE5E9F0),
+        text = Color(0xFF1A1F2E),
     ),
     actionStateReminded = BecalmStateColors(
-        fill = Color(0x66F1DEC2),
-        border = Color(0x80B87623),
-        text = Color(0xFF6B410F),
+        fill = Color(0xFFF2EDE7),
+        border = Color(0xFFE5E9F0),
+        text = Color(0xFFC0967A),
     ),
     actionStateFollowedUp = BecalmStateColors(
-        fill = Color(0xB8FCFAF5),
-        border = Color(0x66C8BAAA),
-        text = Color(0xFF5C534A),
+        fill = Color(0xFFECF0F4),
+        border = Color(0xFFE5E9F0),
+        text = Color(0xFF6589A1),
     ),
     actionStateCompleted = BecalmStateColors(
-        fill = Color(0x73FCFAF5),
-        border = Color(0x4DB8AC9E),
-        text = Color(0x998B8379),
+        fill = Color(0xFFEDF1EF),
+        border = Color(0xFFE5E9F0),
+        text = Color(0xFF7E948A),
     ),
 
     directionGive = BecalmDirectionColors(
-        fill = Color(0x4DF1DEC2),
-        border = Color(0x80B87623),
+        fill = Color(0xFFF2EDE7),
+        border = Color(0xFFE5E9F0),
     ),
     directionTake = BecalmDirectionColors(
-        fill = Color(0x4DE2E6DD),
-        border = Color(0x805F7F69),
+        fill = Color(0xFFECF0F4),
+        border = Color(0xFFE5E9F0),
     ),
 
     dayBadgeToday = BecalmStateColors(
-        fill = Color(0x80F1DEC2),
-        border = Color(0x99B87623),
-        text = Color(0xFF6B410F),
+        fill = Color(0xFFF3ECEA),
+        border = Color(0xFFE5E9F0),
+        text = Color(0xFFBC8071),
     ),
     dayBadgeSoon = BecalmStateColors(
-        fill = Color(0x59F1DEC2),
-        border = Color(0x66B87623),
-        text = Color(0xCC6B410F),
+        fill = Color(0xFFF2EDE7),
+        border = Color(0xFFE5E9F0),
+        text = Color(0xFFC0967A),
     ),
     dayBadgeUpcoming = BecalmStateColors(
-        fill = Color(0x99FCFAF5),
-        border = Color(0x66B8AC9E),
-        text = Color(0x99696158),
+        fill = Color(0xFFF0F3F8),
+        border = Color(0xFFE5E9F0),
+        text = Color(0xFF5A6478),
     ),
     dayBadgeOverdue = BecalmStateColors(
-        fill = Color(0x66F1D9D5),
-        border = Color(0x80B84A3E),
-        text = Color(0xFF7A281F),
+        fill = Color(0xFFF3ECEA),
+        border = Color(0xFFE5E9F0),
+        text = Color(0xFFBC8071),
     ),
 
-    sourceStatusOk = Color(0xFF5F7F69),
-    sourceStatusStale = Color(0xFFB87623),
-    sourceStatusError = Color(0xFFB84A3E),
+    sourceStatusOk = Color(0xFF7E948A),
+    sourceStatusStale = Color(0xFFC0967A),
+    sourceStatusError = Color(0xFFBC8071),
 )
 
 // ─── CompositionLocal ─────────────────────────────────────────────────────────

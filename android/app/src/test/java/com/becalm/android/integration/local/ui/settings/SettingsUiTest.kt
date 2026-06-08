@@ -533,6 +533,40 @@ class SettingsUiTest {
     }
 
     @Test
+    fun `processing status hides raw auth provider errors behind reconnect copy`() {
+        composeRule.setContent {
+            BecalmTheme {
+                ProcessingStatusContent(
+                    state = ProcessingStatusUiState(
+                        rows = listOf(
+                            ProcessingStatusRow(
+                                sourceType = SourceType.GOOGLE_CALENDAR,
+                                phase = ProcessingPhase.ERROR,
+                                itemCount = 0,
+                                message = "Unauthorized",
+                                updatedAt = null,
+                            ),
+                            ProcessingStatusRow(
+                                sourceType = SourceType.GMAIL,
+                                phase = ProcessingPhase.BLOCKED,
+                                itemCount = 0,
+                                message = "provider_needs_reauth",
+                                updatedAt = null,
+                            ),
+                        ),
+                    ),
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithText(string(R.string.processing_status_error_reconnect_needed), substring = true)
+            .assertCountEquals(2)
+        composeRule.onAllNodesWithText("Unauthorized", substring = true).assertCountEquals(0)
+        composeRule.onAllNodesWithText("provider_needs_reauth", substring = true).assertCountEquals(0)
+    }
+
+    @Test
     fun `processing status empty state explains future incoming work`() {
         composeRule.setContent {
             BecalmTheme {

@@ -27,7 +27,7 @@ internal object SourceConnectionProjector {
         respectConnectedStepStates: Boolean = respectStepStates,
         includeCalendarSources: Boolean = true,
         includedProviders: Set<OnboardingSourceProvider>? = null,
-        existingConnectionProviders: Set<OnboardingSourceProvider> = emptySet(),
+        existingConnectionStates: Map<OnboardingSourceProvider, SourceConnectionState> = emptyMap(),
         stringFor: (Int) -> String,
     ): List<SourceConnectionItemUi> =
         sourceSpecs
@@ -36,15 +36,16 @@ internal object SourceConnectionProjector {
                     ?: (includeCalendarSources || spec.category != SourceConnectionCategory.Calendar)
             }
             .map { spec ->
+                val existingState = existingConnectionStates[spec.provider]
                 SourceConnectionItemUi(
                     provider = spec.provider,
                     category = spec.category,
                     title = stringFor(spec.titleRes),
                     description = stringFor(spec.descriptionRes),
                     consentCopy = spec.consentRes?.let(stringFor),
-                    state = if (spec.provider in existingConnectionProviders) {
+                    state = if (existingState != null) {
                         transientStates[spec.provider]?.takeIf { it != SourceConnectionState.Idle }
-                            ?: SourceConnectionState.Connected
+                            ?: existingState
                     } else {
                         sourceStateFor(
                             provider = spec.provider,
@@ -55,7 +56,7 @@ internal object SourceConnectionProjector {
                             defaultState = spec.defaultState,
                         )
                     },
-                    primaryActionLabel = if (spec.provider in existingConnectionProviders) {
+                    primaryActionLabel = if (existingState == SourceConnectionState.Connected) {
                         stringFor(R.string.settings_source_connections_add_another_account)
                     } else {
                         null
@@ -99,6 +100,7 @@ internal object SourceConnectionProjector {
                 "network",
                 -> R.string.onb_gmail_error_network
                 "scope_denied" -> R.string.onb_gmail_error_permission_denied
+                "browser_unavailable" -> R.string.onb_oauth_error_browser_unavailable
                 "pipa_consent_missing" -> R.string.onb_sources_consent_write_failed
                 else -> R.string.onb_gmail_error_unknown
             }
@@ -107,6 +109,7 @@ internal object SourceConnectionProjector {
                 "network",
                 -> R.string.onb_outlook_error_network
                 "scope_denied" -> R.string.onb_outlook_error_permission_denied
+                "browser_unavailable" -> R.string.onb_oauth_error_browser_unavailable
                 "pipa_consent_missing" -> R.string.onb_sources_consent_write_failed
                 else -> R.string.onb_outlook_error_unknown
             }
@@ -125,12 +128,14 @@ internal object SourceConnectionProjector {
                 "not_implemented",
                 "oauth_not_configured",
                 -> R.string.onb_gcal_error_unavailable
+                "browser_unavailable" -> R.string.onb_oauth_error_browser_unavailable
                 else -> R.string.onb_gcal_error_unknown
             }
             CalendarOAuthProvider.OUTLOOK_CALENDAR -> when (errorCode) {
                 "not_implemented",
                 "oauth_not_configured",
                 -> R.string.onb_outlook_cal_error_unavailable
+                "browser_unavailable" -> R.string.onb_oauth_error_browser_unavailable
                 else -> R.string.onb_outlook_cal_error_unknown
             }
         }

@@ -20,6 +20,7 @@ import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.MeetingImportRepository
+import com.becalm.android.data.repository.SourceConnectionRepositoryImpl
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepositoryImpl
@@ -36,6 +37,7 @@ import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.sources.SourcesListViewModel
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.worker.SourceConnectionLocalStateHydrator
 import com.becalm.android.worker.ingestion.ImapNaverWorker
 import io.mockk.every
 import io.mockk.mockk
@@ -61,6 +63,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import javax.inject.Provider
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -103,6 +106,13 @@ class SourcesLocalIntegrationTest {
         userPrefs = LocalIntegrationSupport.prefsDataStore("sources-processing-status-prefs"),
         ioDispatcher = UnconfinedTestDispatcher(),
         logger = logger,
+    )
+    private val sourceConnectionRepository = SourceConnectionRepositoryImpl(
+        dao = db.sourceConnectionDao(),
+        apiProvider = Provider { api },
+        syncCursorStore = syncCursorStore,
+        logger = logger,
+        ioDispatcher = UnconfinedTestDispatcher(),
     )
     private val contactsPermissionChecker = FakeContactsPermissionChecker(granted = true)
     private val sourceSyncPort = RecordingSourceSyncPort()
@@ -169,6 +179,8 @@ class SourcesLocalIntegrationTest {
             personEnrichmentRepository = enrichmentRepository,
             contactsPermissionChecker = contactsPermissionChecker,
             userPrefsStore = userPrefsStore,
+            sourceConnectionLocalStateHydrator = mockk<SourceConnectionLocalStateHydrator>(relaxed = true),
+            sourceSyncPort = mockk<SourceSyncPort>(relaxed = true),
             logger = logger,
         )
 
@@ -236,6 +248,7 @@ class SourcesLocalIntegrationTest {
             processingStatusRepository = processingStatusRepository,
             rawIngestionRepository = rawIngestionRepository,
             authRepository = authRepository,
+            sourceConnectionRepository = sourceConnectionRepository,
             sourceAdministrationPort = object : SourceAdministrationPort {
                 override suspend fun disconnect(sourceType: String) = error("not used")
             },
@@ -326,6 +339,7 @@ class SourcesLocalIntegrationTest {
             processingStatusRepository = processingStatusRepository,
             rawIngestionRepository = rawIngestionRepository,
             authRepository = authRepository,
+            sourceConnectionRepository = sourceConnectionRepository,
             sourceAdministrationPort = DefaultSourceAdministrationPort(
                 sourceStatusRepository = sourceStatusRepository,
                 syncCursorStore = syncCursorStore,

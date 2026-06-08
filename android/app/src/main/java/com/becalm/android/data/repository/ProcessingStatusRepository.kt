@@ -62,6 +62,8 @@ public object ProcessingStatusMessages {
     public const val SOURCE_SYNC_IMPORTING_MORE_PAGES: String = "source_sync_importing_more_pages"
     public const val LLM_DAILY_BUDGET_EXCEEDED: String = "llm_daily_budget_exceeded"
     public const val LLM_RATE_LIMITED_RETRYING: String = "llm_rate_limited_retrying"
+    public const val LLM_PROCESSING_RETRYING: String = "llm_processing_retrying"
+    public const val LLM_PROCESSING_FAILED: String = "llm_processing_failed"
     public const val AUDIO_CONFIRMATION_REQUIRED: String = "audio_confirmation_required"
 }
 

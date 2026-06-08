@@ -141,6 +141,30 @@ class BecalmNavHostTest {
     }
 
     @Test
+    fun settings_sources_oauth_result_route_parses_source_result_arguments() {
+        setNavHost(
+            startDestination = BecalmRoute.SettingsSources.oauthResultPath(
+                result = "success",
+                provider = "gmail",
+                family = "mail",
+            ),
+        ) {
+            mapOf(
+                BecalmRoute.SettingsSources.path to { entry ->
+                    Text(
+                        "oauth-result:" +
+                            "${entry.arguments?.getString(BecalmRoute.SettingsSources.ARG_SOURCE_CONNECTION_RESULT)}:" +
+                            "${entry.arguments?.getString(BecalmRoute.SettingsSources.ARG_SOURCE_PROVIDER)}:" +
+                            "${entry.arguments?.getString(BecalmRoute.SettingsSources.ARG_SOURCE_FAMILY)}",
+                    )
+                },
+            )
+        }
+
+        composeTestRule.onNodeWithText("oauth-result:success:gmail:mail").assertIsDisplayed()
+    }
+
+    @Test
     fun commitment_detail_route_parses_id_argument() {
         setNavHost(startDestination = BecalmRoute.CommitmentDetail("cmt-77").path) {
             mapOf(
@@ -200,7 +224,7 @@ class BecalmNavHostTest {
     }
 
     @Test
-    fun cold_sync_route_redirects_to_authenticated_home_without_rendering_deprecated_screen() {
+    fun cold_sync_route_redirects_to_completion_without_rendering_deprecated_screen() {
         composeTestRule.setContent {
             BecalmTheme {
                 val navController = rememberNavController()
@@ -212,7 +236,7 @@ class BecalmNavHostTest {
                         navController = navController,
                         startDestination = BecalmRoute.OnboardingColdSync.path,
                         routeOverrides = mapOf(
-                            BecalmRoute.Persons.path to { Text("persons-screen") },
+                            BecalmRoute.OnboardingComplete.PATH to { Text("completion-screen") },
                         ),
                     )
                 }
@@ -220,10 +244,10 @@ class BecalmNavHostTest {
         }
 
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            composeTestRule.onAllNodesWithText("persons-screen").fetchSemanticsNodes().isNotEmpty()
+            composeTestRule.onAllNodesWithText("completion-screen").fetchSemanticsNodes().isNotEmpty()
         }
-        composeTestRule.onNodeWithText("persons-screen").assertIsDisplayed()
-        composeTestRule.onNodeWithText("route:${BecalmRoute.Persons.path}").assertIsDisplayed()
+        composeTestRule.onNodeWithText("completion-screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("route:${BecalmRoute.OnboardingComplete.PATH}").assertIsDisplayed()
     }
 
     @Test

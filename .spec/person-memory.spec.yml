@@ -1,13 +1,14 @@
 module: person-memory
 platform: android-backend
-version: 1
+version: 2
 
 summary: >
   Person memory is a compact, person-scoped Markdown artifact generated from the
-  canonical person/relation graph. It behaves like a compact context cache: useful
-  for human review, future assistant reasoning, and optional semantic matching
-  context, but never the source of truth for identity, source ingestion, UI
-  rendering, or person interaction projection.
+  canonical person/relation graph. It behaves like a business context ledger for
+  one person: useful for future assistant reasoning, semantic context, and
+  explaining why a next action exists. It is never the source of truth for
+  identity, source ingestion, UI rendering, person interaction projection, or
+  backend PersonActionItem rows.
 
 canonical_inputs:
   structured_source_of_truth:
@@ -35,18 +36,19 @@ artifact_contract:
     metadata:
       user_id: uuid
       person_id: uuid
-      schema_version: 1
+      schema_version: 2
       content_hash: sha256
       generated_at: datetime
   canonicality:
     - "Derived artifact only. Deleting it must not delete any canonical person/relation row."
     - "Regeneration from structured DB must produce a valid replacement."
-    - "Missing, stale, or failed upload state must not block source ingestion, person matching, person_interactions rebuild, or UI rendering."
+    - "Missing, stale, or failed upload state must not block source ingestion, person matching, person_interactions rebuild, backend action recomputation, or UI rendering."
     - "Supabase mirror is for cross-device/future assistant context. Android local DB remains usable without downloading it."
+    - "UI may show a compact context summary derived from structured graph/index signals, but must not parse memory.md at runtime to decide action cards."
 
 markdown_format:
   required_frontmatter:
-    schema_version: 1
+    schema_version: 2
     user_id: uuid
     person_id: uuid
     display_name: string
@@ -59,8 +61,11 @@ markdown_format:
     - "# Person Memory"
     - "## Identity"
     - "## Profile"
+    - "## Active Context"
+    - "## Upcoming Touchpoints"
     - "## Work Context"
     - "## Recent Interactions"
+    - "## Decision Inputs"
     - "## Matching Notes"
     - "## Local Voice Evidence"
     - "## Evidence References"
@@ -72,6 +77,15 @@ markdown_format:
       - "Only facts explicitly present in participant evidence, source title/snippet, commitment quote, or verified identity metadata."
       - "Company/title/role facts must include a source ref and observed date."
       - "Do not resolve conflicts; list conflicting evidence separately."
+    Active_Context:
+      - "Summarize current open loops with this person, grouped as user owes, counterparty owes, schedule/prep, and review needed."
+      - "Every bullet must include source refs and, when available, linked commitment_id or source_event_id."
+      - "Do not include completed/cancelled/deleted commitments unless they explain why an active item was superseded."
+      - "This section is context for backend PersonActionItem computation, not a UI feed to parse at runtime."
+    Upcoming_Touchpoints:
+      - "List confirmed or likely future meetings, conferences, calls, due dates, and preparation windows involving this person."
+      - "Use calendar_events and schedule commitments only when they apply to the authenticated user or this person."
+      - "Mark approximate dates explicitly and preserve due_hint."
     Work_Context:
       - "Summarize current work relationship, open commitments, decisions, and recurring topics."
       - "Every bullet must include source refs."
@@ -81,6 +95,11 @@ markdown_format:
     Recent_Interactions:
       - "Most recent bounded interaction list, newest first."
       - "Use title/snippet/quote only; never full body."
+      - "This section is history context. It must not be rendered as the default first-screen person UI."
+    Decision_Inputs:
+      - "List active or recently referenced decisions only when they shape a next action, meeting prep, or relationship context."
+      - "Use decision_status, never action_state, to describe decision meaning."
+      - "Decision-only facts do not become open-loop UI rows by default."
     Matching_Notes:
       - "May include user-confirmed semantic patterns, rejected matches, and ambiguity warnings."
       - "Semantic notes are reinforcement context, not deterministic identity anchors."
@@ -101,7 +120,7 @@ generation_rules:
 
   - id: PMEM-002
     description: "Markdown generation is off the critical path."
-    expected: "Worker failure records retry state only. Source ingestion, matching, PersonInteractionIndexWorker, People tab, and PersonDetail must keep working."
+    expected: "Worker failure records retry state only. Source ingestion, matching, PersonInteractionIndexWorker, backend action recomputation, People tab, Schedule tab, Commitments tab, and PersonDetail must keep working."
 
   - id: PMEM-003
     description: "Prompt uses compact structured evidence only."
@@ -124,6 +143,11 @@ generation_rules:
     trigger: "User resolves an audio source_event_participant speaker label to a real person and PersonInteractionIndexWorker enqueues ProfileMemoryWorker for that person."
     expected: "PersonMemoryInputCollector derives a PersonMemoryVoiceEvidence row from the resolved speaker participant. PersonMemoryMarkdownBuilder writes it under Local Voice Evidence as a voice://chunk link. The link is local-only and does not imply backend, Supabase, or cloud audio storage."
 
+  - id: PMEM-008
+    description: "Person memory feeds backend action reasoning through structured context signals only."
+    trigger: "ProfileMemoryWorker updates person_memory_semantic_index and memory artifact metadata for a person."
+    expected: "Backend action recomputation may use bounded terms, active-context flags, and content_hash freshness from structured/index rows. Android UI must not read or parse memory.md content to construct UI cards."
+
 reinforcement_matching_rules:
   - "Email and phone identities are automatic deterministic anchors."
   - "User-confirmed exact aliases may become person_identities when they are sufficiently scoped and not ambiguous."
@@ -140,7 +164,7 @@ prompt_contract:
     Do not invent employers, titles, relationships, responsibilities, deadlines, or aliases.
     Do not include full source bodies, full transcripts, audio content, or raw model output.
     Every profile or work-context statement must include a source reference.
-    Separate identity anchors, profile facts, work context, recent interactions, matching notes, and evidence references.
+    Separate identity anchors, profile facts, active context, upcoming touchpoints, work context, recent interactions, decision inputs, matching notes, and evidence references.
     If evidence conflicts, preserve the conflict instead of resolving it.
     If information is missing, omit the item rather than guessing.
     Output Markdown only, with the required YAML frontmatter and required sections.
@@ -177,7 +201,21 @@ prompt_contract:
         title: string
         status?: string # action_state for action, schedule_status for schedule, decision_status for decision
         quote: string
+        due_at?: datetime
+        due_hint?: string
+        due_is_approximate?: boolean
         occurred_at: datetime
+    upcoming_touchpoints:
+      - calendar_event_id?: uuid
+        commitment_id?: uuid
+        source_ref?: string
+        title: string
+        start_at?: datetime
+        due_at?: datetime
+        due_hint?: string
+        due_is_approximate?: boolean
+        attendance_required?: boolean
+        preparation_needed?: boolean
     voice_evidence:
       - source_ref: string
         source_type: "voice|call_recording|meeting"
@@ -193,12 +231,13 @@ prompt_contract:
 
 validation_rules:
   - "Frontmatter must parse and must include schema_version, user_id, person_id, display_name, generated_at, source_window, content_hash."
+  - "schema_version must be 2 for newly generated artifacts. Readers may tolerate schema_version=1 only as a stale artifact that must not block app rendering."
   - "content_hash is SHA-256 of canonical Markdown bytes after replacing the frontmatter content_hash value with 64 zeroes. This avoids self-referential hashing while keeping the artifact tamper-checkable."
   - "person_id in frontmatter must equal the worker target person_id."
   - "Markdown byte size must stay below 64 KiB."
   - "No single evidence quote/snippet may exceed 240 characters."
   - "Forbidden original-body markers or transcript-size text blocks cause validation failure."
-  - "Every Profile, Work Context, and Matching Notes factual bullet must contain a source ref token such as raw:<id>, commitment:<id>, or participant:<id>."
+  - "Every Profile, Active Context, Upcoming Touchpoints, Work Context, Decision Inputs, and Matching Notes factual bullet must contain a source ref token such as raw:<id>, commitment:<id>, calendar:<id>, or participant:<id>."
   - "Local Voice Evidence rows must use voice://chunk links and must never include raw filesystem paths, content:// URIs, cloud object paths, or full transcript text."
   - "Validator failure prevents upload and keeps the local worker retryable or quarantined according to error type."
 
@@ -216,6 +255,9 @@ semantic_index_contract:
     - work_terms_json
     - decision_terms_json
     - open_commitment_terms_json
+    - active_context_terms_json
+    - upcoming_touchpoint_terms_json
+    - next_action_reason_terms_json
     - confirmed_patterns_json
     - rejected_patterns_json
     - recent_source_types_json
@@ -226,6 +268,7 @@ semantic_index_contract:
     - "ProfileMemoryWorker updates the index before/with local memory generation, but failed remote upload must not remove or block the local index."
     - "Unresolved/name-only/speaker-label matching may use index terms to rank candidates and show recommendation reasons."
     - "Semantic index matches never auto-merge people; user confirmation is required unless deterministic email/phone/contact/verified alias anchors match."
+    - "Backend action recomputation may use index terms to rank and explain actions, but Android UI must not parse memory.md content at runtime."
 
 privacy_and_retention:
   - "The artifact is user-scoped and person-scoped. Account deletion deletes local files and Supabase Storage objects under {user_id}/."

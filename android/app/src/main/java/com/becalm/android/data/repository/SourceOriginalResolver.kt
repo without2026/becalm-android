@@ -19,17 +19,40 @@ public class SourceOriginalResolver @Inject constructor(
     public suspend fun resolve(
         userId: String,
         event: RawIngestionEventEntity,
+        fallbackRawEventIds: List<String> = emptyList(),
     ): SourceOriginalContext {
+        val rawEventIds = listOf(event.id)
+            .plus(fallbackRawEventIds)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
         val emailBody = if (event.sourceType in EMAIL_SOURCE_TYPES) {
-            emailBodyRepository.getByRawEventId(event.id)
+            firstEmailBody(rawEventIds)
         } else {
             null
         }
-        val archivedOriginal = sourceArtifactRepository.findMarkdownOriginal(userId, event.id)
+        val archivedOriginal = firstArchivedOriginal(userId, rawEventIds)
         return SourceOriginalContext(
             emailBody = emailBody,
             archivedOriginal = archivedOriginal,
         )
+    }
+
+    private suspend fun firstEmailBody(rawEventIds: List<String>): EmailBodyEntity? {
+        for (rawEventId in rawEventIds) {
+            emailBodyRepository.getByRawEventId(rawEventId)?.let { return it }
+        }
+        return null
+    }
+
+    private suspend fun firstArchivedOriginal(
+        userId: String,
+        rawEventIds: List<String>,
+    ): ArchivedOriginal? {
+        for (rawEventId in rawEventIds) {
+            sourceArtifactRepository.findMarkdownOriginal(userId, rawEventId)?.let { return it }
+        }
+        return null
     }
 
     private companion object {

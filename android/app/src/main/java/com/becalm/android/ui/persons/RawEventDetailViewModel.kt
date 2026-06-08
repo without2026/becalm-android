@@ -261,9 +261,13 @@ public class RawEventDetailViewModel @Inject constructor(
                 return@launch
             }
 
-            val entity = rawIngestionRepository.findById(id = eventId, userId = userId)
-                ?: sourceEventAnchorDao.findBestForEventRef(userId = userId, eventRef = eventId)
-                    ?.toSyntheticRawEvent()
+            val rawEntity = rawIngestionRepository.findById(id = eventId, userId = userId)
+            val sourceEventAnchor = if (rawEntity == null) {
+                sourceEventAnchorDao.findBestForEventRef(userId = userId, eventRef = eventId)
+            } else {
+                null
+            }
+            val entity = rawEntity ?: sourceEventAnchor?.toSyntheticRawEvent()
             logger.d(TAG, "loadEvent id=%08x found=${entity != null}".format(eventId.hashCode()))
             if (entity == null) {
                 _uiState.value = RawEventDetailProjector.notFoundState()
@@ -276,7 +280,11 @@ public class RawEventDetailViewModel @Inject constructor(
                 val attendeesRaw = projectionPort.loadCalendarAttendeesRaw(userId, entity)
                 val participantCorrections = projectionPort.loadParticipantCorrections(userId, entity)
                 val participantChoices = projectionPort.loadParticipantCorrectionChoices(userId)
-                val sourceOriginal = sourceOriginalResolver.resolve(userId, entity)
+                val sourceOriginal = sourceOriginalResolver.resolve(
+                    userId = userId,
+                    event = entity,
+                    fallbackRawEventIds = sourceEventAnchor?.localRawEventId?.let(::listOf).orEmpty(),
+                )
                 RawEventDetailProjector.buildLoadedState(
                     entity = entity,
                     emailBody = sourceOriginal.emailBody,
@@ -315,7 +323,7 @@ public class RawEventDetailViewModel @Inject constructor(
         RawIngestionEventEntity(
             id = sourceEventId ?: localRawEventId ?: id,
             userId = userId,
-            clientEventId = sourceEventId ?: localRawEventId ?: id,
+            clientEventId = localRawEventId ?: sourceEventId ?: id,
             sourceType = sourceType,
             sourceRef = sourceRef ?: providerEventId,
             counterpartyRef = null,

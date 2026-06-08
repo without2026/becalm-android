@@ -17,6 +17,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
@@ -30,7 +31,12 @@ import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.actions.defaultReminderSnoozeUntil
 import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.actions.PersonActionEvidenceDetailUi
+import com.becalm.android.ui.actions.PersonActionFeedStatusUi
+import com.becalm.android.ui.actions.personActionFeedStatusFor
+import com.becalm.android.ui.actions.toPersonActionEvidenceDetailUi
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.SourceParticipantRefreshScope
@@ -64,14 +70,14 @@ import javax.inject.Inject
 /**
  * Display filter applied in-memory to the full commitment list.
  *
- * - [ALL]      — no filter; shows every trackable item for the current user.
+ * - [ALL]      — open primary action rows for the current user.
  * - [GIVE]     — open action rows where the wire direction is give.
  * - [TAKE]     — open action rows where the wire direction is take.
  * - [SCHEDULE] — legacy value normalized to [ALL]; schedules live in the Schedule tab.
- * - [CLOSED]   — completed or cancelled action rows.
+ * - [CLOSED]   — legacy value normalized to [ALL]; terminal history is not a main-tab feed.
  *
- * Action-specific lifecycle (due-today / overdue / completed / cancelled) is surfaced
- * per-card and in the terminal sections rather than as a top-level filter.
+ * Action-specific lifecycle is surfaced per-card or in detail/evidence views. The main
+ * commitments tab stays an open Give/Take inbox, not a completed/cancelled history.
  */
 // spec: CMT-001, CMT-002
 public enum class CommitmentFilter {
@@ -241,6 +247,10 @@ public sealed interface CommitmentUndoSnapshot {
 public data class CommitmentUiState(
     val items: List<CommitmentRow> = emptyList(),
     val topActions: List<PersonActionItemUi> = emptyList(),
+    val actionFeedStatus: PersonActionFeedStatusUi? = null,
+    val loadingReminderActionId: String? = null,
+    val evidenceDetail: CommitmentActionEvidenceDetailUi? = null,
+    val loadingEvidenceActionId: String? = null,
     val activeItems: List<CommitmentRow> = emptyList(),
     val scheduleUpcomingItems: List<CommitmentRow> = emptyList(),
     val schedulePastSection: CommitmentSectionUiState = CommitmentSectionUiState(expanded = false, dimmed = true),
@@ -257,6 +267,8 @@ public data class CommitmentUiState(
     public val activePersonGroups: List<CommitmentPersonGroup>
         get() = buildCommitmentPersonGroups(activeItems)
 }
+
+public typealias CommitmentActionEvidenceDetailUi = PersonActionEvidenceDetailUi
 
 /** Test-visible projection of one expandable terminal section (CMT-009 / CMT-012). */
 public data class CommitmentSectionUiState(
@@ -381,7 +393,12 @@ public class CommitmentManagementViewModel @Inject constructor(
             userPrefsStore.observeCurrentUserId()
                 .flatMapLatest { userId ->
                     if (userId == null) return@flatMapLatest flowOf(
-                        CommitmentRowsWithLinks(rows = emptyList(), scheduleLinks = emptyList(), actionRows = emptyList()),
+                        CommitmentRowsWithLinks(
+                            rows = emptyList(),
+                            scheduleLinks = emptyList(),
+                            actionRows = emptyList(),
+                            actionSyncState = null,
+                        ),
                     )
                     refreshCommitmentActions(userId)
                     commitmentRepository.observeManagementRowsForUser(userId)
@@ -404,8 +421,18 @@ public class CommitmentManagementViewModel @Inject constructor(
                                     surface = "commitment",
                                     limit = COMMITMENT_ACTION_LIMIT,
                                 ),
-                            ) { links, actionRows ->
-                                CommitmentRowsWithLinks(rows = rows, scheduleLinks = links, actionRows = actionRows)
+                                personActionRepository.observeSyncState(
+                                    userId = userId,
+                                    surface = "commitment",
+                                    status = "active",
+                                ),
+                            ) { links, actionRows, actionSyncState ->
+                                CommitmentRowsWithLinks(
+                                    rows = rows,
+                                    scheduleLinks = links,
+                                    actionRows = actionRows,
+                                    actionSyncState = actionSyncState,
+                                )
                             }
                         }
                 }
@@ -426,6 +453,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                             rows = rows,
                             scheduleLinks = snapshot.scheduleLinks,
                             actionRows = snapshot.actionRows,
+                            actionFeedStatus = personActionFeedStatusFor(snapshot.actionSyncState),
                             loading = false,
                             now = clock.nowInstant(),
                         )
@@ -439,6 +467,7 @@ public class CommitmentManagementViewModel @Inject constructor(
         val rows: List<CommitmentManagementRow>,
         val scheduleLinks: List<ScheduleEventLinkEntity>,
         val actionRows: List<PersonActionItemCacheEntity>,
+        val actionSyncState: PersonActionSyncStateEntity?,
     )
 
     // ─── Actions ──────────────────────────────────────────────────────────────
@@ -475,6 +504,183 @@ public class CommitmentManagementViewModel @Inject constructor(
     /** Emits a one-shot detail navigation for the tapped card (CMT-003). */
     public fun onCommitmentSelected(id: String) {
         _navigation.tryEmit(CommitmentManagementNavigation.OpenDetail(id))
+    }
+
+    public fun onCompletePersonAction(actionItemId: String) {
+        val inFlightKey = "person-action:$actionItemId"
+        if (!inFlightActionIds.add(inFlightKey)) {
+            logger.d(TAG, "onCompletePersonAction ignored duplicate in-flight action id=${hashId(actionItemId)}")
+            return
+        }
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+                if (userId.isNullOrBlank()) {
+                    _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_action_failed)) }
+                    return@launch
+                }
+                when (val result = personActionRepository.completeAction(userId = userId, actionItemId = actionItemId)) {
+                    is BecalmResult.Success -> {
+                        logger.d(
+                            TAG,
+                            "onCompletePersonAction succeeded id=${hashId(actionItemId)} " +
+                                "synced=${result.value.synced} retryable=${result.value.retryable}",
+                        )
+                        _uiState.update { it.copy(error = null) }
+                    }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "onCompletePersonAction failed id=${hashId(actionItemId)}: ${result.error}")
+                        _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_action_failed)) }
+                    }
+                }
+            } catch (e: Throwable) {
+                e.rethrowIfCancellation()
+                logger.e(TAG, "onCompletePersonAction unexpected failure id=${hashId(actionItemId)}", e)
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_action_failed)) }
+            } finally {
+                inFlightActionIds.remove(inFlightKey)
+            }
+        }
+    }
+
+    public fun onOpenPersonActionEvidence(
+        actionItemId: String,
+        evidenceKind: String?,
+        evidenceId: String?,
+    ) {
+        if (actionItemId.isBlank() || evidenceKind.isNullOrBlank() || evidenceId.isNullOrBlank()) {
+            _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_evidence_failed)) }
+            return
+        }
+        val inFlightKey = "person-action-evidence:$actionItemId"
+        if (!inFlightActionIds.add(inFlightKey)) {
+            logger.d(TAG, "onOpenPersonActionEvidence ignored duplicate in-flight action id=${hashId(actionItemId)}")
+            return
+        }
+        _uiState.update { it.copy(loadingEvidenceActionId = actionItemId, error = null) }
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+                if (userId.isNullOrBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            loadingEvidenceActionId = null,
+                            error = UiMessage.resource(R.string.commitments_error_evidence_failed),
+                        )
+                    }
+                    return@launch
+                }
+                when (
+                    val result = personActionRepository.fetchEvidenceOriginal(
+                        userId = userId,
+                        actionItemId = actionItemId,
+                        evidenceKind = evidenceKind,
+                        evidenceId = evidenceId,
+                    )
+                ) {
+                    is BecalmResult.Success -> {
+                        _uiState.update {
+                            it.copy(
+                                loadingEvidenceActionId = null,
+                                evidenceDetail = result.value.toPersonActionEvidenceDetailUi(),
+                                error = null,
+                            )
+                        }
+                    }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "onOpenPersonActionEvidence failed id=${hashId(actionItemId)}: ${result.error}")
+                        _uiState.update {
+                            it.copy(
+                                loadingEvidenceActionId = null,
+                                error = UiMessage.resource(R.string.commitments_error_evidence_failed),
+                            )
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                e.rethrowIfCancellation()
+                logger.e(TAG, "onOpenPersonActionEvidence unexpected failure id=${hashId(actionItemId)}", e)
+                _uiState.update {
+                    it.copy(
+                        loadingEvidenceActionId = null,
+                        error = UiMessage.resource(R.string.commitments_error_evidence_failed),
+                    )
+                }
+            } finally {
+                inFlightActionIds.remove(inFlightKey)
+            }
+        }
+    }
+
+    public fun onDismissPersonActionEvidence() {
+        _uiState.update { it.copy(evidenceDetail = null) }
+    }
+
+    public fun onRemindPersonAction(actionItemId: String) {
+        val action = _uiState.value.topActions.firstOrNull { it.id == actionItemId }
+        val snoozedUntil = action?.defaultReminderSnoozeUntil(clock.nowInstant())
+        if (actionItemId.isBlank() || snoozedUntil == null) {
+            _uiState.update { it.copy(error = UiMessage.resource(R.string.person_action_reminder_failed)) }
+            return
+        }
+        val inFlightKey = "person-action-reminder:$actionItemId"
+        if (!inFlightActionIds.add(inFlightKey)) {
+            logger.d(TAG, "onRemindPersonAction ignored duplicate in-flight action id=${hashId(actionItemId)}")
+            return
+        }
+        _uiState.update { it.copy(loadingReminderActionId = actionItemId, error = null) }
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+                if (userId.isNullOrBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            loadingReminderActionId = null,
+                            error = UiMessage.resource(R.string.person_action_reminder_failed),
+                        )
+                    }
+                    return@launch
+                }
+                when (
+                    val result = personActionRepository.snoozeAction(
+                        userId = userId,
+                        actionItemId = actionItemId,
+                        snoozedUntil = snoozedUntil,
+                        reason = "user_reminder",
+                    )
+                ) {
+                    is BecalmResult.Success -> {
+                        refreshCommitmentActions(userId)
+                        _uiState.update {
+                            it.copy(
+                                loadingReminderActionId = null,
+                                error = UiMessage.resource(R.string.person_action_reminder_scheduled),
+                            )
+                        }
+                    }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "onRemindPersonAction failed id=${hashId(actionItemId)}: ${result.error}")
+                        _uiState.update {
+                            it.copy(
+                                loadingReminderActionId = null,
+                                error = UiMessage.resource(R.string.person_action_reminder_failed),
+                            )
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                e.rethrowIfCancellation()
+                logger.e(TAG, "onRemindPersonAction unexpected failure id=${hashId(actionItemId)}", e)
+                _uiState.update {
+                    it.copy(
+                        loadingReminderActionId = null,
+                        error = UiMessage.resource(R.string.person_action_reminder_failed),
+                    )
+                }
+            } finally {
+                inFlightActionIds.remove(inFlightKey)
+            }
+        }
     }
 
     /** Toggles the collapsed-by-default completed section (CMT-009). */
@@ -903,6 +1109,27 @@ private object NoopPersonActionRepository : PersonActionRepository {
     ): kotlinx.coroutines.flow.Flow<List<PersonActionItemCacheEntity>> =
         flowOf(emptyList())
 
+    override fun observeActiveForPerson(
+        userId: String,
+        personId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForCommitment(
+        userId: String,
+        commitmentId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForCalendarEvent(
+        userId: String,
+        calendarEventId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
     override suspend fun refresh(
         userId: String,
         surface: String?,
@@ -915,4 +1142,47 @@ private object NoopPersonActionRepository : PersonActionRepository {
                 recomputeState = null,
             ),
         )
+
+    override suspend fun completeAction(
+        userId: String,
+        actionItemId: String,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun dismissAction(
+        userId: String,
+        actionItemId: String,
+        reason: String?,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun snoozeAction(
+        userId: String,
+        actionItemId: String,
+        snoozedUntil: kotlinx.datetime.Instant,
+        reason: String?,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun submitActionFeedback(
+        userId: String,
+        actionItemId: String,
+        feedbackType: String,
+        reason: String?,
+        correctedPersonId: String?,
+        correctedDueAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun syncPendingMutations(
+        userId: String,
+        limit: Int,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    private fun noopMutationStats(): com.becalm.android.data.repository.PersonActionMutationSyncStats =
+        com.becalm.android.data.repository.PersonActionMutationSyncStats(queued = 0, synced = 0, retryable = 0, failed = 0)
 }

@@ -14,7 +14,7 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 /**
- * Relative-time label rendered at the bottom of a Today timeline row.
+ * Relative-time label rendered at the bottom of a schedule timeline row.
  *
  * The label is computed with a KST-anchored bucket
  * ([relativeSinceKst][com.becalm.android.core.util.relativeSinceKst]) and then

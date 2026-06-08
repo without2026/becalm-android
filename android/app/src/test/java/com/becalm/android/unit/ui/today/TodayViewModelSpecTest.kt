@@ -5,6 +5,7 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.CalendarWriteJobPrefsSnapshot
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
@@ -13,12 +14,15 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.CalendarWriteJobStatus
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
@@ -26,14 +30,20 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.PersonActionMutationSyncStats
+import com.becalm.android.data.repository.PersonActionProviderWriteRequest
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.actions.PersonActionFeedStatusKind
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.today.ScheduleRangeFilter
+import com.becalm.android.ui.today.CalendarWriteJobStatusKind
 import com.becalm.android.ui.today.TimelineItem
 import com.becalm.android.ui.today.TodayCommitmentRowTreatment
 import com.becalm.android.ui.today.TodayEffect
@@ -83,14 +93,17 @@ class TodayViewModelSpecTest {
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
+    private val personActionRepository: PersonActionRepository = mockk(relaxed = true)
     private val authRepository: AuthRepository = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
     private val createdViewModels = mutableListOf<TodayViewModel>()
+    private val actionSyncState = MutableStateFlow<PersonActionSyncStateEntity?>(null)
 
     @Before
     fun setUp() {
+        actionSyncState.value = null
         Dispatchers.setMain(testDispatcher)
         every { sourceStatusRepository.observeAll() } returns flowOf(
             listOf(
@@ -99,9 +112,22 @@ class TodayViewModelSpecTest {
             ),
         )
         every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(emptyList())
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { scheduleEventLinkRepository.observeForTodayRange(any(), any(), any(), any(), any()) } returns flowOf(emptyList())
         every { userPrefsStore.observeProcessingPaused() } returns flowOf(false)
+        every { userPrefsStore.observeCalendarWriteJobSnapshots() } returns flowOf(emptyList())
         every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
+        every { personActionRepository.observeActiveForSurface(any(), any(), any()) } returns flowOf(emptyList())
+        every { personActionRepository.observeSyncState(any(), any(), any()) } returns actionSyncState
+        coEvery { personActionRepository.refresh(any(), any()) } returns
+            BecalmResult.Success(
+                PersonActionRefreshStats(
+                    fetched = 0,
+                    deleted = 0,
+                    serverWatermark = null,
+                    recomputeState = null,
+                ),
+            )
         coEvery { sourceEventParticipantRepository.refreshSince(any(), any(), any()) } returns
             BecalmResult.Success(
                 SourceEventParticipantRepository.RefreshStats(
@@ -609,10 +635,13 @@ class TodayViewModelSpecTest {
 
             assertTrue(emission.timeline.isEmpty())
             assertEquals(
-                Instant.fromEpochMilliseconds(0).toEpochMilliseconds(),
+                Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds(),
                 dayStartEpochMs.captured,
             )
-            assertEquals(Long.MAX_VALUE - 1L, dayEndEpochMs.captured)
+            assertEquals(
+                Instant.parse("2026-04-24T15:00:00Z").toEpochMilliseconds() - 1L,
+                dayEndEpochMs.captured,
+            )
 
             commitmentsFlow.value = todayRows(
                 commitment(
@@ -660,8 +689,11 @@ class TodayViewModelSpecTest {
             while (emission.loading) emission = awaitItem()
 
             assertTrue(emission.timeline.isEmpty())
-            assertEquals(Instant.fromEpochMilliseconds(0), todayStart.captured)
-            assertEquals(Long.MAX_VALUE, todayEnd.captured.toEpochMilliseconds())
+            assertEquals(Instant.parse("2026-04-17T15:00:00Z"), todayStart.captured)
+            assertEquals(
+                Instant.parse("2026-04-24T15:00:00Z").toEpochMilliseconds(),
+                todayEnd.captured.toEpochMilliseconds(),
+            )
 
             calendarFlow.value = listOf(
                 calendarEvent(
@@ -684,7 +716,7 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `schedule range dropdown switches repository query to past schedules`() = runTest {
+    fun `schedule range defaults to next seven days and can switch to today`() = runTest {
         val startBounds = mutableListOf<Long>()
         val endBounds = mutableListOf<Long>()
         coEvery { authRepository.currentSession() } returns session()
@@ -706,9 +738,12 @@ class TodayViewModelSpecTest {
         viewModel.state.test {
             var emission = awaitItem()
             while (emission.loading) emission = awaitItem()
-            assertEquals(ScheduleRangeFilter.ALL, emission.scheduleRangeFilter)
-            assertEquals(Instant.fromEpochMilliseconds(0).toEpochMilliseconds(), startBounds.last())
-            assertEquals(Long.MAX_VALUE - 1L, endBounds.last())
+            assertEquals(ScheduleRangeFilter.NEXT_7_DAYS, emission.scheduleRangeFilter)
+            assertEquals(Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds(), startBounds.last())
+            assertEquals(
+                Instant.parse("2026-04-24T15:00:00Z").toEpochMilliseconds() - 1L,
+                endBounds.last(),
+            )
 
             viewModel.onScheduleRangeChange(ScheduleRangeFilter.TODAY)
 
@@ -1124,6 +1159,7 @@ class TodayViewModelSpecTest {
                 commitments = emptyList(),
                 calendarEvents = emptyList(),
                 scheduleActions = emptyList(),
+                scheduleActionSyncState = null,
                 scheduleLinks = emptyList(),
                 sourceStatuses = emptyList(),
                 processingStates = listOf(
@@ -1203,6 +1239,405 @@ class TodayViewModelSpecTest {
     }
 
     @Test
+    fun `schedule action cache refreshes from backend on first authenticated entry`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.refresh(userId = "user-1", surface = "schedule")
+        }
+        assertFalse(viewModel.state.value.refreshing)
+    }
+
+    @Test
+    fun `P1-GAP-004 schedule action feed quota delay state remains visible`() = runTest {
+        actionSyncState.value = actionSyncStateEntity(
+            surfaceKey = "schedule",
+            recomputeState = "pending",
+            capacityState = "quota_degraded",
+            backlogLagSeconds = 240,
+        )
+        coEvery { authRepository.currentSession() } returns session()
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.scheduleActionFeedStatus == null) {
+                emission = awaitItem()
+            }
+
+            val status = emission.scheduleActionFeedStatus
+            assertEquals(PersonActionFeedStatusKind.QUOTA_DELAY, status?.kind)
+            assertEquals(240, status?.backlogLagSeconds)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `schedule action completion patches backend action and refreshes schedule feed`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery {
+            personActionRepository.completeAction(userId = "user-1", actionItemId = "pa-schedule-1", expectedUpdatedAt = null)
+        } returns BecalmResult.Success(PersonActionMutationSyncStats(queued = 1, synced = 1, retryable = 0, failed = 0))
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onCompleteScheduleAction("pa-schedule-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.completeAction(userId = "user-1", actionItemId = "pa-schedule-1", expectedUpdatedAt = null)
+        }
+        coVerify(exactly = 2) {
+            personActionRepository.refresh(userId = "user-1", surface = "schedule")
+        }
+    }
+
+    @Test
+    fun `schedule action completion sends provider write when metadata is ready`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { personActionRepository.observeActiveForSurface(any(), any(), any()) } returns flowOf(
+            listOf(scheduleActionEntity(providerWriteReady = true)),
+        )
+        val providerWriteSlot = slot<PersonActionProviderWriteRequest>()
+        coEvery {
+            personActionRepository.completeActionWithProviderWrite(
+                userId = "user-1",
+                actionItemId = "pa-schedule-1",
+                providerWrite = capture(providerWriteSlot),
+                expectedUpdatedAt = null,
+            )
+        } returns BecalmResult.Success(PersonActionMutationSyncStats(queued = 1, synced = 1, retryable = 0, failed = 0))
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading || emission.scheduleActions.isEmpty()) {
+                emission = awaitItem()
+            }
+
+            viewModel.onCompleteScheduleAction("pa-schedule-1")
+            advanceUntilIdle()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals("google_calendar", providerWriteSlot.captured.provider)
+        assertEquals("conn-calendar-write", providerWriteSlot.captured.sourceConnectionId)
+        assertEquals("schedule-link-1", providerWriteSlot.captured.scheduleEventLinkId)
+        coVerify(exactly = 0) {
+            personActionRepository.completeAction(userId = "user-1", actionItemId = "pa-schedule-1", expectedUpdatedAt = null)
+        }
+    }
+
+    @Test
+    fun `P1-GAP-005 add to calendar keeps visible job status and polls terminal state`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { personActionRepository.observeActiveForSurface(any(), any(), any()) } returns flowOf(
+            listOf(scheduleActionEntity(providerWriteReady = true)),
+        )
+        coEvery {
+            personActionRepository.completeActionWithProviderWrite(
+                userId = "user-1",
+                actionItemId = "pa-schedule-1",
+                providerWrite = any(),
+                expectedUpdatedAt = null,
+            )
+        } returns BecalmResult.Success(
+            PersonActionMutationSyncStats(
+                queued = 1,
+                synced = 1,
+                retryable = 0,
+                failed = 0,
+                providerWriteJobId = "job-1",
+            ),
+        )
+        coEvery {
+            personActionRepository.fetchCalendarWriteJobStatus(userId = "user-1", jobId = "job-1")
+        } returns BecalmResult.Success(
+            CalendarWriteJobStatus(
+                jobId = "job-1",
+                status = "succeeded",
+                accepted = true,
+                provider = "google_calendar",
+                actionItemId = "pa-schedule-1",
+                scheduleEventLinkId = "schedule-link-1",
+                sourceConnectionId = "conn-calendar-write",
+                attempts = 1,
+            ),
+        )
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading || emission.scheduleActions.isEmpty()) {
+                emission = awaitItem()
+            }
+
+            viewModel.onCompleteScheduleAction("pa-schedule-1")
+            advanceUntilIdle()
+
+            while (emission.calendarWriteJobs.firstOrNull()?.status != CalendarWriteJobStatusKind.SUCCEEDED) {
+                emission = awaitItem()
+            }
+            val job = emission.calendarWriteJobs.single()
+            assertEquals("job-1", job.jobId)
+            assertEquals("Jane Kim calendar candidate", job.title)
+            assertEquals(false, job.checking)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) {
+            personActionRepository.fetchCalendarWriteJobStatus(userId = "user-1", jobId = "job-1")
+        }
+    }
+
+    @Test
+    fun `P1-GAP-005 calendar write poll failure keeps visible retryable job status`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { personActionRepository.observeActiveForSurface(any(), any(), any()) } returns flowOf(
+            listOf(scheduleActionEntity(providerWriteReady = true)),
+        )
+        coEvery {
+            personActionRepository.completeActionWithProviderWrite(
+                userId = "user-1",
+                actionItemId = "pa-schedule-1",
+                providerWrite = any(),
+                expectedUpdatedAt = null,
+            )
+        } returns BecalmResult.Success(
+            PersonActionMutationSyncStats(
+                queued = 1,
+                synced = 1,
+                retryable = 0,
+                failed = 0,
+                providerWriteJobId = "job-poll-failed",
+            ),
+        )
+        coEvery {
+            personActionRepository.fetchCalendarWriteJobStatus(
+                userId = "user-1",
+                jobId = "job-poll-failed",
+            )
+        } returns BecalmResult.Failure(BecalmError.Network(503, "calendar_write_status_unavailable"))
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading || emission.scheduleActions.isEmpty()) {
+                emission = awaitItem()
+            }
+
+            viewModel.onCompleteScheduleAction("pa-schedule-1")
+            advanceUntilIdle()
+
+            while (emission.calendarWriteJobs.firstOrNull()?.status != CalendarWriteJobStatusKind.CHECK_FAILED) {
+                emission = awaitItem()
+            }
+            val job = emission.calendarWriteJobs.single()
+            assertEquals("job-poll-failed", job.jobId)
+            assertEquals("Jane Kim calendar candidate", job.title)
+            assertEquals(CalendarWriteJobStatusKind.CHECK_FAILED, job.status)
+            assertEquals(false, job.checking)
+            assertEquals("retry_later", job.clientAction)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(atLeast = 1) {
+            userPrefsStore.setCalendarWriteJobSnapshots(
+                match { jobs ->
+                    jobs.any {
+                        it.jobId == "job-poll-failed" &&
+                            it.actionItemId == "pa-schedule-1" &&
+                            it.status == "check_failed" &&
+                            it.clientAction == "retry_later"
+                    }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `P1-GAP-005 restores calendar write retry state from user prefs after process restart`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { userPrefsStore.observeCalendarWriteJobSnapshots() } returns flowOf(
+            listOf(
+                CalendarWriteJobPrefsSnapshot(
+                    jobId = "job-restored",
+                    actionItemId = "pa-schedule-1",
+                    title = "Jane Kim calendar candidate",
+                    provider = "google_calendar",
+                    scheduleEventLinkId = "schedule-link-1",
+                    status = "check_failed",
+                    retryAfterSeconds = null,
+                    attempts = 1,
+                    errorCode = "calendar_write_status_unavailable",
+                    clientAction = "retry_later",
+                ),
+            ),
+        )
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.calendarWriteJobs.isEmpty()) {
+                emission = awaitItem()
+            }
+            val job = emission.calendarWriteJobs.single()
+            assertEquals("job-restored", job.jobId)
+            assertEquals("pa-schedule-1", job.actionItemId)
+            assertEquals("Jane Kim calendar candidate", job.title)
+            assertEquals("google_calendar", job.provider)
+            assertEquals("schedule-link-1", job.scheduleEventLinkId)
+            assertEquals(CalendarWriteJobStatusKind.CHECK_FAILED, job.status)
+            assertEquals(false, job.checking)
+            assertEquals("calendar_write_status_unavailable", job.errorCode)
+            assertEquals("retry_later", job.clientAction)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            personActionRepository.fetchCalendarWriteJobStatus(userId = "user-1", jobId = "job-restored")
+        }
+    }
+
+    @Test
+    fun `P1-GAP-005 restores calendar write reauth state from user prefs after process restart`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { userPrefsStore.observeCalendarWriteJobSnapshots() } returns flowOf(
+            listOf(
+                CalendarWriteJobPrefsSnapshot(
+                    jobId = "job-restored-reauth",
+                    actionItemId = "pa-schedule-1",
+                    title = "Jane Kim calendar candidate",
+                    provider = "google_calendar",
+                    scheduleEventLinkId = "schedule-link-1",
+                    status = "needs_reauth",
+                    retryAfterSeconds = null,
+                    attempts = 2,
+                    errorCode = "provider_token_expired",
+                    clientAction = "reconnect_source",
+                ),
+            ),
+        )
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.calendarWriteJobs.isEmpty()) {
+                emission = awaitItem()
+            }
+            val job = emission.calendarWriteJobs.single()
+            assertEquals("job-restored-reauth", job.jobId)
+            assertEquals("pa-schedule-1", job.actionItemId)
+            assertEquals("Jane Kim calendar candidate", job.title)
+            assertEquals("google_calendar", job.provider)
+            assertEquals("schedule-link-1", job.scheduleEventLinkId)
+            assertEquals(CalendarWriteJobStatusKind.NEEDS_REAUTH, job.status)
+            assertEquals(false, job.checking)
+            assertEquals("provider_token_expired", job.errorCode)
+            assertEquals("reconnect_source", job.clientAction)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            personActionRepository.fetchCalendarWriteJobStatus(userId = "user-1", jobId = "job-restored-reauth")
+        }
+    }
+
+    @Test
+    fun `P1-GAP-005 restored queued calendar write job resumes polling after process restart`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { userPrefsStore.observeCalendarWriteJobSnapshots() } returns flowOf(
+            listOf(
+                CalendarWriteJobPrefsSnapshot(
+                    jobId = "job-restored-active",
+                    actionItemId = "pa-schedule-1",
+                    title = "Jane Kim calendar candidate",
+                    provider = "google_calendar",
+                    scheduleEventLinkId = "schedule-link-1",
+                    status = "queued",
+                    retryAfterSeconds = 1,
+                    attempts = 0,
+                    errorCode = null,
+                    clientAction = null,
+                ),
+            ),
+        )
+        coEvery {
+            personActionRepository.fetchCalendarWriteJobStatus(
+                userId = "user-1",
+                jobId = "job-restored-active",
+            )
+        } returns BecalmResult.Success(
+            CalendarWriteJobStatus(
+                jobId = "job-restored-active",
+                status = "succeeded",
+                accepted = true,
+                provider = "google_calendar",
+                actionItemId = "pa-schedule-1",
+                scheduleEventLinkId = "schedule-link-1",
+                sourceConnectionId = "conn-calendar-write",
+                attempts = 1,
+            ),
+        )
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.calendarWriteJobs.firstOrNull()?.status != CalendarWriteJobStatusKind.SUCCEEDED) {
+                emission = awaitItem()
+            }
+            val job = emission.calendarWriteJobs.single()
+            assertEquals("job-restored-active", job.jobId)
+            assertEquals("pa-schedule-1", job.actionItemId)
+            assertEquals("Jane Kim calendar candidate", job.title)
+            assertEquals(CalendarWriteJobStatusKind.SUCCEEDED, job.status)
+            assertEquals(false, job.checking)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) {
+            personActionRepository.fetchCalendarWriteJobStatus(userId = "user-1", jobId = "job-restored-active")
+        }
+        coVerify(atLeast = 1) {
+            userPrefsStore.setCalendarWriteJobSnapshots(match { it.isEmpty() })
+        }
+    }
+
+    @Test
+    fun `schedule action dismissal patches backend action and refreshes schedule feed`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery {
+            personActionRepository.dismissAction(
+                userId = "user-1",
+                actionItemId = "pa-schedule-1",
+                reason = "not_actionable",
+                expectedUpdatedAt = null,
+            )
+        } returns BecalmResult.Success(PersonActionMutationSyncStats(queued = 1, synced = 1, retryable = 0, failed = 0))
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onDismissScheduleAction("pa-schedule-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.dismissAction(
+                userId = "user-1",
+                actionItemId = "pa-schedule-1",
+                reason = "not_actionable",
+                expectedUpdatedAt = null,
+            )
+        }
+        coVerify(exactly = 2) {
+            personActionRepository.refresh(userId = "user-1", surface = "schedule")
+        }
+    }
+
+    @Test
     fun `pull refresh failure surfaces a retryable message and stops the spinner`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
@@ -1229,12 +1664,15 @@ class TodayViewModelSpecTest {
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
     }
 
-    private fun buildViewModel(): TodayViewModel = TodayViewModel(
+    private fun buildViewModel(
+        personActionRepository: PersonActionRepository = this.personActionRepository,
+    ): TodayViewModel = TodayViewModel(
         commitmentRepository = commitmentRepository,
         calendarEventRepository = calendarEventRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
         scheduleEventLinkRepository = scheduleEventLinkRepository,
+        personActionRepository = personActionRepository,
         workScheduler = workScheduler,
         sourceStatusRepository = sourceStatusRepository,
         processingStatusRepository = processingStatusRepository,
@@ -1253,6 +1691,24 @@ class TodayViewModelSpecTest {
                 .invoke(viewModel)
         }
     }
+
+    private fun actionSyncStateEntity(
+        surfaceKey: String,
+        recomputeState: String?,
+        capacityState: String?,
+        backlogLagSeconds: Int? = null,
+    ): PersonActionSyncStateEntity =
+        PersonActionSyncStateEntity(
+            userId = "user-1",
+            surfaceKey = surfaceKey,
+            status = "active",
+            serverWatermark = now,
+            recomputeState = recomputeState,
+            capacityState = capacityState,
+            capacityBacklogLagSeconds = backlogLagSeconds,
+            lastSyncedAt = now,
+            updatedAt = now,
+        )
 
     private fun session() = SupabaseSession(
         accessToken = "a",
@@ -1359,6 +1815,52 @@ class TodayViewModelSpecTest {
         location = location,
         syncStatus = "synced",
     )
+
+    private fun scheduleActionEntity(providerWriteReady: Boolean = false): PersonActionItemCacheEntity =
+        PersonActionItemCacheEntity(
+            id = "pa-schedule-1",
+            userId = "user-1",
+            personId = "person-1",
+            personDisplayName = "Jane Kim",
+            personSortKey = "jane kim",
+            surfacesCsv = "schedule,person",
+            actionKind = "add_to_calendar",
+            status = "active",
+            title = "Jane Kim calendar candidate",
+            primaryVerb = "후보 확인",
+            shortReason = "메일에는 있는데 캘린더에는 없습니다.",
+            commitmentId = "commitment-1",
+            calendarEventId = null,
+            sourceEventId = "source-event-1",
+            sourceType = "gmail",
+            sourceRef = "gmail-msg-1",
+            dueAt = null,
+            dueHint = null,
+            dueIsApproximate = false,
+            staleAfter = null,
+            urgencyScore = 91.0,
+            importanceScore = 82.0,
+            confidence = 0.88,
+            reasonCodesCsv = "calendar_missing",
+            inputWatermark = Instant.parse("2026-06-03T02:00:00Z"),
+            serverWatermark = Instant.parse("2026-06-03T03:00:00Z"),
+            computedAt = Instant.parse("2026-06-03T02:00:01Z"),
+            updatedAt = Instant.parse("2026-06-03T02:00:02Z"),
+            snoozedUntil = null,
+            completedAt = null,
+            dismissedAt = null,
+            primaryEvidenceKind = "schedule_link",
+            primaryEvidenceId = "schedule-link-1",
+            primaryEvidenceSourceRef = "gmail-msg-1",
+            primaryEvidenceOccurredAt = null,
+            primaryEvidenceLabel = "메일 일정 후보",
+            primaryEvidenceQuote = null,
+            providerWriteKind = if (providerWriteReady) "add_to_calendar" else null,
+            providerWriteState = if (providerWriteReady) "ready" else null,
+            providerWriteProvider = if (providerWriteReady) "google_calendar" else null,
+            providerWriteSourceConnectionId = if (providerWriteReady) "conn-calendar-write" else null,
+            providerWriteScheduleEventLinkId = if (providerWriteReady) "schedule-link-1" else null,
+        )
 
     private fun scheduleLink(
         id: String,

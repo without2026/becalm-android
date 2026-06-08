@@ -25,6 +25,20 @@ public data class PersonActionSyncStateEntity(
     val recomputeState: String?,
     @ColumnInfo(name = "capacity_state")
     val capacityState: String?,
+    @ColumnInfo(name = "capacity_backlog_lag_seconds")
+    val capacityBacklogLagSeconds: Int? = null,
+    @ColumnInfo(name = "capacity_last_caught_up_at")
+    val capacityLastCaughtUpAt: Instant? = null,
+    @ColumnInfo(name = "capacity_incident_id")
+    val capacityIncidentId: String? = null,
+    @ColumnInfo(name = "recovery_actions_json")
+    val recoveryActionsJson: String? = null,
+    @ColumnInfo(name = "empty_state_json")
+    val emptyStateJson: String? = null,
+    @ColumnInfo(name = "server_timing_json")
+    val serverTimingJson: String? = null,
+    @ColumnInfo(name = "server_timing_total_ms")
+    val serverTimingTotalMs: Double? = null,
     @ColumnInfo(name = "last_synced_at")
     val lastSyncedAt: Instant,
     @ColumnInfo(name = "updated_at")

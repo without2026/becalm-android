@@ -3,6 +3,7 @@ package com.becalm.android.ui.onboarding
 import android.content.Context
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -76,12 +77,13 @@ class OnboardingCheckpoint1E2eTest {
         composeTestRule.onAllNodesWithText(string(R.string.onb_setup_required_section)).assertCountEquals(0)
         composeTestRule.onAllNodesWithText(string(R.string.onb_setup_recommended_section)).assertCountEquals(0)
         composeTestRule.onAllNodesWithText(string(R.string.onb_setup_contacts_title)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.onb_setup_first_source_section)).assertCountEquals(0)
+        composeTestRule.onNodeWithTag("progressive-source-card").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.onb_setup_source_preview_label)).assertIsDisplayed()
         composeTestRule.onNodeWithTag("source-connections-list")
-            .performScrollToNode(hasText(string(R.string.onb_setup_first_source_section)))
-        composeTestRule.onNodeWithText(string(R.string.onb_setup_first_source_section)).assertIsDisplayed()
-        composeTestRule.onNodeWithTag("source-connections-list")
-            .performScrollToNode(hasText(string(R.string.onb_setup_add_later_title)))
-        composeTestRule.onNodeWithText(string(R.string.onb_setup_add_later_title)).assertIsDisplayed()
+            .performScrollToNode(hasTestTag("setup-add-later-note"))
+        composeTestRule.onNodeWithTag("setup-add-later-note").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.onb_setup_add_later_title)).assertCountEquals(0)
         composeTestRule.onNodeWithTag("source-connections-list")
             .performScrollToNode(hasText(string(R.string.onb_setup_start)))
         composeTestRule.onNodeWithText(string(R.string.onb_setup_start)).performClick()

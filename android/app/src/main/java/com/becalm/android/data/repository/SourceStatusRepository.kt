@@ -294,6 +294,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 lastSyncedAtMs = this[SourceStatusPrefsKeys.lastSyncedAt(sourceType)],
                 lastError = this[SourceStatusPrefsKeys.lastError(sourceType)],
                 isInProgress = this[SourceStatusPrefsKeys.inProgress(sourceType)] ?: false,
+                inProgressStartedAtMs = this[SourceStatusPrefsKeys.inProgressStartedAt(sourceType)],
                 serverConnectionState = serverConnectionState,
             ),
             serverConnectionState = serverConnectionState,
@@ -341,6 +342,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 lastSyncedAt = SourceStatusPrefsKeys::lastSyncedAt,
                 lastError = SourceStatusPrefsKeys::lastError,
                 inProgress = SourceStatusPrefsKeys::inProgress,
+                inProgressStartedAt = SourceStatusPrefsKeys::inProgressStartedAt,
                 connectionState = SourceStatusPrefsKeys::connectionState,
             )
             logger.d(TAG, "refreshFromServer merged=${body.sources.size}")
@@ -368,6 +370,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             prefs[SourceStatusPrefsKeys.lastSyncedAt(sourceType)] = at.toEpochMilliseconds()
             prefs.remove(SourceStatusPrefsKeys.lastError(sourceType))
             prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
+            prefs.remove(SourceStatusPrefsKeys.inProgressStartedAt(sourceType))
         }
         logger.d(TAG, "syncSuccess source=$sourceType at=$at")
         trackSourceSync(ProductAnalyticsEvents.SOURCE_SYNC_COMPLETED, sourceType, result = "success")
@@ -382,6 +385,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             prefs[SourceStatusPrefsKeys.lastError(sourceType)] = error
             prefs[SourceStatusPrefsKeys.lastSyncedAt(sourceType)] = at.toEpochMilliseconds()
             prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
+            prefs.remove(SourceStatusPrefsKeys.inProgressStartedAt(sourceType))
         }
         logger.d(TAG, "syncError source=$sourceType error=$error at=$at")
         trackSourceSync(ProductAnalyticsEvents.SOURCE_SYNC_FAILED, sourceType, result = "error")
@@ -391,6 +395,8 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         runOp(sourceType, "recordSyncStart") {
             userPrefs.edit { prefs ->
                 prefs[SourceStatusPrefsKeys.inProgress(sourceType)] = true
+                prefs[SourceStatusPrefsKeys.inProgressStartedAt(sourceType)] = Clock.System.now().toEpochMilliseconds()
+                prefs.remove(SourceStatusPrefsKeys.lastError(sourceType))
             }
             logger.d(TAG, "syncStart source=$sourceType")
             trackSourceSync(ProductAnalyticsEvents.SOURCE_SYNC_STARTED, sourceType, result = "started")
@@ -402,6 +408,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 prefs.remove(SourceStatusPrefsKeys.lastSyncedAt(sourceType))
                 prefs.remove(SourceStatusPrefsKeys.lastError(sourceType))
                 prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
+                prefs.remove(SourceStatusPrefsKeys.inProgressStartedAt(sourceType))
                 prefs.remove(SourceStatusPrefsKeys.connectionState(sourceType))
             }
             logger.d(TAG, "clear source=$sourceType")
@@ -416,6 +423,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 prefs.remove(SourceStatusPrefsKeys.lastSyncedAt(source))
                 prefs.remove(SourceStatusPrefsKeys.lastError(source))
                 prefs.remove(SourceStatusPrefsKeys.inProgress(source))
+                prefs.remove(SourceStatusPrefsKeys.inProgressStartedAt(source))
                 prefs.remove(SourceStatusPrefsKeys.connectionState(source))
             }
         }

@@ -100,6 +100,9 @@ public interface CalendarEventDao {
     )
     public suspend fun findAllForUser(userId: String): List<CalendarEventEntity>
 
+    @Query("SELECT COUNT(*) FROM calendar_events WHERE user_id = :userId")
+    public suspend fun countForUser(userId: String): Int
+
     // ── Deletion ─────────────────────────────────────────────────────────────
 
     /**

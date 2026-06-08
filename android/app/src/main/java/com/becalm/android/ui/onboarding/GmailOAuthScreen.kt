@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -93,6 +94,7 @@ public fun GmailOAuthScreen(
     val errorCopyByCode = oauthErrorStringMap(
         network = stringResource(R.string.onb_gmail_error_network),
         permission = stringResource(R.string.onb_gmail_error_permission_denied),
+        browserUnavailable = stringResource(R.string.onb_oauth_error_browser_unavailable),
         unknown = stringResource(R.string.onb_gmail_error_unknown),
     )
 
@@ -156,6 +158,7 @@ public fun GmailOAuthScreen(
     ) { padding ->
         GmailOAuthContent(
             modifier = Modifier.padding(padding),
+            connectLoading = pendingOAuthResumeRefresh,
             onConnect = onConnect ?: {
                 val hostActivity = activity
                 if (hostActivity == null) {
@@ -180,6 +183,7 @@ internal fun GmailOAuthContent(
     onConnect: () -> Unit,
     onSkip: () -> Unit,
     modifier: Modifier = Modifier,
+    connectLoading: Boolean = false,
 ) {
     OAuthPlaceholderContent(
         modifier = modifier,
@@ -189,6 +193,7 @@ internal fun GmailOAuthContent(
         connectLabel = stringResource(R.string.action_connect),
         onConnect = onConnect,
         onSkip = onSkip,
+        connectLoading = connectLoading,
     )
 }
 
@@ -234,7 +239,9 @@ internal fun OAuthPlaceholderContent(
             variant = BecalmButtonVariant.Primary,
             enabled = !connectLoading,
             loading = connectLoading,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("oauth-connect"),
         )
         Spacer(modifier = Modifier.height(12.dp))
         BecalmButton(
@@ -242,6 +249,7 @@ internal fun OAuthPlaceholderContent(
             onClick = onSkip,
             variant = BecalmButtonVariant.Text,
             enabled = !connectLoading,
+            modifier = Modifier.testTag("oauth-skip"),
         )
     }
 }
@@ -254,10 +262,12 @@ internal fun OAuthPlaceholderContent(
 internal fun oauthErrorStringMap(
     network: String,
     permission: String,
+    browserUnavailable: String,
     unknown: String,
 ): Map<String, String> = mapOf(
     "network" to network,
     "scope_denied" to permission,
+    "browser_unavailable" to browserUnavailable,
     "play_services_unavailable" to unknown,
     "unknown" to unknown,
     "save_failed" to unknown,

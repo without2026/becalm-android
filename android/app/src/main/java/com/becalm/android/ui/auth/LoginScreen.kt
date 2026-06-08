@@ -600,7 +600,7 @@ private fun LoginDivider(modifier: Modifier = Modifier) {
 }
 
 /** Reading-width cap for the login form on tablets / foldables. Matches the
- *  spirit of the 600dp Today timeline cap and 480dp state-view cap; sized
+ *  spirit of the 600dp schedule timeline cap and 480dp state-view cap; sized
  *  smaller because login fields are denser than reading content. */
 private val LoginFormMaxContentWidth: androidx.compose.ui.unit.Dp = 480.dp
 // ─── Previews ─────────────────────────────────────────────────────────────────

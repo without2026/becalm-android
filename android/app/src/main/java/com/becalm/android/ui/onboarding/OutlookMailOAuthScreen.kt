@@ -74,6 +74,7 @@ public fun OutlookMailOAuthScreen(
     val errorCopyByCode = oauthErrorStringMap(
         network = stringResource(R.string.onb_outlook_error_network),
         permission = stringResource(R.string.onb_outlook_error_permission_denied),
+        browserUnavailable = stringResource(R.string.onb_oauth_error_browser_unavailable),
         unknown = stringResource(R.string.onb_outlook_error_unknown),
     )
 

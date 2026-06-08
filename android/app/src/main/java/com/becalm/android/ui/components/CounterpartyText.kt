@@ -9,7 +9,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.becalm.android.R
 
 /**
- * Inline counterparty display for Today timeline rows.
+ * Inline counterparty display for schedule timeline rows.
  *
  * [name] is the fully-resolved counterparty label produced by
  * `TodayViewModel.resolveCounterpartyDisplay` (`display_name → nickname →

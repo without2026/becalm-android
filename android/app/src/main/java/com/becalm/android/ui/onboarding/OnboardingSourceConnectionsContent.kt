@@ -6,12 +6,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -41,6 +47,8 @@ internal fun SourceConnectionsContent(
     onSelfAliasChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
     connectedAccounts: List<OnboardingSourceOwnershipUi> = emptyList(),
+    connectedAccountActionIds: Set<String> = emptySet(),
+    onDeleteConnectedAccount: ((OnboardingSourceOwnershipUi) -> Unit)? = null,
     onConnectSetupItem: (OnboardingSetupItem) -> Unit = {},
     onSkipSetupItem: (OnboardingSetupItem) -> Unit = {},
     continueEnabled: Boolean = true,
@@ -53,7 +61,6 @@ internal fun SourceConnectionsContent(
     val optionalSection = stringResource(R.string.onb_setup_optional_section)
     val mailSection = stringResource(R.string.onb_sources_mail_section)
     val calendarSection = stringResource(R.string.onb_sources_calendar_section)
-    val firstSourceSection = stringResource(R.string.onb_setup_first_source_section)
     val visibleSourceItems = if (progressiveSetup) items.take(1) else items
     val mailItems = visibleSourceItems.filter { it.category == SourceConnectionCategory.Mail }
     val calendarItems = visibleSourceItems.filter { it.category == SourceConnectionCategory.Calendar }
@@ -68,6 +75,15 @@ internal fun SourceConnectionsContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
+            if (progressiveSetup) {
+                OnboardingSetupProgress(
+                    currentStep = ONBOARDING_INTRO_PAGE_COUNT,
+                    totalSteps = ONBOARDING_INTRO_PAGE_COUNT,
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                ProgressiveSourceSetupIcon(provider = visibleSourceItems.firstOrNull()?.provider)
+                Spacer(modifier = Modifier.height(12.dp))
+            }
             Text(
                 text = headline,
                 style = MaterialTheme.typography.headlineSmall,
@@ -82,7 +98,7 @@ internal fun SourceConnectionsContent(
             Spacer(modifier = Modifier.height(12.dp))
         }
         if (progressiveSetup) {
-            if (selfIdentity != null) {
+            if (selfIdentity != null && !selfIdentity.confirmed) {
                 item(key = "progressive-self-identity") {
                     SelfIdentitySetupPanel(
                         state = selfIdentity,
@@ -95,17 +111,19 @@ internal fun SourceConnectionsContent(
                 }
             }
             if (selfIdentityGateOpen && visibleSourceItems.isNotEmpty()) {
-                sourceSection(
-                    title = firstSourceSection,
-                    items = visibleSourceItems,
-                    onConnect = onConnect,
-                    onSkip = onSkip,
-                    skipLabel = skipLabel,
-                )
+                item(key = "progressive-first-source-card") {
+                    val firstSource = visibleSourceItems.first()
+                    ProgressiveSourceConnectionCard(
+                        item = firstSource,
+                        onConnect = { onConnect(firstSource.provider) },
+                        onSkip = { onSkip(firstSource.provider) },
+                        skipLabel = skipLabel,
+                    )
+                }
             }
             if (selfIdentityGateOpen) {
                 item(key = "setup-add-later-notice") {
-                    SetupAddLaterNotice()
+                    ProgressiveAddLaterNote()
                 }
             }
         } else if (showRequiredSetup) {
@@ -201,7 +219,13 @@ internal fun SourceConnectionsContent(
                 )
             }
             items(connectedAccounts, key = { item -> item.id }) { item ->
-                SourceConnectedAccountRow(item = item)
+                SourceConnectedAccountRow(
+                    item = item,
+                    deleting = item.id in connectedAccountActionIds,
+                    onDelete = onDeleteConnectedAccount?.let { onDelete ->
+                        { onDelete(item) }
+                    },
+                )
             }
         }
         item {
@@ -217,6 +241,42 @@ internal fun SourceConnectionsContent(
             )
         }
     }
+}
+
+@Composable
+private fun ProgressiveSourceSetupIcon(provider: OnboardingSourceProvider?) {
+    Icon(
+        imageVector = provider.progressiveSetupIcon(),
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .testTag("source-connections-progressive-icon")
+            .size(32.dp),
+    )
+}
+
+private fun OnboardingSourceProvider?.progressiveSetupIcon(): ImageVector =
+    when (this) {
+        OnboardingSourceProvider.GOOGLE_CALENDAR,
+        OnboardingSourceProvider.OUTLOOK_CALENDAR,
+        -> Icons.Outlined.CalendarMonth
+        OnboardingSourceProvider.GMAIL,
+        OnboardingSourceProvider.OUTLOOK_MAIL,
+        null,
+        -> Icons.Outlined.Email
+}
+
+@Composable
+private fun ProgressiveAddLaterNote() {
+    Text(
+        text = "• ${stringResource(R.string.onb_setup_add_later_body)}",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .testTag("setup-add-later-note"),
+    )
 }
 
 @Composable

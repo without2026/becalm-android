@@ -1,7 +1,8 @@
 # Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
 #
 # 이 스펙은 사용자가 CommitmentDetailSheet에서 이미 추출된 commitment를 수정·정정·폐기하는 경로를 codify한다.
-# 'action_state 전이'(commitment-management.spec.yml)와 다르게 **semantic 변경**(제목·마감·상대·방향·이의제기·삭제)을 다룬다.
+# 'action_state 전이'(next-action-projection.spec.yml NAP-ACTION-*)와 다르게
+# **semantic 변경**(제목·마감·상대·방향·이의제기·삭제)을 다룬다.
 # quote는 법적 증거 성격(data-model.yml invariants)으로 **불변**이며 사용자는 이의제기 플래그만 set한다.
 #
 # 스키마 의존성: 이 스펙의 구현은 commitments 테이블에 last_edited_by, last_edited_at,
@@ -65,11 +66,11 @@ behaviors:
 
   - id: EDIT-006
     type: ui_interaction
-    description: "commitment 삭제 — CommitmentEditSheet 하단 [삭제] 링크 탭 시 AlertDialog로 확인 후 deleted_at=now() soft delete. action_state='cancelled'(CMT-012)와 구분되는 의미: cancelled는 '약속이 무효화됨'(기록은 유지), deleted는 'LLM이 애초에 잘못 추출했거나 약속이 아님'(기록에서 제거). 삭제된 commitment는 모든 목록/타임라인에서 숨김"
+    description: "commitment 삭제 — CommitmentEditSheet 하단 [삭제] 링크 탭 시 AlertDialog로 확인 후 deleted_at=now() soft delete. action_state='cancelled'(NAP-ACTION-001)와 구분되는 의미: cancelled는 '약속이 무효화됨'(기록은 유지), deleted는 'LLM이 애초에 잘못 추출했거나 약속이 아님'(기록에서 제거). 삭제된 commitment는 모든 action projection과 evidence/history에서 숨김"
     screen: "CommitmentEditSheet"
     interaction: "[삭제] 링크 탭 → 확인"
     precondition: "CommitmentEditSheet 열림, deleted_at IS NULL"
-    expected: "AlertDialog '이 약속을 삭제하시겠습니까? LLM이 잘못 추출한 경우에만 사용하세요. 실수로 약속이 취소된 경우 [취소]를 사용하세요.' 확인 시 Room UPDATE deleted_at=now() + sync_status='pending'. PATCH /v1/commitments/{id} {deleted_at: ISO8601} (서버는 DELETE 대신 soft delete). CommitmentManagementScreen·TodayTimelineScreen·PersonDetailScreen·UnassignedEventsScreen 모든 쿼리에서 deleted_at IS NOT NULL 제외. CommitmentEditSheet dismiss → CommitmentManagementScreen으로 복귀. 복원 UI는 MVP에 없음(post-MVP '휴지통')"
+    expected: "AlertDialog '이 약속을 삭제하시겠습니까? LLM이 잘못 추출한 경우에만 사용하세요. 실수로 약속이 취소된 경우 [취소]를 사용하세요.' 확인 시 Room UPDATE deleted_at=now() + sync_status='pending'. PATCH /v1/commitments/{id} {deleted_at: ISO8601} (서버는 DELETE 대신 soft delete). CommitmentActionInboxScreen·ScheduleScreen·PersonDetailScreen·UnassignedEventsScreen 및 backend PersonActionItem recomputation에서 deleted_at IS NOT NULL 제외. CommitmentEditSheet dismiss → 이전 action/evidence surface로 복귀. 복원 UI는 MVP에 없음(post-MVP '휴지통')"
     source: phase2-acceptance
     tests: []
 

@@ -15,10 +15,12 @@ import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.SOURCE_CONNECTION_STATUS_NEEDS_REAUTH
 import com.becalm.android.data.repository.SourceSyncJobPollResult
 import com.becalm.android.data.repository.SourceSyncJobPoller
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.UserCorrectionRepository
+import com.becalm.android.data.repository.isSyncableBackendSourceConnectionStatus
 import com.becalm.android.data.repository.toSnapshot
 import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.ColdSyncWorkInputs
@@ -51,7 +53,7 @@ internal suspend fun runServerBackedCalendarSync(
     WorkerRunGuard(
         tag = tag,
         runAttemptCount = runAttemptCount,
-        maxRetries = MAX_RETRIES,
+        maxRetries = null,
         processingPauseGate = processingPauseGate,
         logger = logger,
     ).terminalResultOrNull()?.let { return it }
@@ -120,8 +122,6 @@ internal suspend fun runServerBackedCalendarSync(
 }
 
 private const val NO_LOOKBACK: Int = -1
-private const val MAX_RETRIES: Int = 5
-
 private suspend fun triggerConnectionScopedCalendarSync(
     userId: String,
     sourceType: String,
@@ -131,7 +131,13 @@ private suspend fun triggerConnectionScopedCalendarSync(
     tag: String,
 ): ServerBackedTriggerResult {
     val connections = when (val refresh = sourceConnectionRepository.refresh(userId)) {
-        is BecalmResult.Success -> refresh.value.syncableCalendarConnectionsFor(sourceType)
+        is BecalmResult.Success -> {
+            val calendarConnections = refresh.value.calendarConnectionsFor(sourceType)
+            if (calendarConnections.any { it.status == SOURCE_CONNECTION_STATUS_NEEDS_REAUTH }) {
+                return ServerBackedTriggerResult.Failure(SOURCE_CONNECTION_STATUS_NEEDS_REAUTH, retryable = false)
+            }
+            calendarConnections.syncableCalendarConnections()
+        }
         is BecalmResult.Failure -> {
             val message = refresh.error.toCalendarSyncMessage()
             logger.w(tag, "source connection refresh failed before calendar sync: $message")
@@ -149,11 +155,7 @@ private suspend fun triggerConnectionScopedCalendarSync(
     for (connection in connections) {
         val response = api.syncSourceConnection(connection.id)
         if (!response.isSuccessful) {
-            val message = "HTTP ${response.code()}"
-            return ServerBackedTriggerResult.Failure(
-                message = message,
-                retryable = response.code() == 429 || response.code() in 500..599,
-            )
+            return ServerBackedSyncErrorMapping.triggerFailureFor(response)
         }
         val body = response.body()
             ?: return ServerBackedTriggerResult.Failure("Empty response", retryable = true)
@@ -187,10 +189,11 @@ private suspend fun triggerConnectionScopedCalendarSync(
     return ServerBackedTriggerResult.Success(syncedCount = synced)
 }
 
-private fun List<SourceConnectionEntity>.syncableCalendarConnectionsFor(sourceType: String): List<SourceConnectionEntity> =
-    filter { connection ->
-        connection.status != "disconnected" && connection.toCalendarSourceType() == sourceType
-    }
+private fun List<SourceConnectionEntity>.calendarConnectionsFor(sourceType: String): List<SourceConnectionEntity> =
+    filter { connection -> connection.toCalendarSourceType() == sourceType }
+
+private fun List<SourceConnectionEntity>.syncableCalendarConnections(): List<SourceConnectionEntity> =
+    filter { connection -> isSyncableBackendSourceConnectionStatus(connection.status) }
 
 private fun SourceConnectionEntity.toCalendarSourceType(): String? =
     when {

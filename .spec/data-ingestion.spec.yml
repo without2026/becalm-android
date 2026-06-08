@@ -2,13 +2,15 @@
 #
 # SYNC ARCHITECTURE NOTE:
 # PRIMARY local-arrival path: ING-011 foreground catch-up (ON_START / pull-to-refresh)
-#   for Android-owned sources + Room-as-source-of-truth + immediate UploadWorker (SYNC-006).
+#   for Android-owned sources + Room as local source origin/outbox + immediate UploadWorker (SYNC-006).
 # SECONDARY redundancy path: periodic WorkManager jobs (ING-006..010).
 # ContentObserver (ING-001) covers realtime detection ONLY while process is alive.
 # Events missed while process is dead are recovered via ING-011 MediaStore cursor.
-# Provider fetch owner is separate from local UI source of truth:
+# Provider fetch owner is separate from product action decision ownership:
 #   backend-managed: gmail, outlook_mail, google_calendar, outlook_calendar
 #   local-worker: voice, meeting, naver_imap, daum_imap
+# Railway owns Person/Schedule/Commitment action computation through
+# /v1/person_action_items after bounded structured context is durably accepted.
 
 module: data-ingestion
 platform: android

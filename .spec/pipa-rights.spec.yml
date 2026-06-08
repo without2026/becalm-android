@@ -49,7 +49,7 @@ behaviors:
     screen: "PrivacyManagementScreen | ProcessingPauseScreen"
     interaction: "[데이터 처리 일시중단] Switch 탭"
     precondition: "로그인 상태, processing_paused=false (default)"
-    expected: "Switch on 시 AlertDialog '처리를 일시중단하면 새 녹음·이메일·캘린더 이벤트가 자동으로 수집되지 않습니다. 기존 데이터는 유지됩니다. 재개까지 얼마나 걸릴지 추정치를 알려주세요(선택).' → 확인 시 DataStore processing_paused=true, pause_started_at=now(). 모든 주기 worker(VoiceUploadWorker·EmailPollingWorker·CalendarPollingWorker·OverdueSweepWorker·RetentionSweepWorker·CommitmentExtractionWorker)의 doWork() 진입부에서 processing_paused 체크 → Result.success() 즉시 반환. ContentObserver(RecordingFileObserver)는 등록 유지하되 onChange()에서 early return. SettingsScreen·TodayTimelineScreen 상단에 영구 배너 '처리 일시중단 중 — N일째'. off 시 DataStore processing_paused=false + ING-011 catch-up sync 즉시 트리거"
+    expected: "Switch on 시 AlertDialog '처리를 일시중단하면 새 녹음·이메일·캘린더 이벤트가 자동으로 수집되지 않습니다. 기존 데이터는 유지됩니다. 재개까지 얼마나 걸릴지 추정치를 알려주세요(선택).' → 확인 시 DataStore processing_paused=true, pause_started_at=now(). 모든 주기 worker(VoiceUploadWorker·EmailPollingWorker·CalendarPollingWorker·OverdueSweepWorker·RetentionSweepWorker·CommitmentExtractionWorker)의 doWork() 진입부에서 processing_paused 체크 → Result.success() 즉시 반환. ContentObserver(RecordingFileObserver)는 등록 유지하되 onChange()에서 early return. SettingsScreen·ScheduleScreen 상단에 영구 배너 '처리 일시중단 중 — N일째'. off 시 DataStore processing_paused=false + ING-011 catch-up sync 즉시 트리거"
     source: phase2-acceptance
     tests: []
 

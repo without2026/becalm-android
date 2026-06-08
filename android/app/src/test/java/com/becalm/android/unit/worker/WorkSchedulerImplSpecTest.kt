@@ -137,6 +137,23 @@ class WorkSchedulerImplSpecTest {
     }
 
     @Test
+    fun `manual memory outbox retry uses stable connected one-shot work`() {
+        val workName = slot<String>()
+        val policy = slot<ExistingWorkPolicy>()
+        val request = slot<OneTimeWorkRequest>()
+
+        WorkSchedulerImpl(appContext, logger).enqueueManualMemoryOutboxRetry(initialDelaySeconds = 0L)
+
+        verify(exactly = 1) {
+            workManager.enqueueUniqueWork(capture(workName), capture(policy), capture(request))
+        }
+        assertEquals(UniqueWorkKeys.MANUAL_MEMORY_OUTBOX, workName.captured)
+        assertEquals(ExistingWorkPolicy.REPLACE, policy.captured)
+        assertEquals(NetworkType.CONNECTED, request.captured.workSpec.constraints.requiredNetworkType)
+        assertEquals(0L, request.captured.workSpec.initialDelay)
+    }
+
+    @Test
     fun `profile memory work is person scoped and can run offline`() {
         val workName = slot<String>()
         val policy = slot<ExistingWorkPolicy>()

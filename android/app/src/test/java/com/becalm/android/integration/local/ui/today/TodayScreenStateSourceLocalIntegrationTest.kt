@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.After
@@ -231,21 +232,22 @@ class TodayScreenStateSourceLocalIntegrationTest {
                     ),
                 ),
             )
+            runCurrent()
 
             var updated = awaitItem()
-            while (updated.timeline.size < 4) {
+            while (updated.timeline.size < 3) {
                 updated = awaitItem()
             }
 
             val commitments = updated.timeline.filterIsInstance<TimelineItem.Commitment>()
             val meetings = updated.timeline.filterIsInstance<TimelineItem.Meeting>()
-            assertEquals(listOf("4월 초 과거 일정", "영희와 일정 변경"), commitments.map { it.title })
-            assertEquals(listOf(CommitmentItemType.SCHEDULE, CommitmentItemType.SCHEDULE), commitments.map { it.itemType })
-            assertEquals("김영희", commitments.last().counterpartyDisplayName)
+            assertEquals(listOf("영희와 일정 변경"), commitments.map { it.title })
+            assertEquals(listOf(CommitmentItemType.SCHEDULE), commitments.map { it.itemType })
+            assertEquals("김영희", commitments.single().counterpartyDisplayName)
             assertEquals(listOf("Daily standup", "Tomorrow planning"), meetings.map { it.title })
             assertFalse(updated.timeline.any { it.title == "영희와 결정" })
             assertFalse(updated.timeline.any { it.title == "4월 초 과거 액션" })
-            assertTrue(updated.timeline.any { it.title == "4월 초 과거 일정" })
+            assertFalse(updated.timeline.any { it.title == "4월 초 과거 일정" })
             assertFalse(updated.overallSyncing)
 
             cancelAndIgnoreRemainingEvents()

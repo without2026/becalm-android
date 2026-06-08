@@ -249,7 +249,7 @@ if ! wait_for_text "$back_dump" "사람"; then
   echo "Back navigation did not return to the persons surface. See $report_dir" >&2
   exit 1
 fi
-if ! contains_text "$back_dump" "Account B Contact"; then
+if ! wait_for_text "$back_dump" "Account B Contact"; then
   echo "Back navigation lost account B list state. See $report_dir" >&2
   exit 1
 fi

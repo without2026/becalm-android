@@ -136,7 +136,7 @@ internal class SourceSyncJobPoller(
             -> null
             "retry" -> if (errorCode != null && errorCode in RETRY_WAIT_REASON_CODES) {
                 SourceSyncJobPollResult.Pending(
-                    message = errorMessage ?: errorCode,
+                    message = message ?: errorCode ?: errorMessage ?: "Source sync is waiting before automatic retry",
                     retryAfterSeconds = retryAfterSeconds,
                     reasonCode = errorCode,
                     stage = stage,
@@ -161,7 +161,7 @@ internal class SourceSyncJobPoller(
             "needs_reauth" -> SourceSyncJobPollResult.Failed(errorMessage ?: errorCode ?: "needs_reauth", retryable = false)
             "failed",
             "cancelled",
-            -> SourceSyncJobPollResult.Failed(errorMessage ?: errorCode ?: status, retryable = false)
+            -> SourceSyncJobPollResult.Failed(failureMessage(), retryable = false)
             else -> SourceSyncJobPollResult.Pending(
                 message = message ?: "Provider sync status=$status",
                 retryAfterSeconds = retryAfterSeconds,
@@ -171,12 +171,19 @@ internal class SourceSyncJobPoller(
             )
         }
 
+    private fun SourceSyncJobSnapshot.failureMessage(): String =
+        when (errorCode) {
+            "llm_processing_failed" -> ProcessingStatusMessages.LLM_PROCESSING_FAILED
+            else -> errorMessage ?: errorCode ?: status ?: "failed"
+        }
+
     private companion object {
         private const val TAG = "SourceSyncJobPoller"
         private const val DEFAULT_MAX_POLL_ATTEMPTS = 3
         private val RETRY_WAIT_REASON_CODES = setOf(
             "backpressure_delayed",
             "llm_rate_limited_retrying",
+            "llm_processing_retrying",
         )
     }
 }

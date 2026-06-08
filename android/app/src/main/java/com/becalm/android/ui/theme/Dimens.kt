@@ -61,9 +61,9 @@ public data class BecalmDimens(
     val avatarSize: Dp,
     /** 28 dp — filter tabs (전체/내가 한/상대가 한), source status chips. */
     val chipHeight: Dp,
-    /** 20 dp — [glassPanel] default corner radius (mirrors [BecalmShapes.medium]). */
+    /** 18 dp — [glassPanel] default corner radius (mirrors [BecalmShapes.medium]). */
     val cardCornerRadius: Dp,
-    /** 28 dp — [glassPanelElevated] corner radius (mirrors [BecalmShapes.large]). */
+    /** 24 dp — [glassPanelElevated] corner radius (mirrors [BecalmShapes.large]). */
     val cardCornerRadiusLarge: Dp,
     /** 48 dp — primary / ghost buttons. One UI touch-target minimum. */
     val buttonHeight: Dp,
@@ -100,8 +100,8 @@ public val BecalmDimensDefault: BecalmDimens = BecalmDimens(
     iconSizeLarge = 32.dp,
     avatarSize = 36.dp,
     chipHeight = 28.dp,
-    cardCornerRadius = 20.dp,
-    cardCornerRadiusLarge = 28.dp,
+    cardCornerRadius = 18.dp,
+    cardCornerRadiusLarge = 24.dp,
     buttonHeight = 48.dp,
     buttonCornerRadius = 12.dp,
     inputHeight = 52.dp,

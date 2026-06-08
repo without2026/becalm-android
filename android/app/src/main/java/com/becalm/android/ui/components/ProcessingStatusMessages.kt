@@ -12,6 +12,10 @@ internal fun localizedProcessingStatusMessage(message: String?): UiMessage? = wh
         UiMessage.resource(R.string.processing_status_llm_daily_budget_exceeded)
     ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING ->
         UiMessage.resource(R.string.processing_status_llm_rate_limited_retrying)
+    ProcessingStatusMessages.LLM_PROCESSING_RETRYING ->
+        UiMessage.resource(R.string.processing_status_llm_processing_retrying)
+    ProcessingStatusMessages.LLM_PROCESSING_FAILED ->
+        UiMessage.resource(R.string.processing_status_llm_processing_failed)
     ProcessingStatusMessages.AUDIO_CONFIRMATION_REQUIRED ->
         UiMessage.resource(R.string.processing_status_audio_confirmation_required)
     else -> null

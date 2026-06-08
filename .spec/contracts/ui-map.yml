@@ -2,7 +2,7 @@ version: 1
 # BeCalm Android MVP — UI Map Contract
 # Navigation: Jetpack Compose Navigation (NavHost)
 # Language: Korean only
-# Bottom navigation: 3-tab BottomNavigationBar (오늘의 타임라인 / 인물 / 약속관리)
+# Bottom navigation: 3-tab BottomNavigationBar (인물 / 일정 / 약속)
 # Total routes: 25
 # Glass surfaces must preserve foreground legibility. Compose implementations
 # must not apply foreground blur to panel contents, text fields, or buttons.
@@ -123,41 +123,50 @@ routes:
     data: []
     components: [ColdSyncProgressList, DeferButton]
     auth: required
-    # TDY-010 / ONB-008: First-run only. Shown when Room is entirely empty after onboarding.
+    # COLD-001 / ONB-008: First-run only. Shown when Room is entirely empty after onboarding.
     # DataStore onboarding_completed=true written only after this screen is dismissed or sync completes.
 
   # -------- MAIN APP (3-tab bottom nav) --------
   # Bottom nav order: /persons, /today, /commitments.
+  # Product labels: Person / Schedule / Commitment.
+  # The legacy `/today` route is retained for navigation compatibility, but the
+  # contracted surface is Schedule, not a historical Today timeline.
 
   - path: /today
-    screen: TodayTimelineScreen
-    data: ["Room commitments query", "Room calendar_events query", "ING-011 foreground catch-up", "SYNC-006 upload flush"]
-    components: [OverallSyncIndicator, SourceStatusStrip, TodayTimeline, CommitmentItem, CalendarEventItem, BottomNavigationBar]
+    screen: ScheduleScreen
+    data: ["Room person_action_item_cache where surfaces contains 'schedule'", "GET /v1/person_action_items?surface=schedule", "Room calendar_events evidence query", "Room commitments evidence query", "Room source_event_participants/commitment_participants evidence lookup", "ING-011 foreground catch-up", "SYNC-006 upload flush"]
+    components: [OverallSyncIndicator, SourceStatusStrip, ScheduleActionAgenda, PersonActionCard, ScheduleAgendaRow, EvidenceDrillDownSheet, BottomNavigationBar]
     auth: required
-    # Supporting tab 2: 오늘의 타임라인. Settings 접근: 우상단 아이콘 탭 → /settings. HamburgerMenu 없음.
+    # Supporting tab 2: 일정. Settings 접근: 우상단 아이콘 탭 → /settings. HamburgerMenu 없음.
+    # Default view is today + next 7 days of attend/prepare/confirm next actions.
+    # Past source history and generic calendar history do not render as the first
+    # screen unless attached to an active action or opened through evidence.
 
   - path: /persons
     screen: PersonsScreen
-    data: ["Room person_interactions aggregate", "Room persons/person_identities mirror", "Room persons_enrichment join", "ING-011 foreground catch-up", "ENR-005 enrichment refresh"]
-    components: [PersonCard, UnassignedSection, SearchBar, OfflineBadge, BottomNavigationBar]
+    data: ["Room person_action_item_cache where surfaces contains 'person'", "GET /v1/person_action_items?surface=person", "Room person_interactions aggregate for collapsed evidence/search", "Room persons/person_identities mirror", "Room persons_enrichment join", "ING-011 foreground catch-up", "ENR-005 enrichment refresh"]
+    components: [PersonActionList, PersonActionSummaryCard, UnassignedReviewSection, SearchBar, OfflineBadge, BottomNavigationBar]
     auth: required
-    # Primary tab 1: 인물. Prototype-aligned person-first layout: "미이행 약속" 섹션을
-    # 먼저 배치하고 나머지는 "최근 연락"으로 배치한다. PersonCard에 enriched
-    # 표시명 + DNBadge(미이행 약속 수) + 최근 이벤트 미리보기를 표시한다.
+    # Primary tab 1: 인물. First screen answers "who needs my attention next?"
+    # A person appears in the primary list only when an active next action exists.
+    # Recent/history-only people move to search or a secondary collapsed section.
+    # Source ingestion history is not rendered as the default People content.
     # 직접 녹음 UI는 이 화면에 추가하지 않는다.
 
   - path: /persons/{person_id}
     screen: PersonDetailScreen
-    data: ["Room person_interactions projection", "Room source_event_participants/commitment_participants mirror", "Room person_identities", "Room persons_enrichment join", "Room raw_ingestion_events drill-down lookup", "optional local person_memory/<user_hash>/<person_id>/memory.md"]
-    components: [PersonHeader, SourceTimelineFilter, SourceEventCardRow, RawEventRow]
+    data: ["Room person_action_item_cache where person_id=:person_id", "GET /v1/person_action_items?person_id=:person_id", "Room person_interactions projection for collapsed evidence/history", "Room source_event_participants/commitment_participants mirror", "Room person_identities", "Room persons_enrichment join", "Room raw_ingestion_events drill-down lookup", "optional local person_memory/<user_hash>/<person_id>/memory.md"]
+    components: [PersonHeader, PersonNextMovePanel, PersonContextSummary, CollapsedSourceTimeline, EvidenceDrillDownSheet]
     auth: required
-    # Prototype-aligned person detail: profile header + derived stats(이메일/통화/미팅/약속)
-    # + unified source timeline. Filters: All / Email / Call / Meeting / Commitment.
-    # Stats and timeline are derived from Room person index projection.
-    # decision items are not rendered as primary action buckets by default; they are
-    # preserved as source-backed relationship facts in person_memory.md / relation context.
-    # person_memory.md may provide optional compact description text, but this route
-    # must render from structured Room data when the artifact is missing or stale.
+    # Person detail first viewport: profile header + next move + compact context.
+    # Unified source timeline is collapsed behind evidence/history affordances.
+    # decision items are preserved as source-backed relationship facts in
+    # person_memory.md / relation context and do not appear as primary actions
+    # unless they generate a concrete next action.
+    # person_memory.md may provide optional compact description text, but this
+    # route must render action rows from backend-computed person_action_item_cache
+    # when the artifact is missing or stale. Android does not locally rank or
+    # generate replacement action rows.
 
   - path: /persons/{person_id}/events/{event_id}
     screen: RawEventDetailSheet
@@ -174,13 +183,15 @@ routes:
     # Events where person_ref IS NULL.
 
   - path: /commitments
-    screen: CommitmentManagementScreen
-    data: ["Room commitments query", "PATCH /v1/commitments/{id}", "ING-011 foreground catch-up", "SYNC-006 upload flush"]
-    components: [CommitmentFilterTabs, CommitmentCard, DNBadge, BottomNavigationBar]
+    screen: CommitmentActionInboxScreen
+    data: ["Room person_action_item_cache where surfaces contains 'commitment'", "GET /v1/person_action_items?surface=commitment", "Room commitments evidence query", "Room commitment_participants/persons evidence lookup", "PATCH /v1/person_action_items/{id}", "POST /v1/person_action_items/{id}:feedback", "Room person_action_mutation_queue", "ING-011 foreground catch-up", "SYNC-006 upload flush"]
+    components: [CommitmentActionInbox, ActionBucketTabs, PersonActionCard, CommitmentEvidenceCard, DNBadge, BottomNavigationBar]
     auth: required
-    # Tab 3: tracked item 관리. Filter tabs: 전체 / 액션 / 내가 한 / 상대가 한 / 일정 / 결정.
-    # Cards show person/counterparty first, type+subtype chips, title, due info, and
-    # source context from existing source_event_* fields. No new collection/storage is required.
+    # Tab 3: 약속. First screen answers "what work must close next?"
+    # Default buckets: 지금 / 내가 할 일 / 기다리는 일 / 검토. Completed,
+    # cancelled, deleted, schedule-only history, and decision-only facts are hidden
+    # unless the user opens history/evidence. Legacy CommitmentFilterTabs are no
+    # longer the primary contract.
 
   # -------- SETTINGS --------
 
@@ -189,7 +200,7 @@ routes:
     data: ["POST https://<supabase-project>.supabase.co/auth/v1/logout"]
     components: [SourcesEntryRow, PrivacyManagementEntryRow, AccountSection, LogoutButton]
     auth: required
-    # Accessed via top-right settings icon on TodayTimelineScreen (not hamburger menu).
+    # Accessed via top-right settings icon on ScheduleScreen (not hamburger menu).
 
   - path: /settings/privacy
     screen: PrivacyManagementScreen
@@ -233,9 +244,9 @@ routes:
 shared_components:
   - name: BottomNavigationBar
     props:
-      selectedTab: "BottomTab"  # TODAY | PERSONS | COMMITMENTS
+      selectedTab: "BottomTab"  # SCHEDULE | PERSONS | COMMITMENTS
       onTabSelected: "(tab: BottomTab) -> Unit"
-    description: "3탭 하단 네비게이션. 탭: '오늘의 타임라인'(/today) / '인물'(/persons) / '약속관리'(/commitments)"
+    description: "3탭 하단 네비게이션. 탭: '인물'(/persons) / '일정'(/today compatibility route) / '약속'(/commitments)"
 
   - name: OverallSyncIndicator
     props:
@@ -253,24 +264,68 @@ shared_components:
     props:
       items: "TodayItem[]"
       onRefresh: "() -> Unit"
-    description: "오늘 캘린더 이벤트 + due=오늘 commitment 통합 시간순 목록. pull-to-refresh 지원"
+    description: "Legacy compatibility component. New default Schedule surface uses ScheduleActionAgenda and PersonActionCard instead of a historical timeline feed."
+
+  - name: ScheduleActionAgenda
+    props:
+      actions: "PersonActionItem[]"
+      agendaRows: "ScheduleAgendaRow[]"
+      onRefresh: "() -> Unit"
+      onActionTap: "(id: string) -> Unit"
+      onEvidenceTap: "(id: string) -> Unit"
+    description: "일정 탭 기본 컴포넌트. today + next 7 days의 backend-computed attend/prepare/confirm person action을 우선 표시하고, 단순 calendar row는 compact agenda로 표시한다."
+
+  - name: PersonActionCard
+    props:
+      action: "PersonActionItem"
+      onPrimaryAction: "(id: string) -> Unit"
+      onSnooze: "(id: string, until: datetime) -> Unit"
+      onDismiss: "(id: string) -> Unit"
+      onEvidenceTap: "(id: string) -> Unit"
+    description: "세 탭 공통 backend-computed person action 카드. title, primary_verb, due label, person label, one-line reason, bounded evidence handle만 표시한다. 전체 source history는 열지 않는다."
+
+  - name: ScheduleAgendaRow
+    props:
+      event: "CalendarEvent"
+      linkedActionId: "string?"
+    description: "사용자가 참석해야 하는 일정의 compact row. 준비/확인 action이 있으면 linkedActionId로 PersonActionCard에 연결된다."
 
   - name: CommitmentItem
     props:
       commitment: "Commitment"
-    description: "direction 배지(give=파랑/take=주황) + title + person_ref 기반 표시명 + due_at(KST HH:mm) 표시. due_is_approximate=true면 '~' prefix + due_hint 보조 라벨. TodayTimelineScreen 전용 compact 카드"
+    description: "Legacy compact commitment row. New first-screen UI renders backend-computed PersonActionCard rows."
 
   - name: CommitmentCard
     props:
       commitment: "Commitment"
       onTap: "(id: string) -> Unit"
-    description: "CommitmentManagementScreen + PersonDetailScreen 전용 풀 카드. direction 배지 + title + quote(truncated) + source_event_title + person_ref 표시명 + DNBadge + action_state 상태 표시"
+    description: "Evidence/detail component for an underlying commitment. It is not the default first-screen card when a PersonActionItem exists."
+
+  - name: CommitmentEvidenceCard
+    props:
+      commitment: "Commitment"
+      participants: "Person[]"
+      onTap: "(id: string) -> Unit"
+    description: "PersonActionCard에서 evidence를 열 때 보이는 commitment detail card. quote/source_event_title/person chips를 표시한다."
 
   - name: CommitmentFilterTabs
     props:
       selectedFilter: "CommitmentFilter"  # ALL | GIVE | TAKE
       onFilterSelected: "(filter: CommitmentFilter) -> Unit"
-    description: "CommitmentManagementScreen 상단 필터 탭. '전체' / '내가 한(give)' / '상대가 한(take)'"
+    description: "Legacy filter component. New CommitmentActionInbox uses ActionBucketTabs: 지금 / 내가 할 일 / 기다리는 일 / 검토."
+
+  - name: CommitmentActionInbox
+    props:
+      buckets: "ActionBucket[]"
+      onActionTap: "(id: string) -> Unit"
+      onRefresh: "() -> Unit"
+    description: "약속 탭 기본 컴포넌트. active next action을 지금/내가 할 일/기다리는 일/검토 bucket으로 보여준다."
+
+  - name: ActionBucketTabs
+    props:
+      selectedBucket: "ActionBucketKind"
+      onBucketSelected: "(bucket: ActionBucketKind) -> Unit"
+    description: "약속 탭 action bucket 선택. item_type history filter가 아니라 다음 행동의 운영 상태를 기준으로 한다."
 
   - name: DNBadge
     props:
@@ -283,7 +338,7 @@ shared_components:
     props:
       event: "InteractionRow(Event | Commitment | CalendarMeeting)"
       onTap: "(eventId: string) -> Unit"
-    description: "PersonDetailScreen 단일 timeline 항목. source/type label + title + snippet/status + timestamp. raw event는 탭 시 RawEventDetail로 이동하고 commitments_extracted_count >= 1 시 '약속 추출 N건' 배지 표시"
+    description: "CollapsedSourceTimeline 내부 history row. PersonDetail first viewport의 기본 row가 아니다."
 
   - name: CalendarEventItem
     props:
@@ -296,7 +351,49 @@ shared_components:
       enrichment: "PersonEnrichment?"
       pendingCommitmentsCount: int
       onTap: "(personId: string) -> Unit"
-    description: "인물 카드. 표시명: enrichment.display_name (없으면 person_ref 원본). company·title(있을 경우) + 채널 아이콘 클러스터 + DNBadge(미이행 약속 수) + 최근 이벤트 미리보기 + 타임스탬프"
+    description: "Legacy person card. New primary list uses PersonActionSummaryCard and may show history-only people only in secondary/search sections."
+
+  - name: PersonActionList
+    props:
+      actions: "PersonActionItem[]"
+      secondaryPeople: "Person[]"
+      onActionTap: "(id: string) -> Unit"
+      onPersonTap: "(personId: string) -> Unit"
+    description: "인물 탭 기본 목록. backend active person action이 있는 사람을 우선 표시하고, history-only 사람은 접힌 secondary section 또는 search로 이동한다."
+
+  - name: PersonActionSummaryCard
+    props:
+      person: "Person"
+      topAction: "PersonActionItem"
+      enrichment: "PersonEnrichment?"
+      onTap: "(personId: string) -> Unit"
+      onActionTap: "(id: string) -> Unit"
+    description: "사람별 top backend person action 카드. 표시명, 보조 identity/company, action title, due label, one-line reason만 보여준다."
+
+  - name: PersonNextMovePanel
+    props:
+      person: "Person"
+      actions: "PersonActionItem[]"
+      onActionTap: "(id: string) -> Unit"
+    description: "PersonDetail first viewport의 핵심 패널. 그 사람과 관련해 backend가 계산한 지금 해야 할 next move를 먼저 보여준다."
+
+  - name: PersonContextSummary
+    props:
+      personId: "string"
+      contextSignals: "PersonContextSignal[]"
+    description: "person_memory_semantic_index와 structured evidence에서 온 compact relationship context. memory.md 본문을 runtime parse하지 않는다."
+
+  - name: CollapsedSourceTimeline
+    props:
+      items: "InteractionHistoryRow[]"
+      initiallyExpanded: boolean
+    description: "PersonDetail history/evidence section. 기본 first viewport에서는 접혀 있어야 한다."
+
+  - name: EvidenceDrillDownSheet
+    props:
+      evidenceRefs: "PersonActionEvidenceRef[]"
+      onOpenSource: "(kind: string, id: string) -> Unit"
+    description: "PersonActionCard의 근거 확인 sheet. bounded quote/ref만 표시하고 기존 raw/source detail route로 연결한다."
 
   - name: UnifiedTimeline
     props:
@@ -304,6 +401,12 @@ shared_components:
       onEventTap: "(eventId: string) -> Unit"
       isLoading: boolean
     description: "소스 무관 통합 타임라인. 각 항목: 소스 아이콘 + event_title + event_snippet(truncated) + 타임스탬프. 커서 페이지네이션 지원"
+
+  - name: UnassignedReviewSection
+    props:
+      items: "PersonActionItem[]"
+      onReviewTap: "(id: string) -> Unit"
+    description: "인물 매칭/추출 검토가 backend active person action을 막을 때만 노출되는 접힌 review section. 원시 미할당 이벤트 feed가 아니다."
 
   - name: SearchBar
     props:
@@ -324,6 +427,89 @@ shared_components:
     description: "초기 동기화 전용. '초기 데이터를 가져오는 중 (N/7 완료)' 헤더 + 소스별 진행 항목(완료 체크/진행 스피너). [나중에 하기] 버튼 포함"
 
 types:
+  PersonActionSurface:
+    enum: [person, schedule, commitment]
+    description: "3탭 person action surface"
+
+  PersonActionStatus:
+    enum: [active, completed, dismissed, snoozed, superseded, stale]
+    description: "active만 기본 탭에 표시한다"
+
+  PersonActionKind:
+    enum: [do_work, attend, prepare, reply, follow_up, wait, confirm_schedule, review_person, review_extraction, source_reconnect]
+    description: "카드의 primary command와 bucket 산정에 쓰이는 action kind"
+
+  PersonActionItem:
+    id: string
+    surfaces: "PersonActionSurface[]"
+    actionKind: PersonActionKind
+    status: PersonActionStatus
+    title: string
+    primaryVerb: string
+    shortReason: string
+    personId?: string
+    commitmentId?: string
+    calendarEventId?: string
+    sourceEventId?: string
+    dueAt?: datetime
+    dueHint?: string
+    dueIsApproximate: boolean
+    urgencyScore: float
+    importanceScore: float
+    confidence: float
+    reasonCodes: "string[]"
+    evidenceRefs: "PersonActionEvidenceRef[]"
+    inputWatermark: datetime
+    computedAt: datetime
+    description: "3탭 UI의 first-screen row. Backend-computed product projection cached in Room; Android does not generate it locally."
+
+  PersonActionEvidenceRef:
+    kind: "commitment | calendar_event | source_event | source_participant | commitment_participant | person_memory | source_status"
+    id: string
+    label: string
+    sourceRef?: string
+    occurredAt?: datetime
+    quote?: string
+    description: "짧은 evidence handle. quote는 200자 이하이며 full body/transcript/OCR/raw model output 금지."
+
+  PersonActionRecoveryAction:
+    kind: "retry_now | full_refresh | open_source_settings | reconnect_source | review_quarantine | refresh_action | discard_mutation | upgrade_app | contact_support"
+    label: string
+    sourceId?: SourceId
+    actionItemId?: string
+    mutationId?: string
+    reasonCode?: string
+    description: "stale/degraded/failed action feed 상태를 닫는 CTA. 모든 오류 상태는 자동 retry 또는 이 CTA 중 하나를 가져야 한다."
+
+  PersonActionFeedHealth:
+    recomputeState: "caught_up | pending | stale | degraded"
+    capacityState: "normal | backlog | degraded"
+    backlogLagSeconds?: int
+    serverWatermark?: datetime
+    lastSuccessfulFetchAt?: datetime
+    lastCaughtUpAt?: datetime
+    changedSinceMin?: datetime
+    tombstoneWindowDays?: int
+    longDegraded: boolean
+    incidentId?: string
+    recoveryActions: "PersonActionRecoveryAction[]"
+    description: "3탭 action feed의 health 상태. stale/degraded/backlog 또는 longDegraded이면 recoveryActions 또는 incidentId가 비어 있으면 안 된다."
+
+  ActionBucketKind:
+    enum: [now, mine, waiting, review]
+    description: "약속 탭 action bucket. source/item history filter가 아니다."
+
+  ActionBucket:
+    kind: ActionBucketKind
+    actions: "PersonActionItem[]"
+    description: "CommitmentActionInbox bucket"
+
+  PersonContextSignal:
+    kind: "identity | role | topic | open_loop | decision | warning"
+    label: string
+    evidenceRef?: "PersonActionEvidenceRef"
+    description: "Person detail compact context. Runtime memory.md parsing 없이 structured graph/index에서 생성된다."
+
   SourceId:
     enum: [voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar]
     description: "Today/Settings에서 사용자에게 노출되는 source id. 표시 라벨은 Voice, Gmail, Outlook Mail, Naver Email, Daum Email, Google Calendar, Outlook Calendar"

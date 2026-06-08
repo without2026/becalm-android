@@ -12,14 +12,14 @@ version: 1
 behaviors:
   - id: MSG-001
     type: ui_interaction
-    description: "CommitmentManagementScreen 우하단 + 버튼은 evidence import bottom sheet를 연다"
-    screen: "CommitmentManagementScreen"
+    description: "CommitmentActionInboxScreen 우하단 + 버튼은 evidence import bottom sheet를 연다"
+    screen: "CommitmentActionInboxScreen"
     interaction: "FAB [+] 탭"
     precondition: "인증 완료"
     expected: "Bottom sheet title='증거 추가'. Action rows: '메신저 스크린샷', '회의 녹음', '회의 전사본'. 수동 약속 입력 폼은 열리지 않는다. 각 row는 48dp 이상 touch target, source icon, 한 줄 보조 설명을 가진다"
     source: user-request
     tests:
-      - "CommitmentManagementScreenTest.commitment_management_fab_opens_evidence_import_sheet"
+      - "CommitmentActionInboxScreenTest.commitment_action_inbox_fab_opens_evidence_import_sheet"
 
   - id: MSG-002
     type: lifecycle

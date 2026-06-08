@@ -25,7 +25,7 @@ behaviors:
     description: "Railway `/v1/extractions/commitments`는 오디오 파일 전체를 NAVER Cloud CLOVA Speech에 업로드하여 STT + speaker diarization을 수행하고, 정규화된 transcript text만 Vertex AI Gemini 2.5 Flash structured extraction에 전달한다"
     trigger: "Railway가 유효한 오디오 업로드 수신 (duration_seconds ≤ 7200)"
     precondition: "duration_seconds in [1, 7200], audio codec=.m4a/.mp4/.aac/.mp3/.wav 중 하나, CLOVA Speech invoke upload endpoint 및 Gemini 2.5 Flash structured extraction 엔드포인트 가용"
-    expected: "CLOVA 호출 1회(오디오 바이트, STT + diarization) 후 Vertex AI 호출 1회(정규화 transcript text + responseSchema = SourceExtractedItem[]). HTTP 200 + { items: [...], model: 'clova-speech+gemini-2.5-flash', region: 'clova+us-central1' } 반환. Gemini 응답에 finish_reason='MAX_TOKENS'가 포함되거나 JSON이 잘린 경우(스키마 검증 실패) HTTP 502 + { error: 'output_truncated' } 반환 — 해당 raw_event는 quarantine되며 post-MVP overlap-chunk 경로로 재처리 예정. duration_seconds > 7200인 요청은 업스트림(api-contract 422)에서 차단되어 본 behavior에 도달하지 않음."
+    expected: "CLOVA 호출 1회(오디오 바이트, STT + diarization) 후 Vertex AI 호출 1회(정규화 transcript text + responseSchema = SourceExtractedItem[]). HTTP 200 + { items: [...], model: 'clova-speech+gemini-2.5-flash', region: 'clova+us-central1' } 반환. Gemini 응답에 finish_reason='MAX_TOKENS'가 포함되거나 JSON이 잘린 경우(스키마 검증 실패) HTTP 502 + { error: 'output_truncated', retryable:false, client_action:'review_quarantine' } 반환 — 해당 raw_event는 quarantine되며 ERR-005의 [짧게 나누어 다시 가져오기] 또는 [삭제]로 닫힌다. duration_seconds > 7200인 요청은 업스트림(api-contract 422)에서 차단되어 본 behavior에 도달하지 않음."
     source: phase2-acceptance
     tests: []
 
@@ -61,7 +61,7 @@ behaviors:
     description: "VoiceUploadWorker는 네트워크/서버 오류 시 지수 백오프로 최대 3회 재시도한 후 quarantine으로 전이한다"
     trigger: "Railway `/v1/extractions/commitments` 호출이 HTTP 500/502/503 또는 IOException으로 실패"
     precondition: "VoiceUploadWorker 실행 중, max_attempts=3, initial_backoff=30s, multiplier=2"
-    expected: "1차 실패 → retry_count=1, 30s 백오프. 2차 실패 → retry_count=2, 60s 백오프. 3차 실패 → retry_count=3, sync_status='failed', ObservabilityClient에 voice_upload_quarantined 이벤트 전송됨. HTTP 401 수신 시: AuthInterceptor refresh 후 1회 재시도, 그래도 401이면 즉시 failed(retry_count=0 유지). HTTP 413/422는 retryable=false로 즉시 quarantine."
+    expected: "1차 실패 → retry_count=1, 30s 백오프. 2차 실패 → retry_count=2, 60s 백오프. 3차 실패 → retry_count=3, sync_status='failed' + 사용자-visible retry CTA, ObservabilityClient에 voice_upload_failed 이벤트 전송됨. HTTP 401 수신 시: AuthInterceptor refresh 후 1회 재시도, 그래도 401이면 ERR-008 login recovery. HTTP 413/422/output_truncated는 retryable=false로 즉시 quarantine하며 ERR-004/ERR-005 repair 또는 explicit discard로 닫힌다."
     source: phase2-acceptance
     tests: []
 
@@ -72,6 +72,15 @@ behaviors:
     precondition: "원본 파일 URI = MediaStore.Audio content URI 또는 사용자가 직접 선택한 read-only content URI. 원본 파일은 사용자 자산이다"
     expected: "파일 URI → ContentResolver.openInputStream → OkHttp RequestBody 직접 스트리밍. 앱 context.filesDir / cacheDir 에 복사본 없음. 업로드 성공/실패와 무관하게 원본 파일은 삭제되지 않음(사용자 소유). 메모리 버퍼는 청크 단위(64KB)로 스트리밍."
     source: phase2-acceptance
+    tests: []
+
+  - id: VOI-008
+    type: lifecycle
+    description: "user_profile은 음성/미팅 추출의 self context를 제공한다. Android는 로그인 직후 timezone/locale/display_name_override/phone_e164_self를 로컬 bootstrap하고, phone_e164_self가 있을 때만 Railway user_profile mirror에 반영한다"
+    trigger: "로그인 직후 user_profile bootstrap 또는 Settings > 내 프로필 저장"
+    precondition: "Supabase Auth user_id 존재"
+    expected: "Room user_profile은 user_id 기준 1행으로 유지된다. phone_e164_self는 E.164 형식일 때만 저장/전송된다. 음성/미팅 extraction prompt는 이 값을 self speaker/context hint로 사용할 수 있지만, 미입력 상태에서도 추출은 중단되지 않고 'self unknown' fallback으로 진행한다. user_profile 저장 실패는 voice raw ingestion, backend PersonActionItem recomputation, 또는 main UI 렌더링을 막지 않는다."
+    source: api-contract
     tests: []
 
 invariants:

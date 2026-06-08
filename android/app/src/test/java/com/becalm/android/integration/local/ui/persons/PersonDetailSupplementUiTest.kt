@@ -3,6 +3,7 @@ package com.becalm.android.integration.local.ui.persons
 import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
@@ -27,14 +28,23 @@ import com.becalm.android.ui.persons.ArchivedOriginalUi
 import com.becalm.android.ui.persons.EmailBodyUi
 import com.becalm.android.ui.persons.PersonMatchChoiceRow
 import com.becalm.android.ui.persons.PersonMatchCandidateSummary
+import com.becalm.android.ui.actions.PersonActionDraftDialog
+import com.becalm.android.ui.actions.PersonActionEvidenceUi
+import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.persons.PersonActionDraftSheetStatus
+import com.becalm.android.ui.persons.PersonActionDraftSheetUiState
+import com.becalm.android.ui.persons.PersonDetailScreenContent
+import com.becalm.android.ui.persons.PersonDetailUiState
 import com.becalm.android.ui.persons.RawEventCommitmentSummary
 import com.becalm.android.ui.persons.RawEventDetailContent
 import com.becalm.android.ui.persons.RawEventDetailUiState
+import com.becalm.android.ui.persons.SourceEventCardProjection
 import com.becalm.android.ui.persons.UnassignedEventSummary
 import com.becalm.android.ui.persons.UnassignedEventsContent
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -47,6 +57,205 @@ class PersonDetailSupplementUiTest {
 
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun `person detail keeps one primary action and secondary actions visible`() {
+        composeRule.setContent {
+            BecalmTheme {
+                PersonDetailScreenContent(
+                    state = PersonDetailUiState(
+                        personId = "person-1",
+                        displayName = "김도현",
+                        sourceEventCards = listOf(sourceEventCard("event-7")),
+                        topActions = listOf(
+                            personAction(id = "pa-primary", title = "수정 계약서 회신"),
+                            personAction(id = "pa-secondary-1", title = "자료 확인 요청"),
+                            personAction(id = "pa-secondary-2", title = "미팅 날짜 제안"),
+                        ),
+                        loading = false,
+                    ),
+                    title = "김도현",
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onEventTap = {},
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithTag("person-detail-primary-action", useUnmergedTree = true)
+            .assertCountEquals(1)
+        composeRule.onNodeWithText("수정 계약서 회신").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_detail_secondary_actions_title_fmt, 2))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithTag("person-detail-secondary-actions", useUnmergedTree = true)
+            .assertCountEquals(1)
+        composeRule.onAllNodesWithTag("person-detail-action-pa-secondary-1").assertCountEquals(1)
+        composeRule.onAllNodesWithTag("person-detail-action-pa-secondary-2").assertCountEquals(1)
+    }
+
+    @Test
+    fun `P2-GAP-002 primary action promotes draft and evidence without hiding mutations`() {
+        var openedDraftActionId: String? = null
+        var openedEvidenceActionId: String? = null
+        var dismissedActionId: String? = null
+        var completedActionId: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonDetailScreenContent(
+                    state = PersonDetailUiState(
+                        personId = "person-1",
+                        displayName = "김도현",
+                        sourceEventCards = listOf(sourceEventCard("event-7")),
+                        topActions = listOf(personAction(id = "pa-primary", title = "수정 계약서 회신")),
+                        loading = false,
+                    ),
+                    title = "김도현",
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onEventTap = {},
+                    onOpenPersonActionDraft = { openedDraftActionId = it },
+                    onOpenPersonActionEvidence = { actionId, _, _ -> openedEvidenceActionId = actionId },
+                    onDismissPersonAction = { dismissedActionId = it },
+                    onCompletePersonAction = { completedActionId = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.person_action_draft_primary_follow_up)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_action_evidence_view)).assertIsDisplayed()
+        composeRule.onNodeWithTag("person-detail-action-draft-pa-primary").performClick()
+        composeRule.onNodeWithTag("person-detail-action-evidence-pa-primary").performClick()
+        composeRule.onNodeWithText(string(R.string.schedule_action_dismiss)).performClick()
+        composeRule.onNodeWithText(string(R.string.commitment_action_complete)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("pa-primary", openedDraftActionId)
+            assertEquals("pa-primary", openedEvidenceActionId)
+            assertEquals("pa-primary", dismissedActionId)
+            assertEquals("pa-primary", completedActionId)
+        }
+    }
+
+    @Test
+    fun `P1-GAP-002 draft sheet evidence action opens matching action evidence`() {
+        var openedActionId: String? = null
+        var openedEvidenceKind: String? = null
+        var openedEvidenceId: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonDetailScreenContent(
+                    state = PersonDetailUiState(
+                        personId = "person-1",
+                        displayName = "김도현",
+                        sourceEventCards = listOf(sourceEventCard("event-7")),
+                        topActions = listOf(personAction(id = "pa-draft", title = "수정 계약서 회신")),
+                        draftSheet = PersonActionDraftSheetUiState(
+                            actionItemId = "pa-draft",
+                            actionTitle = "수정 계약서 회신",
+                            status = PersonActionDraftSheetStatus.READY,
+                            draftKind = "follow_up",
+                            subject = "Re: 수정 계약서 회신",
+                            body = "확인 후 회신드리겠습니다.",
+                            recipientLabel = "김도현 대표",
+                            provenanceLabels = listOf("통화"),
+                        ),
+                        loading = false,
+                    ),
+                    title = "김도현",
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onEventTap = {},
+                    onOpenPersonActionEvidence = { actionId, evidenceKind, evidenceId ->
+                        openedActionId = actionId
+                        openedEvidenceKind = evidenceKind
+                        openedEvidenceId = evidenceId
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.person_action_draft_recipient_label))
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_action_draft_sheet_label_follow_up))
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_action_draft_header_recipient_fmt, "김도현 대표"))
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_action_draft_review_notice_context_fmt, "통화"))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("김도현 대표")
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithTag("person-action-draft-subject")
+            .assertCountEquals(0)
+        composeRule.onNodeWithTag("person-action-draft-evidence")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("pa-draft", openedActionId)
+            assertEquals("source_event", openedEvidenceKind)
+            assertEquals("source-pa-draft", openedEvidenceId)
+        }
+    }
+
+    @Test
+    fun `P1-GAP-002 draft sheet opens external mail app from explicit CTA`() {
+        var openMailCount = 0
+        var editedBody: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonActionDraftDialog(
+                    state = PersonActionDraftSheetUiState(
+                        actionItemId = "pa-draft",
+                        actionTitle = "수정 계약서 회신",
+                        status = PersonActionDraftSheetStatus.READY,
+                        draftKind = "reply",
+                        subject = "Re: 수정 계약서 회신",
+                        body = "확인 후 회신드리겠습니다.",
+                        recipientLabel = "김도현 <dh.kim@partner.co.kr>",
+                        provenanceLabels = listOf("통화"),
+                    ),
+                    onSubjectChange = {},
+                    onBodyChange = { editedBody = it },
+                    onRetry = {},
+                    onOpenExternalDraft = { openMailCount += 1 },
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithTag("person-action-draft-subject")
+            .assertCountEquals(0)
+        composeRule.onNodeWithText(string(R.string.person_action_draft_sheet_label_reply))
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(
+            string(R.string.person_action_draft_header_recipient_fmt, "김도현 <dh.kim@partner.co.kr>"),
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_action_draft_review_notice_context_fmt, "통화"))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("person-action-draft-body-input")
+            .performTextInput("\n추가 확인")
+        composeRule.runOnIdle {
+            assertTrue(editedBody.orEmpty().contains("추가 확인"))
+        }
+        composeRule.onNodeWithTag("person-action-draft-copy")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("person-action-draft-open-mail")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, openMailCount)
+        }
+    }
 
     @Test
     fun `unassigned events content shows empty state`() {
@@ -663,6 +872,15 @@ class PersonDetailSupplementUiTest {
         }
 
         composeRule.onNodeWithTag("raw-event-detail-list").assertIsDisplayed()
+        composeRule.onNodeWithTag("raw-event-detail-list")
+            .performScrollToNode(hasTestTag("raw-event-why-action"))
+        composeRule.onNodeWithText(string(R.string.commitment_action_evidence_why))
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(
+            string(R.string.raw_event_action_reason_single_fmt, string(R.string.commitments_filter_give), "하단 약속"),
+        ).assertIsDisplayed()
+        composeRule.onNodeWithTag("raw-event-detail-list")
+            .performScrollToNode(hasTestTag("raw-event-extracted-commitments"))
         composeRule.onNodeWithText(string(R.string.raw_event_extracted_commitments_title))
             .assertIsDisplayed()
         composeRule.onNodeWithTag("raw-event-extracted-commitments").assertIsDisplayed()
@@ -740,4 +958,46 @@ class PersonDetailSupplementUiTest {
 
     private fun string(resId: Int, vararg args: Any): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
+
+    private fun sourceEventCard(rawEventId: String): SourceEventCardProjection =
+        SourceEventCardProjection(
+            sourceEventKey = rawEventId,
+            sourceType = "call_recording",
+            rawEventId = rawEventId,
+            occurredAt = Instant.parse("2026-04-24T01:00:00Z"),
+            title = "수정 계약서 논의",
+            snippet = "다음 주까지 제안서 보내기",
+        )
+
+    private fun personAction(
+        id: String,
+        title: String,
+    ): PersonActionItemUi =
+        PersonActionItemUi(
+            id = id,
+            personId = "person-1",
+            personDisplayName = "김도현",
+            actionKind = "follow_up",
+            title = title,
+            primaryVerb = "회신",
+            shortReason = "6/1 통화에서 약속",
+            commitmentId = "commitment-$id",
+            calendarEventId = null,
+            sourceEventId = "event-7",
+            sourceType = "call_recording",
+            sourceRef = "raw:event-7",
+            dueAt = null,
+            dueHint = "오늘까지",
+            urgencyScore = 0.91,
+            confidence = 0.9,
+            reasonCodes = listOf("source:due"),
+            evidence = PersonActionEvidenceUi(
+                kind = "source_event",
+                id = "source-$id",
+                sourceRef = "raw:event-7",
+                occurredAt = null,
+                label = "통화",
+                quote = "오늘까지 회신드릴게요.",
+            ),
+        )
 }

@@ -1,5 +1,7 @@
 package com.becalm.android.ui.navigation
 
+import android.net.Uri
+
 /**
  * Sealed hierarchy of every navigable route in the BeCalm Android app.
  *
@@ -327,11 +329,11 @@ public sealed class BecalmRoute(public val path: String) {
         ): String = buildString {
             append(path)
             append("?sourceConnectionResult=")
-            append(result)
+            append(Uri.encode(result))
             append("&sourceProvider=")
-            append(provider.orEmpty())
+            append(Uri.encode(provider.orEmpty()))
             append("&sourceFamily=")
-            append(family.orEmpty())
+            append(Uri.encode(family.orEmpty()))
         }
     }
 

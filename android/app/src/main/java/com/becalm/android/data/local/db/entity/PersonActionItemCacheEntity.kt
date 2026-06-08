@@ -91,4 +91,14 @@ public data class PersonActionItemCacheEntity(
     val primaryEvidenceLabel: String? = null,
     @ColumnInfo(name = "primary_evidence_quote")
     val primaryEvidenceQuote: String? = null,
+    @ColumnInfo(name = "provider_write_kind")
+    val providerWriteKind: String? = null,
+    @ColumnInfo(name = "provider_write_state")
+    val providerWriteState: String? = null,
+    @ColumnInfo(name = "provider_write_provider")
+    val providerWriteProvider: String? = null,
+    @ColumnInfo(name = "provider_write_source_connection_id")
+    val providerWriteSourceConnectionId: String? = null,
+    @ColumnInfo(name = "provider_write_schedule_event_link_id")
+    val providerWriteScheduleEventLinkId: String? = null,
 )

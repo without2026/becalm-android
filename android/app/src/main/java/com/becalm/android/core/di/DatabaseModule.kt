@@ -6,6 +6,7 @@ import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
+import com.becalm.android.data.local.db.dao.ManualMemoryOutboxDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonActionDao
@@ -188,6 +189,12 @@ public object DatabaseModule {
         provider: BeCalmDatabaseProvider,
     ): PersonActionDao =
         lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::personActionDao)
+
+    @Provides
+    public fun provideManualMemoryOutboxDao(
+        provider: BeCalmDatabaseProvider,
+    ): ManualMemoryOutboxDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::manualMemoryOutboxDao)
 
     private inline fun <reified T : Any> lazyDaoProxy(
         dbProvider: BeCalmDatabaseProvider?,

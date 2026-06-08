@@ -8,23 +8,24 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.ManualMemoryOutboxDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
+import com.becalm.android.data.local.db.entity.ManualMemoryOutboxEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
-import com.becalm.android.data.remote.api.RailwayApi
-import com.becalm.android.data.remote.dto.ManualMemoryCreateRequestDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.onboarding.FirstMemoryInput
 import com.becalm.android.domain.onboarding.FirstMemoryKind
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.SourceInteractionKind
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -40,7 +41,9 @@ public class FirstMemoryRepositoryImpl @Inject constructor(
     private val databaseProvider: BeCalmDatabaseProvider,
     private val commitmentDao: CommitmentDao,
     private val personIndexDao: PersonIndexDao,
-    private val api: RailwayApi,
+    private val manualMemoryOutboxDao: ManualMemoryOutboxDao,
+    private val manualMemoryOutboxSyncEngine: ManualMemoryOutboxSyncEngine,
+    private val workScheduler: com.becalm.android.worker.WorkScheduler,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : FirstMemoryRepository {
@@ -197,6 +200,13 @@ public class FirstMemoryRepositoryImpl @Inject constructor(
                 confidence = 1.0,
                 createdAt = now,
             )
+            val outbox = input.toManualMemoryOutbox(
+                userId = userId,
+                personId = resolution.personId,
+                commitmentId = commitmentId,
+                sourceRef = sourceRef,
+                occurredAt = now,
+            )
 
             try {
                 databaseProvider.current().withTransaction {
@@ -205,67 +215,33 @@ public class FirstMemoryRepositoryImpl @Inject constructor(
                     commitmentDao.insert(commitment)
                     personIndexDao.upsertCommitmentParticipants(listOf(participant))
                     personIndexDao.upsertInteractions(listOf(sourceInteraction, commitmentInteraction))
+                    manualMemoryOutboxDao.upsert(outbox)
                 }
-                val syncedRemotely = syncRemote(
-                    input = input,
+            } catch (e: Exception) {
+                logger.e(TAG, "failed to save first memory locally", e)
+                return@withContext BecalmResult.Failure(BecalmError.Io(e.message ?: "first memory save failed"))
+            }
+
+            val syncOutcome = runCatching {
+                manualMemoryOutboxSyncEngine.sync(outbox)
+            }.getOrElse { error ->
+                logger.w(TAG, "first memory backend sync deferred", error)
+                ManualMemoryOutboxSyncOutcome.RETRY_NEEDED
+            }
+            val syncedRemotely = syncOutcome == ManualMemoryOutboxSyncOutcome.SYNCED
+            if (syncOutcome == ManualMemoryOutboxSyncOutcome.RETRY_NEEDED) {
+                runCatching { workScheduler.enqueueManualMemoryOutboxRetry() }
+                    .onFailure { logger.w(TAG, "manual memory outbox retry enqueue failed", it) }
+            }
+            BecalmResult.Success(
+                FirstMemorySaveResult(
                     personId = resolution.personId,
                     commitmentId = commitmentId,
                     sourceRef = sourceRef,
-                    occurredAt = now,
-                )
-                if (syncedRemotely) {
-                    commitmentDao.markSynced(listOf(commitmentId))
-                }
-                BecalmResult.Success(
-                    FirstMemorySaveResult(
-                        personId = resolution.personId,
-                        commitmentId = commitmentId,
-                        sourceRef = sourceRef,
-                        syncedRemotely = syncedRemotely,
-                    ),
-                )
-            } catch (e: Exception) {
-                logger.e(TAG, "failed to save first memory locally", e)
-                BecalmResult.Failure(BecalmError.Io(e.message ?: "first memory save failed"))
-            }
+                    syncedRemotely = syncedRemotely,
+                ),
+            )
         }
-
-    private suspend fun syncRemote(
-        input: FirstMemoryInput,
-        personId: String,
-        commitmentId: String,
-        sourceRef: String,
-        occurredAt: Instant,
-    ): Boolean {
-        val request = ManualMemoryCreateRequestDto(
-            clientMemoryId = input.clientMemoryId,
-            personId = personId,
-            commitmentId = commitmentId,
-            personDisplayName = input.personName,
-            originChannel = input.origin.name.lowercase(),
-            memoryKind = input.kind.wireValue,
-            title = input.promiseText,
-            occurredAt = occurredAt,
-            dueAt = null,
-            dueHint = input.dueHint,
-        )
-        return try {
-            val response = api.createManualMemory(request = request)
-            if (!response.isSuccessful) {
-                logger.w(TAG, "first memory backend sync deferred: status=${response.code()}")
-                return false
-            }
-            val body = response.body()
-            if (body?.personId != personId || body.commitmentId != commitmentId || body.sourceRef != sourceRef) {
-                logger.w(TAG, "first memory backend sync returned mismatched ids")
-                return false
-            }
-            true
-        } catch (e: Exception) {
-            logger.w(TAG, "first memory backend sync deferred", e)
-            false
-        }
-    }
 
     private fun firstMemorySourceTitle(personName: String): String =
         "이제 ${personName}님과의 약속을 잊지 않게 정리했습니다"
@@ -276,6 +252,69 @@ public class FirstMemoryRepositoryImpl @Inject constructor(
             FirstMemoryKind.THEIR_ACTION -> "their_action"
             FirstMemoryKind.SHARED_SCHEDULE -> "shared_schedule"
         }
+
+    private fun FirstMemoryInput.toManualMemoryOutbox(
+        userId: String,
+        personId: String,
+        commitmentId: String,
+        sourceRef: String,
+        occurredAt: Instant,
+    ): ManualMemoryOutboxEntity {
+        val originChannel = origin.name.lowercase()
+        val memoryKind = kind.wireValue
+        val backendDueHint = dueHint.takeIf { kind == FirstMemoryKind.SHARED_SCHEDULE }
+        return ManualMemoryOutboxEntity(
+            userId = userId,
+            clientMemoryId = clientMemoryId,
+            personId = personId,
+            commitmentId = commitmentId,
+            sourceRef = sourceRef,
+            personDisplayName = personName,
+            originChannel = originChannel,
+            memoryKind = memoryKind,
+            title = promiseText,
+            occurredAt = occurredAt,
+            dueAt = null,
+            dueHint = backendDueHint,
+            payloadHash = manualMemoryPayloadHash(
+                clientMemoryId = clientMemoryId,
+                personDisplayName = personName,
+                originChannel = originChannel,
+                memoryKind = memoryKind,
+                title = promiseText,
+                dueAt = null,
+                dueHint = backendDueHint,
+            ),
+            createdAt = occurredAt,
+            updatedAt = occurredAt,
+        )
+    }
+
+    private fun manualMemoryPayloadHash(
+        clientMemoryId: String,
+        personDisplayName: String,
+        originChannel: String,
+        memoryKind: String,
+        title: String,
+        dueAt: Instant?,
+        dueHint: String?,
+    ): String =
+        sha256Hex(
+            listOf(
+                clientMemoryId,
+                personDisplayName,
+                originChannel,
+                memoryKind,
+                title,
+                dueAt?.toString().orEmpty(),
+                dueHint.orEmpty(),
+            ).joinToString("\n"),
+        )
+
+    private fun sha256Hex(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
     private fun stableId(vararg parts: String): String =
         UUID.nameUUIDFromBytes(parts.joinToString(":").toByteArray(StandardCharsets.UTF_8)).toString()

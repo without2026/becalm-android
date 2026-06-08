@@ -2,7 +2,7 @@
 
 Spec: `becalm-android/.spec/source-management.spec.yml`
 
-> Per-source admin & 오류 복구 경로. PRIMARY sync 트리거는 ING-011/TDY-006 이고, **SMG-005 `[지금 동기화]` 는 소스 상세 화면에서만 수동 트리거**.
+> Per-source admin & 오류 복구 경로. PRIMARY sync 트리거는 ING-011/NAP-SYNC-001 이고, **SMG-005 `[지금 동기화]` 는 소스 상세 화면에서만 수동 트리거**.
 
 ---
 
@@ -28,8 +28,9 @@ Source owners:
 - Voice (MediaStore): local worker (`MediaStoreWorker.kt`)
 
 Owner rule:
-- Room/local UI state remains the source of truth for rendering.
+- Room/local state can be source origin, source status cache, and offline action cache.
 - Provider fetch owner is separate: backend-managed sources call Railway, local sources enqueue Android workers.
+- Person/Schedule/Commitment action computation and ranking are backend-owned through `/v1/person_action_items`; Android must not locally generate replacement action rows.
 - IMAP app passwords are local credentials and must not be sent to Railway.
 
 ---

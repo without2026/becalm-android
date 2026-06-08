@@ -2,11 +2,13 @@ package com.becalm.android.unit.worker
 
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.ManualMemoryOutboxDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.PersonIndexStaleLinkedSourceRow
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
+import com.becalm.android.data.local.db.entity.ManualMemoryOutboxEntity
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
@@ -37,6 +39,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
+    private val manualMemoryOutboxDao: ManualMemoryOutboxDao = mockk(relaxed = true)
     private val meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao = mockk(relaxed = true)
     private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
@@ -49,6 +52,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
         every { userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri(any()) } returns flowOf(null)
         every { userPrefsStore.observeContactsConsent() } returns flowOf(true)
+        coEvery { manualMemoryOutboxDao.findPendingForUser(any(), any()) } returns emptyList()
         coEvery { personIndexDao.findPendingSourceParticipantMirrors(any(), any()) } returns emptyList()
         coEvery { personIndexDao.findStaleLinkedSourceProjectionRows(any(), any()) } returns emptyList()
         coEvery { personIndexDao.findStaleRawSourceProjectionRows(any(), any()) } returns emptyList()
@@ -256,6 +260,27 @@ class AppRuntimeSyncCoordinatorSpecTest {
     }
 
     @Test
+    fun `startup re-enqueues pending manual memory outbox for signed in user`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+        coEvery {
+            manualMemoryOutboxDao.findPendingForUser(userId = "user-1", limit = 1)
+        } returns listOf(mockk<ManualMemoryOutboxEntity>(relaxed = true))
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+
+        verify(exactly = 1) { workScheduler.enqueueManualMemoryOutboxRetry() }
+    }
+
+    @Test
     fun `refresh does not repeatedly replace pending source participant mirror work in same process`() = runTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
@@ -293,6 +318,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
         coordinator.start()
 
         verify(exactly = 0) { workScheduler.enqueueSourceParticipantMirrorRetry() }
+        verify(exactly = 0) { workScheduler.enqueueManualMemoryOutboxRetry() }
     }
 
     @Test
@@ -446,6 +472,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
             rawIngestionEventDao = rawIngestionEventDao,
+            manualMemoryOutboxDao = manualMemoryOutboxDao,
             meetingSpeakerPreviewDao = meetingSpeakerPreviewDao,
             personIndexDao = personIndexDao,
             processingStatusRepository = processingStatusRepository,

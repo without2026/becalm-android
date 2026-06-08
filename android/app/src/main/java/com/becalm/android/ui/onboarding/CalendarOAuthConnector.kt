@@ -1,9 +1,6 @@
 package com.becalm.android.ui.onboarding
 
 import android.app.Activity
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
 import com.becalm.android.core.analytics.NoopProductAnalyticsClient
 import com.becalm.android.core.analytics.ProductAnalyticsClient
 import com.becalm.android.core.analytics.ProductAnalyticsEvent
@@ -32,6 +29,7 @@ public class CalendarOAuthConnector @Inject constructor(
     private val moshi: Moshi,
     private val logger: Logger,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
+    private val browserLauncher: OAuthBrowserLauncher = OAuthBrowserLauncher(),
 ) {
 
     private val railwayApi: RailwayApi
@@ -40,6 +38,7 @@ public class CalendarOAuthConnector @Inject constructor(
     public suspend fun startSignIn(
         provider: CalendarOAuthProvider,
         activity: Activity,
+        sourceConnectionId: String? = null,
     ): CalendarOAuthResult {
         logger.i(TAG, "calendar OAuth start request provider=${provider.sourceType}")
         trackOAuthEvent(
@@ -48,7 +47,7 @@ public class CalendarOAuthConnector @Inject constructor(
             phase = "start",
         )
         val startResponse = try {
-            railwayApi.startCalendarOAuth(provider.sourceType)
+            railwayApi.startCalendarOAuth(provider.sourceType, sourceConnectionId)
         } catch (e: IOException) {
             // Mirror EmailOAuthConnector — network errors must convert to a Failed
             // result, never propagate as uncaught exceptions to viewModelScope.
@@ -65,16 +64,19 @@ public class CalendarOAuthConnector @Inject constructor(
         val authorizationUrl = startResponse.body()?.authorizationUrl
             ?: return CalendarOAuthResult.Failed(errorCode = "oauth_start_failed")
 
-        try {
-            activity.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(authorizationUrl)),
-            )
-        } catch (_: ActivityNotFoundException) {
-            trackOAuthStatus(provider.sourceType, phase = "browser_open", connected = false, result = "browser_unavailable")
-            return CalendarOAuthResult.Failed(errorCode = "browser_unavailable")
+        when (val launch = browserLauncher.launch(activity, authorizationUrl)) {
+            is OAuthBrowserLaunchResult.Launched -> {
+                logger.i(
+                    TAG,
+                    "calendar OAuth browser launched provider=${provider.sourceType} package=${launch.packageName} custom_tabs=${launch.customTabs}",
+                )
+            }
+            OAuthBrowserLaunchResult.Unavailable -> {
+                trackOAuthStatus(provider.sourceType, phase = "browser_open", connected = false, result = "browser_unavailable")
+                return CalendarOAuthResult.Failed(errorCode = "browser_unavailable")
+            }
         }
 
-        logger.i(TAG, "calendar OAuth browser launched provider=${provider.sourceType}")
         trackOAuthEvent(
             eventName = ProductAnalyticsEvents.SOURCE_OAUTH_BROWSER_OPENED,
             provider = provider.sourceType,

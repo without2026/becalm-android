@@ -61,7 +61,12 @@ class AppDeepLinksSpecTest {
             BecalmRoute.SettingsSourceConnection("google_calendar").path,
             AppDeepLinks.routeFrom(Uri.parse("becalm://settings/sources/connect/google_calendar")),
         )
-        assertNull(
+        assertEquals(
+            BecalmRoute.SettingsSources.oauthResultPath(
+                result = "success",
+                provider = "google_calendar",
+                family = "calendar",
+            ),
             AppDeepLinks.routeFrom(Uri.parse("becalm://oauth-complete?provider=google_calendar&family=calendar&result=success")),
         )
     }
@@ -71,6 +76,7 @@ class AppDeepLinksSpecTest {
         assertNull(AppDeepLinks.routeFrom(Uri.parse("https://example.com/persons/unassigned")))
         assertNull(AppDeepLinks.routeFrom(Intent(Intent.ACTION_SEND)))
         assertNull(AppDeepLinks.routeFrom(Uri.parse(AppDeepLinks.OAUTH_COMPLETE_URI)))
+        assertNull(AppDeepLinks.routeFrom(Uri.parse("becalm://oauth-complete?provider=gmail&family=mail&result=cancelled")))
         assertNull(AppDeepLinks.routeFrom(Uri.parse("becalm://persons/qa-scale-person/events/raw-1")))
     }
 

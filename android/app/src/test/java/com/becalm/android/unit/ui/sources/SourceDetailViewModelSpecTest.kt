@@ -7,6 +7,7 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
@@ -17,6 +18,7 @@ import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.SourceConnectionStatus
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.sources.ARG_SOURCE_TYPE
@@ -26,6 +28,7 @@ import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.ui.sources.SourceDetailViewModel
 import com.becalm.android.ui.sources.SourceDisconnectOutcome
 import com.becalm.android.ui.sources.SourceReconnectDestination
+import com.becalm.android.ui.sources.SourceReconnectTargetResolver
 import com.becalm.android.ui.components.SourceSyncStatus
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -60,13 +63,16 @@ class SourceDetailViewModelSpecTest {
     private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
     private val meetingImportRepository: MeetingImportRepository = mockk(relaxed = true)
     private val authRepository: AuthRepository = mockk(relaxed = true)
+    private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         coEvery { authRepository.currentSession() } returns null
+        coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
         every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
+        every { sourceConnectionRepository.observeAll(any()) } returns flowOf(emptyList())
     }
 
     @After
@@ -255,6 +261,134 @@ class SourceDetailViewModelSpecTest {
                 awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SMG-003 reconnect effect carries failed provider connection id for scoped OAuth`() = runTest {
+        coEvery { authRepository.currentSession() } returns session("user-1")
+        every { sourceStatusRepository.observeFor(SourceType.GMAIL) } returns
+            flowOf(
+                SourceStatus(
+                    sourceType = SourceType.GMAIL,
+                    status = SourceConnectionStatus.ERROR,
+                    lastSyncedAt = Instant.parse("2026-04-20T09:00:00Z"),
+                    errorMessage = "token expired",
+                ),
+            )
+        every { sourceConnectionRepository.observeAll("user-1") } returns flowOf(
+            listOf(
+                sourceConnection(id = "conn-synced", status = "synced"),
+                sourceConnection(id = "conn-failed", status = "needs_reauth"),
+            ),
+        )
+
+        val viewModel = buildViewModel(SourceType.GMAIL)
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            viewModel.onReconnect()
+
+            assertEquals(
+                SourceDetailEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.GMAIL,
+                    sourceType = SourceType.GMAIL,
+                    sourceConnectionId = "conn-failed",
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `reconnect effect omits target id when provider has multiple accounts`() = runTest {
+        coEvery { authRepository.currentSession() } returns session("user-1")
+        every { sourceStatusRepository.observeFor(SourceType.GMAIL) } returns
+            flowOf(
+                SourceStatus(
+                    sourceType = SourceType.GMAIL,
+                    status = SourceConnectionStatus.ERROR,
+                    lastSyncedAt = Instant.parse("2026-04-20T09:00:00Z"),
+                    errorMessage = "token expired",
+                ),
+            )
+        every { sourceConnectionRepository.observeAll("user-1") } returns flowOf(
+            listOf(
+                sourceConnection(id = "conn-synced", status = "synced", accountIdentifier = "current@example.test"),
+                sourceConnection(id = "conn-stale", status = "needs_reauth", accountIdentifier = "old@example.test"),
+            ),
+        )
+
+        val viewModel = buildViewModel(SourceType.GMAIL)
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            viewModel.onReconnect()
+
+            assertEquals(
+                SourceDetailEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.GMAIL,
+                    sourceType = SourceType.GMAIL,
+                    sourceConnectionId = null,
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `reconnect target resolver carries scoped id for each OAuth provider when account is unambiguous`() {
+        oauthReconnectCases.forEach { case ->
+            val targetId = SourceReconnectTargetResolver.targetConnectionId(
+                connections = listOf(
+                    sourceConnection(
+                        id = "${case.sourceType}-synced",
+                        status = "synced",
+                        provider = case.provider,
+                        capability = case.capability,
+                        accountIdentifier = "same-account@example.test",
+                    ),
+                    sourceConnection(
+                        id = "${case.sourceType}-reauth",
+                        status = "needs_reauth",
+                        provider = case.provider,
+                        capability = case.capability,
+                        accountIdentifier = "same-account@example.test",
+                    ),
+                ),
+                sourceType = case.sourceType,
+            )
+
+            assertEquals(case.sourceType, "${case.sourceType}-reauth", targetId)
+        }
+    }
+
+    @Test
+    fun `reconnect target resolver omits scoped id for each OAuth provider when accounts diverge`() {
+        oauthReconnectCases.forEach { case ->
+            val targetId = SourceReconnectTargetResolver.targetConnectionId(
+                connections = listOf(
+                    sourceConnection(
+                        id = "${case.sourceType}-synced",
+                        status = "synced",
+                        provider = case.provider,
+                        capability = case.capability,
+                        accountIdentifier = "current@example.test",
+                    ),
+                    sourceConnection(
+                        id = "${case.sourceType}-stale",
+                        status = "needs_reauth",
+                        provider = case.provider,
+                        capability = case.capability,
+                        accountIdentifier = "old@example.test",
+                    ),
+                ),
+                sourceType = case.sourceType,
+            )
+
+            assertNull(case.sourceType, targetId)
         }
     }
 
@@ -693,6 +827,7 @@ class SourceDetailViewModelSpecTest {
         processingStatusRepository = processingStatusRepository,
         rawIngestionRepository = rawIngestionRepository,
         authRepository = authRepository,
+        sourceConnectionRepository = sourceConnectionRepository,
         sourceAdministrationPort = sourceAdministrationPort,
         sourceSyncPort = sourceSyncPort,
         meetingImportRepository = meetingImportRepository,
@@ -721,12 +856,45 @@ class SourceDetailViewModelSpecTest {
         timestamp = Instant.fromEpochMilliseconds(1_000),
     )
 
+    private fun sourceConnection(
+        id: String,
+        status: String,
+        provider: String = "google",
+        capability: String = "mail",
+        accountIdentifier: String = "user@example.test",
+    ): SourceConnectionEntity = SourceConnectionEntity(
+        id = id,
+        userId = "user-1",
+        provider = provider,
+        capability = capability,
+        accountIdentifier = accountIdentifier,
+        accountDisplayName = "User",
+        ownership = "self",
+        status = status,
+        linkedSelfAnchorId = null,
+        lastSyncAt = Instant.parse("2026-04-20T09:00:00Z"),
+        lastError = if (status == "needs_reauth") "token expired" else null,
+    )
+
     private fun session(userId: String): SupabaseSession = SupabaseSession(
         accessToken = "access-token",
         refreshToken = "refresh-token",
         userId = userId,
         email = "user@example.test",
         expiresAt = Instant.parse("2026-04-20T10:00:00Z"),
+    )
+
+    private data class OAuthReconnectCase(
+        val sourceType: String,
+        val provider: String,
+        val capability: String,
+    )
+
+    private val oauthReconnectCases = listOf(
+        OAuthReconnectCase(SourceType.GMAIL, provider = "google", capability = "mail"),
+        OAuthReconnectCase(SourceType.OUTLOOK_MAIL, provider = "outlook", capability = "mail"),
+        OAuthReconnectCase(SourceType.GOOGLE_CALENDAR, provider = "google", capability = "calendar"),
+        OAuthReconnectCase(SourceType.OUTLOOK_CALENDAR, provider = "outlook", capability = "calendar"),
     )
 }
 

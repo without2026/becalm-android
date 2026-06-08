@@ -1,9 +1,6 @@
 package com.becalm.android.ui.onboarding
 
 import android.app.Activity
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
 import com.becalm.android.core.analytics.NoopProductAnalyticsClient
 import com.becalm.android.core.analytics.ProductAnalyticsClient
 import com.becalm.android.core.analytics.ProductAnalyticsEvent
@@ -30,6 +27,7 @@ public class EmailOAuthConnector @Inject constructor(
     private val moshi: Moshi,
     private val logger: Logger,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
+    private val browserLauncher: OAuthBrowserLauncher = OAuthBrowserLauncher(),
 ) {
 
     private val railwayApi: RailwayApi
@@ -38,6 +36,7 @@ public class EmailOAuthConnector @Inject constructor(
     public suspend fun startSignIn(
         provider: EmailOAuthProvider,
         activity: Activity,
+        sourceConnectionId: String? = null,
     ): EmailOAuthResult {
         logger.i(TAG, "mail OAuth start request provider=${provider.sourceType}")
         trackOAuthEvent(
@@ -46,7 +45,7 @@ public class EmailOAuthConnector @Inject constructor(
             phase = "start",
         )
         val startResponse = try {
-            railwayApi.startMailOAuth(provider.sourceType)
+            railwayApi.startMailOAuth(provider.sourceType, sourceConnectionId)
         } catch (e: IOException) {
             // Network failure (SocketTimeoutException, UnknownHostException, etc.)
             // must not propagate to the caller's coroutine — viewModelScope.launch
@@ -65,14 +64,19 @@ public class EmailOAuthConnector @Inject constructor(
         val authorizationUrl = startResponse.body()?.authorizationUrl
             ?: return EmailOAuthResult.Failed(errorCode = "oauth_start_failed")
 
-        try {
-            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorizationUrl)))
-        } catch (_: ActivityNotFoundException) {
-            trackOAuthStatus(provider.sourceType, phase = "browser_open", connected = false, result = "browser_unavailable")
-            return EmailOAuthResult.Failed(errorCode = "browser_unavailable")
+        when (val launch = browserLauncher.launch(activity, authorizationUrl)) {
+            is OAuthBrowserLaunchResult.Launched -> {
+                logger.i(
+                    TAG,
+                    "mail OAuth browser launched provider=${provider.sourceType} package=${launch.packageName} custom_tabs=${launch.customTabs}",
+                )
+            }
+            OAuthBrowserLaunchResult.Unavailable -> {
+                trackOAuthStatus(provider.sourceType, phase = "browser_open", connected = false, result = "browser_unavailable")
+                return EmailOAuthResult.Failed(errorCode = "browser_unavailable")
+            }
         }
 
-        logger.i(TAG, "mail OAuth browser launched provider=${provider.sourceType}")
         trackOAuthEvent(
             eventName = ProductAnalyticsEvents.SOURCE_OAUTH_BROWSER_OPENED,
             provider = provider.sourceType,

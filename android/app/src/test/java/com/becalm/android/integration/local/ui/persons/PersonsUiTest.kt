@@ -3,11 +3,16 @@ package com.becalm.android.integration.local.ui.persons
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -18,17 +23,27 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.persons.PersonDetailCommitmentSummary
 import com.becalm.android.ui.persons.PersonDetailScreenContent
-import com.becalm.android.ui.persons.PersonDetailNextAction
 import com.becalm.android.ui.persons.PersonDetailUiState
+import com.becalm.android.ui.persons.PersonActionFeedStatusKind
+import com.becalm.android.ui.persons.PersonActionFeedStatusUi
+import com.becalm.android.ui.persons.PersonActionSummary
 import com.becalm.android.ui.persons.PersonRow
 import com.becalm.android.ui.persons.PersonsScreenContent
 import com.becalm.android.ui.persons.PersonsUiState
+import com.becalm.android.ui.persons.ManualMemorySyncStatusKind
+import com.becalm.android.ui.persons.ManualMemorySyncStatusUi
 import com.becalm.android.ui.persons.SourceEventCardProjection
 import com.becalm.android.ui.persons.SourceEventCardRow
 import com.becalm.android.ui.persons.UnassignedEventSummary
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.main.MainTabHeaderState
+import com.becalm.android.ui.main.OverallSyncState
+import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.ui.onboarding.FirstMemoryFollowUpAction
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
@@ -85,10 +100,12 @@ class PersonsUiTest {
 
         composeRule.onNodeWithText(string(R.string.person_matching_required_banner_title)).assertExists()
         composeRule.onNodeWithText(string(R.string.persons_offline_badge_no_sync)).assertIsDisplayed()
+        composeRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasText("김철수", substring = true))
         composeRule.onNodeWithText("김철수").assertExists()
         composeRule.onAllNodesWithText("김철수 · ABC Corp · 팀장").assertCountEquals(0)
-        composeRule.onNodeWithText(string(R.string.persons_pending_commitments_fmt, 2)).assertExists()
-        composeRule.onNodeWithText("계약서 검토 요청").assertExists()
+        composeRule.onNodeWithText(string(R.string.persons_pending_commitments_fmt, 2), substring = true).assertExists()
+        composeRule.onNodeWithText("계약서 검토 요청", substring = true).assertExists()
         composeRule.onNodeWithTag("persons-list")
             .performScrollToNode(hasText(string(R.string.persons_unassigned_title)))
         composeRule.onNodeWithText(string(R.string.persons_unassigned_title)).assertExists()
@@ -98,14 +115,456 @@ class PersonsUiTest {
     }
 
     @Test
-    fun `persons search input routes typed query`() {
-        var typedQuery: String? = null
-        var screenshotImports = 0
+    fun `persons screen promotes backend person action cache into prototype next action surface`() {
+        composeRule.setContent {
+            BecalmTheme {
+                PersonsScreenContent(
+                    state = PersonsUiState(
+                        people = listOf(
+                            PersonRow(
+                                personId = "person-action",
+                                displayName = "김민홍",
+                                companyName = "거래처",
+                                jobTitle = "대표",
+                                lastInteractionAt = Instant.parse("2026-06-04T01:00:00Z"),
+                                interactionCount = 4,
+                                topAction = PersonActionSummary(
+                                    id = "act-urgent",
+                                    title = "수정 계약서 회신",
+                                    primaryVerb = "답장",
+                                    shortReason = "6/1 통화에서 오늘까지 보내기로 한 약속입니다.",
+                                    actionKind = "reply",
+                                    dueAt = null,
+                                    dueHint = "오늘까지",
+                                    urgencyScore = 92.0,
+                                ),
+                            ),
+                            PersonRow(
+                                personId = "person-week",
+                                displayName = "이준호",
+                                companyName = "세무사",
+                                lastInteractionAt = Instant.parse("2026-06-03T01:00:00Z"),
+                                interactionCount = 2,
+                                topAction = PersonActionSummary(
+                                    id = "act-week",
+                                    title = "분기 미팅 날짜 제안하기",
+                                    primaryVerb = "제안",
+                                    shortReason = "이번 주 안에 후보 시간을 보내면 됩니다.",
+                                    actionKind = "schedule",
+                                    dueAt = null,
+                                    dueHint = "이번 주",
+                                    urgencyScore = 25.0,
+                                ),
+                            ),
+                            PersonRow(
+                                personId = "person-stale",
+                                displayName = "최민서",
+                                companyName = "파트너사",
+                                lastInteractionAt = Instant.parse("2025-05-10T01:00:00Z"),
+                                interactionCount = 1,
+                                lastInteractionSnippet = "24일째 연락 없음 — 복기하고 재개하기",
+                            ),
+                        ),
+                        loading = false,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    onQueryChange = {},
+                    onPersonClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.persons_home_headline)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_home_body)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_section_pending_commitments)).assertExists()
+        composeRule.onNodeWithTag("persons-action-row-act-urgent").assertIsDisplayed()
+        composeRule.onNodeWithText("오늘까지 · 수정 계약서 회신").assertExists()
+        composeRule.onAllNodesWithText("6/1 통화에서 오늘까지 보내기로 한 약속입니다.")
+            .assertCountEquals(0)
+        composeRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasText(string(R.string.persons_section_this_week)))
+        composeRule.onNodeWithText(string(R.string.persons_section_this_week)).assertExists()
+        composeRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasText("분기 미팅 날짜 제안하기", substring = true))
+        composeRule.onNodeWithTag("persons-action-row-act-week").assertIsDisplayed()
+        composeRule.onNodeWithText("이번 주 · 분기 미팅 날짜 제안하기").assertIsDisplayed()
+        composeRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasText(string(R.string.persons_section_recent_contacts)))
+        composeRule.onNodeWithText(string(R.string.persons_section_recent_contacts)).assertExists()
+        composeRule.onNodeWithText("24일째 연락 없음 — 복기하고 재개하기").assertExists()
+    }
+
+    @Test
+    fun `persons screen surfaces source status and reconnect entry on action first home`() {
+        var sourceManagementClicks = 0
+        var openedSource: String? = null
 
         composeRule.setContent {
             BecalmTheme {
                 PersonsScreenContent(
                     state = PersonsUiState(
+                        people = listOf(
+                            PersonRow(
+                                personId = "person-action",
+                                displayName = "김민홍",
+                                lastInteractionAt = Instant.parse("2026-06-04T01:00:00Z"),
+                                interactionCount = 4,
+                                topAction = PersonActionSummary(
+                                    id = "act-urgent",
+                                    title = "수정 계약서 회신",
+                                    primaryVerb = "답장",
+                                    shortReason = "오늘까지 보내기로 한 약속입니다.",
+                                    actionKind = "reply",
+                                    dueAt = null,
+                                    urgencyScore = 92.0,
+                                ),
+                            ),
+                        ),
+                        loading = false,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    headerState = MainTabHeaderState(
+                        sourceStatus = mapOf(
+                            SourceType.GMAIL to SourceStatusUi(
+                                status = SourceSyncStatus.Error,
+                                errorMessage = "needs_reauth",
+                                lastSyncedAt = null,
+                            ),
+                            SourceType.GOOGLE_CALENDAR to SourceStatusUi(
+                                status = SourceSyncStatus.Connected,
+                                errorMessage = null,
+                                lastSyncedAt = Instant.parse("2026-06-04T00:55:00Z"),
+                            ),
+                        ),
+                        overall = OverallSyncState.PartialFailure,
+                    ),
+                    onQueryChange = {},
+                    onPersonClick = {},
+                    onOpenSources = { sourceManagementClicks += 1 },
+                    onOpenSource = { openedSource = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(
+            string(
+                R.string.persons_source_status_delayed_prefix_fmt,
+                string(R.string.raw_event_source_badge_gmail),
+            ),
+            substring = true,
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_source_status_delayed_suffix), substring = true)
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.today_source_attention_action))
+            .assertCountEquals(0)
+        composeRule.onNodeWithTag("persons-source-reconnect-${SourceType.GMAIL}").performClick()
+        composeRule.runOnIdle {
+            assertEquals(0, sourceManagementClicks)
+            assertEquals(SourceType.GMAIL, openedSource)
+        }
+        composeRule.onAllNodesWithText(string(R.string.raw_event_source_badge_google_calendar))
+            .assertCountEquals(0)
+    }
+
+    @Test
+    fun `persons screen summarizes multiple source warnings with action feed degraded status`() {
+        var sourceManagementClicks = 0
+        var processingStatusClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonsScreenContent(
+                    state = PersonsUiState(
+                        people = listOf(
+                            PersonRow(
+                                personId = "person-action",
+                                displayName = "김민홍",
+                                lastInteractionAt = Instant.parse("2026-06-04T01:00:00Z"),
+                                interactionCount = 4,
+                                topAction = PersonActionSummary(
+                                    id = "act-urgent",
+                                    title = "수정 계약서 회신",
+                                    primaryVerb = "답장",
+                                    shortReason = "오늘까지 보내기로 한 약속입니다.",
+                                    actionKind = "reply",
+                                    dueAt = null,
+                                    urgencyScore = 92.0,
+                                ),
+                            ),
+                        ),
+                        actionFeedStatus = PersonActionFeedStatusUi(
+                            kind = PersonActionFeedStatusKind.DEGRADED,
+                            backlogLagSeconds = 600,
+                        ),
+                        loading = false,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    headerState = MainTabHeaderState(
+                        sourceStatus = mapOf(
+                            SourceType.GMAIL to SourceStatusUi(
+                                status = SourceSyncStatus.Error,
+                                errorMessage = "needs_reauth",
+                                lastSyncedAt = null,
+                            ),
+                            SourceType.GOOGLE_CALENDAR to SourceStatusUi(
+                                status = SourceSyncStatus.Disconnected,
+                                errorMessage = null,
+                                lastSyncedAt = null,
+                            ),
+                        ),
+                        overall = OverallSyncState.PartialFailure,
+                    ),
+                    onQueryChange = {},
+                    onPersonClick = {},
+                    onOpenSources = { sourceManagementClicks += 1 },
+                    onOpenProcessingStatus = { processingStatusClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("persons-source-summary").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1), substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_degraded_compact), substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_lag_minutes_fmt, 10), substring = true)
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithTag("persons-action-feed-statusline")
+            .assertCountEquals(0)
+        composeRule.onNodeWithText("수정 계약서 회신", substring = true).assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.raw_event_source_badge_google_calendar))
+            .assertCountEquals(0)
+        composeRule.onNodeWithTag("persons-source-supporting-status-action").performClick()
+        composeRule.onNodeWithTag("persons-source-summary-action").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, processingStatusClicks)
+            assertEquals(1, sourceManagementClicks)
+        }
+    }
+
+    @Test
+    fun `persons screen surfaces action feed readiness when sources are healthy`() {
+        var processingStatusClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonsScreenContent(
+                    state = PersonsUiState(
+                        people = listOf(
+                            PersonRow(
+                                personId = "person-action",
+                                displayName = "김민홍",
+                                lastInteractionAt = Instant.parse("2026-06-04T01:00:00Z"),
+                                interactionCount = 4,
+                                topAction = PersonActionSummary(
+                                    id = "act-urgent",
+                                    title = "수정 계약서 회신",
+                                    primaryVerb = "답장",
+                                    shortReason = "오늘까지 보내기로 한 약속입니다.",
+                                    actionKind = "reply",
+                                    dueAt = null,
+                                    urgencyScore = 92.0,
+                                ),
+                            ),
+                        ),
+                        actionFeedStatus = PersonActionFeedStatusUi(
+                            kind = PersonActionFeedStatusKind.QUOTA_DELAY,
+                            backlogLagSeconds = 600,
+                        ),
+                        loading = false,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    headerState = MainTabHeaderState(
+                        sourceStatus = mapOf(
+                            SourceType.GMAIL to SourceStatusUi(
+                                status = SourceSyncStatus.Connected,
+                                errorMessage = null,
+                                lastSyncedAt = Instant.parse("2026-06-04T00:55:00Z"),
+                            ),
+                        ),
+                        overall = OverallSyncState.Synced(Instant.parse("2026-06-04T00:55:00Z")),
+                    ),
+                    onQueryChange = {},
+                    onPersonClick = {},
+                    onOpenProcessingStatus = { processingStatusClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("persons-action-feed-statusline").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_quota), substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_lag_minutes_fmt, 10), substring = true)
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.raw_event_source_badge_gmail))
+            .assertCountEquals(0)
+        composeRule.onNodeWithTag("persons-action-feed-status-action").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, processingStatusClicks)
+        }
+    }
+
+    @Test
+    fun `persons screen folds action feed readiness into source warning line`() {
+        var openedSource: String? = null
+        var processingStatusClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonsScreenContent(
+                    state = PersonsUiState(
+                        people = listOf(
+                            PersonRow(
+                                personId = "person-action",
+                                displayName = "김민홍",
+                                lastInteractionAt = Instant.parse("2026-06-04T01:00:00Z"),
+                                interactionCount = 4,
+                                topAction = PersonActionSummary(
+                                    id = "act-urgent",
+                                    title = "수정 계약서 회신",
+                                    primaryVerb = "답장",
+                                    shortReason = "오늘까지 보내기로 한 약속입니다.",
+                                    actionKind = "reply",
+                                    dueAt = null,
+                                    urgencyScore = 92.0,
+                                ),
+                            ),
+                        ),
+                        actionFeedStatus = PersonActionFeedStatusUi(
+                            kind = PersonActionFeedStatusKind.DEGRADED,
+                            backlogLagSeconds = 600,
+                        ),
+                        loading = false,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    headerState = MainTabHeaderState(
+                        sourceStatus = mapOf(
+                            SourceType.GMAIL to SourceStatusUi(
+                                status = SourceSyncStatus.Error,
+                                errorMessage = "needs_reauth",
+                                lastSyncedAt = null,
+                            ),
+                        ),
+                        overall = OverallSyncState.PartialFailure,
+                    ),
+                    onQueryChange = {},
+                    onPersonClick = {},
+                    onOpenSource = { openedSource = it },
+                    onOpenProcessingStatus = { processingStatusClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("persons-source-statusline-${SourceType.GMAIL}").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_degraded_compact), substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_lag_minutes_fmt, 10), substring = true)
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithTag("persons-action-feed-statusline")
+            .assertCountEquals(0)
+        composeRule.onNodeWithText("수정 계약서 회신", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("persons-source-supporting-status-action").performClick()
+        composeRule.onNodeWithTag("persons-source-reconnect-${SourceType.GMAIL}").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, processingStatusClicks)
+            assertEquals(SourceType.GMAIL, openedSource)
+        }
+    }
+
+    @Test
+    fun `persons screen keeps matching source and processing warnings compact above action rows`() {
+        var matchingClicks = 0
+        var openedSource: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonsScreenContent(
+                    state = PersonsUiState(
+                        people = listOf(
+                            PersonRow(
+                                personId = "person-action",
+                                displayName = "김민홍",
+                                lastInteractionAt = Instant.parse("2026-06-04T01:00:00Z"),
+                                interactionCount = 4,
+                                topAction = PersonActionSummary(
+                                    id = "act-urgent",
+                                    title = "수정 계약서 회신",
+                                    primaryVerb = "답장",
+                                    shortReason = "오늘까지 보내기로 한 약속입니다.",
+                                    actionKind = "reply",
+                                    dueAt = null,
+                                    urgencyScore = 92.0,
+                                ),
+                            ),
+                        ),
+                        unassignedEvents = listOf(
+                            UnassignedEventSummary(
+                                id = "event-unassigned",
+                                sourceType = SourceType.GMAIL,
+                                title = "상대 확인 필요",
+                                timestamp = Instant.parse("2026-06-04T01:05:00Z"),
+                            ),
+                        ),
+                        actionFeedStatus = PersonActionFeedStatusUi(
+                            kind = PersonActionFeedStatusKind.DEGRADED,
+                            backlogLagSeconds = 600,
+                        ),
+                        loading = false,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    headerState = MainTabHeaderState(
+                        sourceStatus = mapOf(
+                            SourceType.GMAIL to SourceStatusUi(
+                                status = SourceSyncStatus.Error,
+                                errorMessage = "needs_reauth",
+                                lastSyncedAt = null,
+                            ),
+                        ),
+                        overall = OverallSyncState.PartialFailure,
+                    ),
+                    onQueryChange = {},
+                    onPersonClick = {},
+                    onOpenUnassigned = { matchingClicks += 1 },
+                    onOpenSource = { openedSource = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("persons-matching-required-statusline").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_matching_required_status_prefix_fmt, 1), substring = true)
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.person_matching_required_banner_title))
+            .assertCountEquals(0)
+        composeRule.onNodeWithTag("persons-source-statusline-${SourceType.GMAIL}").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_degraded_compact), substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("수정 계약서 회신", substring = true).assertIsDisplayed()
+        composeRule.onAllNodesWithTag("evidence-import-fab")
+            .assertCountEquals(0)
+
+        composeRule.onNodeWithTag("persons-matching-required-status-action").performClick()
+        composeRule.onNodeWithTag("persons-source-reconnect-${SourceType.GMAIL}").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, matchingClicks)
+            assertEquals(SourceType.GMAIL, openedSource)
+        }
+    }
+
+    @Test
+    fun `persons search input routes typed query`() {
+        var typedQuery: String? = null
+        var screenshotImports = 0
+
+        composeRule.setContent {
+            var query by remember { mutableStateOf("") }
+            BecalmTheme {
+                PersonsScreenContent(
+                    state = PersonsUiState(
+                        query = query,
                         people = listOf(
                             PersonRow(
                                 personId = "kim@example.com",
@@ -117,7 +576,10 @@ class PersonsUiTest {
                         loading = false,
                     ),
                     snackbarHostState = SnackbarHostState(),
-                    onQueryChange = { typedQuery = it },
+                    onQueryChange = {
+                        query = it
+                        typedQuery = it
+                    },
                     onPersonClick = {},
                     onMessageScreenshotImport = { screenshotImports += 1 },
                 )
@@ -125,6 +587,7 @@ class PersonsUiTest {
         }
 
         composeRule.onNodeWithTag("persons-search-input").performTextInput("김")
+        composeRule.onNodeWithTag("persons-search-clear").performClick()
         composeRule.onNodeWithTag("evidence-import-fab").performClick()
         composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
         composeRule.waitForIdle()
@@ -132,9 +595,31 @@ class PersonsUiTest {
             .performSemanticsAction(SemanticsActions.OnClick)
 
         composeRule.runOnIdle {
-            assertEquals("김", typedQuery)
+            assertEquals("", typedQuery)
             assertEquals(1, screenshotImports)
         }
+    }
+
+    @Test
+    fun `persons search empty keeps prototype empty state instead of first memory form`() {
+        composeRule.setContent {
+            BecalmTheme {
+                PersonsScreenContent(
+                    state = PersonsUiState(
+                        query = "없는 사람",
+                        people = emptyList(),
+                        loading = false,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    onQueryChange = {},
+                    onPersonClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.persons_search_empty)).assertIsDisplayed()
+        composeRule.onNodeWithTag("persons-search-empty").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("persons-empty-first-memory").assertCountEquals(0)
     }
 
     @Test
@@ -196,7 +681,11 @@ class PersonsUiTest {
             }
         }
 
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText(string(R.string.person_detail_filter_all)))
         composeRule.onNodeWithText(string(R.string.person_detail_filter_all)).assertIsDisplayed()
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText(string(R.string.person_detail_timeline_section_fmt, 2)))
         composeRule.onNodeWithText(string(R.string.person_detail_timeline_section_fmt, 2)).assertIsDisplayed()
         composeRule.onNodeWithTag("person-detail-list")
             .performScrollToNode(hasText("콜 녹음"))
@@ -300,13 +789,37 @@ class PersonsUiTest {
     }
 
     @Test
-    fun `person detail lifts source next action into recommendation panel`() {
+    fun `person detail lifts backend next action into recommendation panel`() {
+        var tappedEventId: String? = null
+
         composeRule.setContent {
             BecalmTheme {
                 PersonDetailScreenContent(
                     state = PersonDetailUiState(
                         personId = "person-1",
                         displayName = "김철수",
+                        topActions = listOf(
+                            PersonActionItemUi(
+                                id = "pa-reply",
+                                personId = "person-1",
+                                personDisplayName = "김철수",
+                                actionKind = "reply",
+                                title = "자료 확인 요청에 답장",
+                                primaryVerb = string(R.string.person_detail_next_action_email_reply),
+                                shortReason = "확인 후 답장 주세요.",
+                                commitmentId = null,
+                                calendarEventId = null,
+                                sourceEventId = null,
+                                sourceType = "gmail",
+                                sourceRef = "raw:mail-1",
+                                dueAt = null,
+                                dueHint = null,
+                                urgencyScore = 88.0,
+                                confidence = 0.86,
+                                reasonCodes = emptyList(),
+                                evidence = null,
+                            ),
+                        ),
                         sourceEventCards = listOf(
                             SourceEventCardProjection(
                                 sourceEventKey = "raw:mail-1",
@@ -315,10 +828,6 @@ class PersonsUiTest {
                                 occurredAt = Instant.parse("2026-04-24T01:00:00Z"),
                                 title = "자료 확인 요청",
                                 snippet = "확인 후 답장 주세요.",
-                                nextAction = PersonDetailNextAction(
-                                    labelRes = R.string.person_detail_next_action_email_reply,
-                                    nextSourceEventKey = "raw:mail-2",
-                                ),
                             ),
                         ),
                         loading = false,
@@ -326,13 +835,63 @@ class PersonsUiTest {
                     title = "김철수",
                     snackbarHostState = SnackbarHostState(),
                     onBack = {},
-                    onEventTap = {},
+                    onEventTap = { tappedEventId = it },
                 )
             }
         }
 
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText(string(R.string.person_detail_next_action_email_reply)))
         composeRule.onNodeWithTag("person-detail-next-action-panel").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("person-detail-relationship-recall").assertCountEquals(0)
         composeRule.onAllNodesWithText(string(R.string.person_detail_next_action_email_reply)).assertCountEquals(1)
+        composeRule.onNodeWithTag("person-detail-action-pa-reply").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("mail-1", tappedEventId)
+        }
+    }
+
+    @Test
+    fun `person detail shows stale relationship recall when there is no active next action`() {
+        var tappedEventId: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonDetailScreenContent(
+                    state = PersonDetailUiState(
+                        personId = "person-1",
+                        displayName = "최민서",
+                        sourceEventCards = listOf(
+                            SourceEventCardProjection(
+                                sourceEventKey = "raw:mail-1",
+                                sourceType = "gmail",
+                                rawEventId = "mail-1",
+                                occurredAt = Instant.parse("2025-05-10T01:00:00Z"),
+                                title = "견적 재검토 요청",
+                                snippet = "진행 여부 회신을 기다리던 대화",
+                            ),
+                        ),
+                        loading = false,
+                    ),
+                    title = "최민서",
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onEventTap = { tappedEventId = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText(string(R.string.person_detail_recall_title)))
+        composeRule.onNodeWithTag("person-detail-relationship-recall").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_detail_recall_title)).assertIsDisplayed()
+        composeRule.onNodeWithText("연락이 없어요", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_detail_recall_open_last)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("mail-1", tappedEventId)
+        }
     }
 
     @Test
@@ -371,6 +930,52 @@ class PersonsUiTest {
 
         composeRule.runOnIdle {
             assertEquals(FirstMemoryFollowUpAction.GMAIL, clicked)
+        }
+    }
+
+    @Test
+    fun `person detail manual memory failed sync is visible and retryable`() {
+        var retried = false
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonDetailScreenContent(
+                    state = PersonDetailUiState(
+                        personId = "person-1",
+                        displayName = "민지",
+                        sourceEventCards = listOf(
+                            SourceEventCardProjection(
+                                sourceEventKey = "manual:mail-1",
+                                sourceType = "manual",
+                                rawEventId = null,
+                                occurredAt = Instant.parse("2026-05-26T00:00:00Z"),
+                                title = "민지님과 직접 입력한 약속",
+                                snippet = "금요일까지 제안서 초안 보내기",
+                                firstMemoryOrigin = "email",
+                            ),
+                        ),
+                        manualMemorySyncStatus = ManualMemorySyncStatusUi(
+                            kind = ManualMemorySyncStatusKind.FAILED,
+                            failedCount = 1,
+                        ),
+                        loading = false,
+                    ),
+                    title = "민지",
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onEventTap = {},
+                    onRetryManualMemorySync = { retried = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText(string(R.string.person_detail_manual_memory_sync_failed_title)))
+        composeRule.onNodeWithTag("person-detail-manual-memory-sync").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_detail_manual_memory_sync_retry)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(true, retried)
         }
     }
 

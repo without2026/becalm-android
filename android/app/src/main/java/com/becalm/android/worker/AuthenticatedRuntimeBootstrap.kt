@@ -1,5 +1,6 @@
 package com.becalm.android.worker
 
+import com.becalm.android.core.di.ApplicationScope
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.di.MainDispatcher
 import com.becalm.android.core.util.Logger
@@ -13,9 +14,14 @@ import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 
 /**
  * Auth-gated startup/runtime wiring. This must not be started from [android.app.Application.onCreate].
@@ -35,12 +41,15 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
     private val sourceConnectionLocalStateHydratorProvider: Provider<SourceConnectionLocalStateHydrator>,
     private val commitmentReminderReconciler: CommitmentReminderReconciler,
     private val logger: Logger,
+    @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
 ) {
     private val bootstrapLock = Any()
     private var bootstrappedUserId: String? = null
     private var inFlightUserId: String? = null
+    private var bootstrapJobUserId: String? = null
+    private var bootstrapJob: Job? = null
 
     /**
      * Backward-compatible entry point for non-UI callers that only know persisted auth state.
@@ -62,6 +71,52 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
         }
 
         startForUser(persistedUserId)
+    }
+
+    /**
+     * Process-lifetime entry point for UI/auth owners. Signed-in route changes can destroy the
+     * auth ViewModel immediately after it emits [com.becalm.android.ui.auth.AuthUiState.SignedIn];
+     * tying source-connection hydration to that ViewModel leaves stale local mirrors in place.
+     */
+    public fun startForUserAsync(userId: String) {
+        if (userId.isBlank()) {
+            logger.d(TAG, "blank user id — runtime sync deferred")
+            return
+        }
+
+        var previousJob: Job? = null
+        val job = applicationScope.launch(ioDispatcher, start = CoroutineStart.LAZY) {
+            try {
+                startForUser(userId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                logger.e(TAG, "runtime bootstrap failed", error)
+            } finally {
+                clearBootstrapJob(userId, coroutineContext[Job])
+            }
+        }
+
+        val shouldStart = synchronized(bootstrapLock) {
+            when {
+                bootstrappedUserId == userId || inFlightUserId == userId -> false
+                bootstrapJobUserId == userId && bootstrapJob?.isActive == true -> false
+                else -> {
+                    previousJob = bootstrapJob?.takeIf { it.isActive }
+                    bootstrapJob = job
+                    bootstrapJobUserId = userId
+                    true
+                }
+            }
+        }
+
+        if (shouldStart) {
+            previousJob?.cancel()
+            job.start()
+        } else {
+            job.cancel()
+            logger.d(TAG, "runtime bootstrap already started for current user")
+        }
     }
 
     public suspend fun startForUser(userId: String) {
@@ -133,11 +188,23 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
 
     public fun resetForAuthBoundary() {
         synchronized(bootstrapLock) {
+            bootstrapJob?.cancel()
+            bootstrapJob = null
+            bootstrapJobUserId = null
             bootstrappedUserId = null
             inFlightUserId = null
         }
         appRuntimeSyncCoordinator.resetForAuthBoundary()
         logger.d(TAG, "runtime bootstrap reset for auth boundary")
+    }
+
+    private fun clearBootstrapJob(userId: String, job: Job?) {
+        synchronized(bootstrapLock) {
+            if (bootstrapJobUserId == userId && bootstrapJob === job) {
+                bootstrapJob = null
+                bootstrapJobUserId = null
+            }
+        }
     }
 
     private suspend fun runStep(name: String, block: suspend () -> Unit) {

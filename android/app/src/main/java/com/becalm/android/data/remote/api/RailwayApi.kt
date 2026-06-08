@@ -6,6 +6,7 @@ import com.becalm.android.data.remote.dto.CalendarEventListResponse
 import com.becalm.android.data.remote.dto.CalendarOAuthStartResponse
 import com.becalm.android.data.remote.dto.CalendarOAuthStatusResponse
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
+import com.becalm.android.data.remote.dto.CalendarWriteJobResponseDto
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
 import com.becalm.android.data.remote.dto.CommitmentParticipantsResponse
@@ -17,15 +18,19 @@ import com.becalm.android.data.remote.dto.MailOAuthStatusResponse
 import com.becalm.android.data.remote.dto.MailSyncResponse
 import com.becalm.android.data.remote.dto.ManualMemoryCreateRequestDto
 import com.becalm.android.data.remote.dto.ManualMemoryCreateResponseDto
-import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
-import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
+import com.becalm.android.data.remote.dto.PersonEventsResponse
+import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
+import com.becalm.android.data.remote.dto.PersonActionDraftRequestDto
+import com.becalm.android.data.remote.dto.PersonActionDraftResponseDto
 import com.becalm.android.data.remote.dto.PersonActionFeedbackDto
+import com.becalm.android.data.remote.dto.PersonActionEvidenceOriginalResponseDto
 import com.becalm.android.data.remote.dto.PersonActionFeedResponseDto
 import com.becalm.android.data.remote.dto.PersonActionStatePatchDto
 import com.becalm.android.data.remote.dto.PersonMemoryDownloadResponseDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadRequestDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadResponseDto
+import com.becalm.android.data.remote.dto.ProcessingStatusResponseDto
 import com.becalm.android.data.remote.dto.ProductEventsBatchRequest
 import com.becalm.android.data.remote.dto.ProductEventsBatchResponse
 import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
@@ -318,6 +323,16 @@ public interface RailwayApi {
     @GET("v1/source_status")
     public suspend fun getSourceStatus(): Response<SourceStatusResponseDto>
 
+    /**
+     * Operational ingestion/extraction backlog aggregate.
+     *
+     * This endpoint is separate from `GET /v1/source_status`: source status is
+     * connection health, while processing status is pending/retry/recovery
+     * progress across ingestion, extraction, source-sync, and person-action lanes.
+     */
+    @GET("v1/processing_status")
+    public suspend fun getProcessingStatus(): Response<ProcessingStatusResponseDto>
+
     @GET("v1/user_profile")
     public suspend fun getUserProfile(): Response<UserProfileResponseDto>
 
@@ -446,6 +461,7 @@ public interface RailwayApi {
     @GET("v1/oauth/calendar/{provider}:start")
     public suspend fun startCalendarOAuth(
         @Path("provider") provider: String,
+        @Query("source_connection_id") sourceConnectionId: String? = null,
     ): Response<CalendarOAuthStartResponse>
 
     /**
@@ -463,6 +479,7 @@ public interface RailwayApi {
     @GET("v1/oauth/mail/{provider}:start")
     public suspend fun startMailOAuth(
         @Path("provider") provider: String,
+        @Query("source_connection_id") sourceConnectionId: String? = null,
     ): Response<MailOAuthStartResponse>
 
     /**
@@ -497,15 +514,10 @@ public interface RailwayApi {
     ): Response<PersonListResponse>
 
     /**
-     * Lists raw ingestion events associated with a specific person.
+     * Lists bounded source-event recall rows for a person detail screen.
      *
-     * Returns 404 when [personId] is not found or belongs to a different user.
-     *
-     * @param personId Canonical backend `persons.id` value.
-     * @param cursor Opaque pagination cursor from the previous response.
-     * @param limit Page size; server default applies when omitted.
-     *
-     * Spec refs: SRC-002.
+     * Android materializes this into the local person timeline as a recovery path when the
+     * Room mirror is empty or stale after reinstall/local DB loss.
      */
     @GET("v1/persons/{person_id}/events")
     public suspend fun getPersonEvents(
@@ -515,15 +527,10 @@ public interface RailwayApi {
     ): Response<PersonEventsResponse>
 
     /**
-     * Lists commitments associated with a specific person.
+     * Lists commitments scoped to one canonical person.
      *
-     * Returns 404 when [personId] is not found or belongs to a different user.
-     *
-     * @param personId Canonical backend `persons.id` value.
-     * @param cursor Opaque pagination cursor from the previous response.
-     * @param limit Page size; server default applies when omitted.
-     *
-     * Spec refs: SRC-002.
+     * Same wire shape as [getCommitments], exposed separately because the backend keeps
+     * person-detail recall under `/persons/{id}`.
      */
     @GET("v1/persons/{person_id}/commitments")
     public suspend fun getPersonCommitments(
@@ -558,7 +565,7 @@ public interface RailwayApi {
         @Query("person_id") personId: String? = null,
         @Query("commitment_id") commitmentId: String? = null,
         @Query("calendar_event_id") calendarEventId: String? = null,
-        @Query("include_stale") includeStale: Boolean = true,
+        @Query("include_stale") includeStale: Boolean = false,
     ): Response<PersonActionFeedResponseDto>
 
     @PATCH("v1/person_action_items/{id}")
@@ -574,4 +581,24 @@ public interface RailwayApi {
         @Header("X-BeCalm-Idempotent") idem: String = "1",
         @Body request: PersonActionFeedbackDto,
     ): Response<SinglePersonActionItemResponseDto>
+
+    @GET("v1/person_action_items/{id}/evidence/{evidence_kind}/{evidence_id}")
+    public suspend fun getPersonActionEvidenceOriginal(
+        @Path("id") id: String,
+        @Path("evidence_kind") evidenceKind: String,
+        @Path("evidence_id") evidenceId: String,
+    ): Response<PersonActionEvidenceOriginalResponseDto>
+
+    @POST("v1/person_action_items/{id}:draft")
+    public suspend fun generatePersonActionDraft(
+        @Path("id") id: String,
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: PersonActionDraftRequestDto,
+    ): Response<PersonActionDraftResponseDto>
+
+    @GET("v1/calendar_write_jobs/{job_id}")
+    public suspend fun getCalendarWriteJob(
+        @Path("job_id") jobId: String,
+    ): Response<CalendarWriteJobResponseDto>
+
 }

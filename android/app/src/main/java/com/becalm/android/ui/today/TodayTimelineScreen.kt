@@ -71,10 +71,13 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.isActive
 import com.becalm.android.domain.schedule.ScheduleRowRef
+import com.becalm.android.ui.actions.PersonActionEvidenceDialog
+import com.becalm.android.ui.actions.PersonActionFeedStatusLine
 import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmTopChrome
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.CounterpartyText
 import com.becalm.android.ui.components.EmptyState
@@ -104,15 +107,15 @@ import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 
 /**
- * Today screen — unified calendar events + due commitments timeline.
+ * Schedule screen — unified calendar events + due commitments timeline.
  *
- * Renders a time-sorted list of [TimelineItem] for today. Shows a loading
+ * Renders a time-sorted list of [TimelineItem] for the selected schedule range. Shows a loading
  * spinner while [TodayUiState.loading] is true. Shows [ErrorState] when
  * [TodayUiState.error] is non-null (e.g. unauthenticated).
  *
  * Composition (TDY-003 / TDY-006 / TDY-008 / TDY-009):
  * ```
- * BecalmScaffold(title=Today)
+ * BecalmScaffold(title=일정)
  *   OverallSyncIndicator(state)            // TDY-008 banner
  *   SourceStatusStrip(chips)               // TDY-003 read-only chips (no tap)
  *   PullRefreshIndicator + TimelineList    // TDY-006 pull-to-refresh + TDY-009 catch-up
@@ -176,11 +179,21 @@ public fun TodayTimelineScreen(
         onOpenProcessingStatus = {
             navController.navigate(BecalmRoute.ProcessingStatus.path)
         },
+        onRecoverAuth = {
+            navController.navigate(BecalmRoute.AuthRecovery(termsAccepted = true).path) {
+                launchSingleTop = true
+            }
+        },
         onDismissProcessingStatus = viewModel::onDismissProcessingStatus,
         onPullRefresh = viewModel::onPullRefresh,
         onScheduleRangeChange = viewModel::onScheduleRangeChange,
         onResolveScheduleConflict = viewModel::onResolveScheduleConflict,
         onDeleteScheduleRow = viewModel::onDeleteScheduleRow,
+        onOpenScheduleActionEvidence = viewModel::onOpenScheduleActionEvidence,
+        onDismissScheduleActionEvidence = viewModel::onDismissScheduleActionEvidence,
+        onCompleteScheduleAction = viewModel::onCompleteScheduleAction,
+        onDismissScheduleAction = viewModel::onDismissScheduleAction,
+        onRetryCalendarWriteJob = viewModel::onRetryCalendarWriteJob,
         onOpenCommitmentDetail = { commitmentId ->
             navController.navigate(BecalmRoute.CommitmentDetail(commitmentId).path)
         },
@@ -204,7 +217,7 @@ public fun TodayTimelineScreen(
 }
 
 /**
- * Stateless Today screen content.
+ * Stateless schedule screen content.
  *
  * Hoisted from [TodayTimelineScreen] per rubric D1 so Compose UI tests can drive the
  * rendered tree with a raw [TodayUiState] + lambdas, without booting a ViewModel.
@@ -220,7 +233,13 @@ public fun TodayTimelineContent(
     onScheduleRangeChange: (ScheduleRangeFilter) -> Unit = {},
     onResolveScheduleConflict: (String, String) -> Unit = { _, _ -> },
     onDeleteScheduleRow: (ScheduleRowRef) -> Unit = {},
+    onOpenScheduleActionEvidence: (String, String?, String?) -> Unit = { _, _, _ -> },
+    onDismissScheduleActionEvidence: () -> Unit = {},
+    onCompleteScheduleAction: (String) -> Unit = {},
+    onDismissScheduleAction: (String) -> Unit = {},
+    onRetryCalendarWriteJob: (String) -> Unit = {},
     onOpenProcessingStatus: () -> Unit = {},
+    onRecoverAuth: () -> Unit = onOpenSettings,
     onDismissProcessingStatus: () -> Unit = {},
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
@@ -260,17 +279,24 @@ public fun TodayTimelineContent(
         refreshing = state.refreshing,
         onRefresh = onPullRefresh,
     )
+    val showEvidenceImportFab = !state.loading &&
+        state.scheduleConflictReviewItems.isEmpty() &&
+        !hasScheduleCandidates
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.today_title),
+        topChrome = BecalmTopChrome.MainTab,
         actions = {
             MainTabHeaderActions(
                 onOpenSettings = onOpenSettings,
+                compact = true,
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            EvidenceImportFloatingActionButton(onClick = evidenceImportController::openSheet)
+            if (showEvidenceImportFab) {
+                EvidenceImportFloatingActionButton(onClick = evidenceImportController::openSheet)
+            }
         },
     ) { padding ->
         // Single-column calm on every viewport: cap content at the timeline
@@ -324,12 +350,42 @@ public fun TodayTimelineContent(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                 )
+                state.scheduleActionFeedStatus?.let { status ->
+                    PersonActionFeedStatusLine(
+                        status = status,
+                        onOpenProcessingStatus = onOpenProcessingStatus,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        testTag = "schedule-action-feed-statusline",
+                    )
+                }
+                CalendarWriteJobStatusPanel(
+                    jobs = state.calendarWriteJobs,
+                    onRetry = onRetryCalendarWriteJob,
+                    onReconnect = { provider ->
+                        if (provider != null && onOpenSource != null) {
+                            onOpenSource(provider)
+                        } else {
+                            onOpenSources()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
                 val actionCandidatesVisible = scheduleStatusFilter == ScheduleStatusFilter.CANDIDATE &&
                     state.scheduleActions.isNotEmpty()
                 if (actionCandidatesVisible) {
                     ScheduleActionPanel(
                         actions = state.scheduleActions,
+                        loadingEvidenceActionId = state.loadingEvidenceActionId,
+                        loadingScheduleActionId = state.loadingScheduleActionId,
+                        loadingScheduleDismissActionId = state.loadingScheduleDismissActionId,
                         onOpenCommitmentDetail = onOpenCommitmentDetail,
+                        onOpenEvidence = onOpenScheduleActionEvidence,
+                        onCompleteAction = onCompleteScheduleAction,
+                        onDismissAction = onDismissScheduleAction,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -345,10 +401,25 @@ public fun TodayTimelineContent(
                             TimelineSkeleton()
                         }
                         state.error != null -> {
+                            val error = requireNotNull(state.error)
+                            val isAuthRequired = error.resId == R.string.today_error_sign_in_required
                             ErrorState(
-                                title = stringResource(R.string.error_generic_title),
-                                message = uiMessageStringResource(requireNotNull(state.error)),
-                                onRetry = onPullRefresh,
+                                title = stringResource(
+                                    if (isAuthRequired) {
+                                        R.string.auth_recovery_title
+                                    } else {
+                                        R.string.error_generic_title
+                                    },
+                                ),
+                                message = uiMessageStringResource(error),
+                                onRetry = if (isAuthRequired) onRecoverAuth else onPullRefresh,
+                                retryLabel = stringResource(
+                                    if (isAuthRequired) {
+                                        R.string.auth_recovery_login_cta
+                                    } else {
+                                        R.string.error_state_retry
+                                    },
+                                ),
                             )
                         }
                         state.timeline.isEmpty() && !actionCandidatesVisible -> {
@@ -438,9 +509,16 @@ public fun TodayTimelineContent(
             },
         )
     }
+
+    state.evidenceDetail?.let { detail ->
+        PersonActionEvidenceDialog(
+            detail = detail,
+            onDismiss = onDismissScheduleActionEvidence,
+        )
+    }
 }
 
-/** Reading-width cap for the Today timeline. Below this, content fills the
+/** Reading-width cap for the schedule timeline. Below this, content fills the
  *  available width on phones; at or above (tablet, foldable open), the column
  *  centres in the viewport so the single-column calm holds on every device. */
 private val TimelineMaxContentWidth: Dp = 600.dp
@@ -562,9 +640,138 @@ private fun TodayProcessingStatusStrip(
 }
 
 @Composable
+private fun CalendarWriteJobStatusPanel(
+    jobs: List<CalendarWriteJobUi>,
+    onRetry: (String) -> Unit,
+    onReconnect: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val visibleJobs = jobs.take(3)
+    if (visibleJobs.isEmpty()) return
+    EvidenceCard(
+        modifier = modifier.testTag("schedule-calendar-write-status-panel"),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = stringResource(R.string.schedule_calendar_write_status_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            visibleJobs.forEach { job ->
+                CalendarWriteJobStatusRow(
+                    job = job,
+                    onRetry = onRetry,
+                    onReconnect = onReconnect,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarWriteJobStatusRow(
+    job: CalendarWriteJobUi,
+    onRetry: (String) -> Unit,
+    onReconnect: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("schedule-calendar-write-status-${job.jobId}"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = job.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            ScheduleMetaPill(
+                text = stringResource(calendarWriteJobStatusLabelRes(job.status)),
+                emphasized = job.status == CalendarWriteJobStatusKind.SUCCEEDED,
+            )
+        }
+        Text(
+            text = stringResource(calendarWriteJobStatusMessageRes(job.status)),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (job.status == CalendarWriteJobStatusKind.NEEDS_REAUTH) {
+            BecalmButton(
+                text = stringResource(R.string.schedule_calendar_write_status_reconnect_action),
+                onClick = { onReconnect(job.provider) },
+                variant = BecalmButtonVariant.Secondary,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .testTag("schedule-calendar-write-reconnect-${job.jobId}"),
+            )
+        } else if (job.status in calendarWriteRetryableStatuses) {
+            BecalmButton(
+                text = stringResource(R.string.schedule_calendar_write_status_retry_action),
+                onClick = { onRetry(job.jobId) },
+                loading = job.checking,
+                variant = BecalmButtonVariant.Secondary,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .testTag("schedule-calendar-write-retry-${job.jobId}"),
+            )
+        }
+    }
+}
+
+@StringRes
+private fun calendarWriteJobStatusLabelRes(status: CalendarWriteJobStatusKind): Int =
+    when (status) {
+        CalendarWriteJobStatusKind.QUEUED -> R.string.schedule_calendar_write_status_queued
+        CalendarWriteJobStatusKind.RUNNING -> R.string.schedule_calendar_write_status_running
+        CalendarWriteJobStatusKind.RETRY -> R.string.schedule_calendar_write_status_retry
+        CalendarWriteJobStatusKind.SUCCEEDED -> R.string.schedule_calendar_write_status_succeeded
+        CalendarWriteJobStatusKind.FAILED -> R.string.schedule_calendar_write_status_failed
+        CalendarWriteJobStatusKind.NEEDS_REAUTH -> R.string.schedule_calendar_write_status_needs_reauth
+        CalendarWriteJobStatusKind.CANCELLED -> R.string.schedule_calendar_write_status_cancelled
+        CalendarWriteJobStatusKind.CHECK_FAILED -> R.string.schedule_calendar_write_status_check_failed
+    }
+
+@StringRes
+private fun calendarWriteJobStatusMessageRes(status: CalendarWriteJobStatusKind): Int =
+    when (status) {
+        CalendarWriteJobStatusKind.QUEUED -> R.string.schedule_calendar_write_status_queued_body
+        CalendarWriteJobStatusKind.RUNNING -> R.string.schedule_calendar_write_status_running_body
+        CalendarWriteJobStatusKind.RETRY -> R.string.schedule_calendar_write_status_retry_body
+        CalendarWriteJobStatusKind.SUCCEEDED -> R.string.schedule_calendar_write_status_succeeded_body
+        CalendarWriteJobStatusKind.FAILED -> R.string.schedule_calendar_write_status_failed_body
+        CalendarWriteJobStatusKind.NEEDS_REAUTH -> R.string.schedule_calendar_write_status_needs_reauth_body
+        CalendarWriteJobStatusKind.CANCELLED -> R.string.schedule_calendar_write_status_cancelled_body
+        CalendarWriteJobStatusKind.CHECK_FAILED -> R.string.schedule_calendar_write_status_check_failed_body
+    }
+
+private val calendarWriteRetryableStatuses: Set<CalendarWriteJobStatusKind> = setOf(
+    CalendarWriteJobStatusKind.RETRY,
+    CalendarWriteJobStatusKind.FAILED,
+    CalendarWriteJobStatusKind.CHECK_FAILED,
+)
+
+@Composable
 private fun ScheduleActionPanel(
     actions: List<PersonActionItemUi>,
+    loadingEvidenceActionId: String?,
+    loadingScheduleActionId: String?,
+    loadingScheduleDismissActionId: String?,
     onOpenCommitmentDetail: (String) -> Unit,
+    onOpenEvidence: (String, String?, String?) -> Unit,
+    onCompleteAction: (String) -> Unit,
+    onDismissAction: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     EvidenceCard(
@@ -591,7 +798,13 @@ private fun ScheduleActionPanel(
             actions.take(3).forEach { action ->
                 ScheduleActionRow(
                     action = action,
+                    loadingEvidence = loadingEvidenceActionId == action.id,
+                    loadingComplete = loadingScheduleActionId == action.id,
+                    loadingDismiss = loadingScheduleDismissActionId == action.id,
                     onOpenCommitmentDetail = onOpenCommitmentDetail,
+                    onOpenEvidence = onOpenEvidence,
+                    onCompleteAction = onCompleteAction,
+                    onDismissAction = onDismissAction,
                 )
             }
         }
@@ -601,7 +814,13 @@ private fun ScheduleActionPanel(
 @Composable
 private fun ScheduleActionRow(
     action: PersonActionItemUi,
+    loadingEvidence: Boolean,
+    loadingComplete: Boolean,
+    loadingDismiss: Boolean,
     onOpenCommitmentDetail: (String) -> Unit,
+    onOpenEvidence: (String, String?, String?) -> Unit,
+    onCompleteAction: (String) -> Unit,
+    onDismissAction: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -634,7 +853,9 @@ private fun ScheduleActionRow(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        action.evidence?.quote?.takeIf { it.isNotBlank() }?.let { quote ->
+        val commitmentId = action.commitmentId
+        val calendarWriteReady = action.providerWrite?.isReady == true
+        action.evidence?.quote?.takeIf { it.isNotBlank() && !calendarWriteReady }?.let { quote ->
             Text(
                 text = stringResource(R.string.schedule_row_quote_fmt, quote),
                 style = MaterialTheme.typography.bodySmall,
@@ -643,18 +864,96 @@ private fun ScheduleActionRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        val commitmentId = action.commitmentId
-        BecalmButton(
-            text = action.primaryVerb,
-            onClick = {
-                if (commitmentId != null) {
-                    onOpenCommitmentDetail(commitmentId)
+        val evidence = action.evidence
+        val evidenceKind = evidence?.kind
+        val evidenceId = evidence?.id
+        if (calendarWriteReady) {
+            Row(
+                modifier = Modifier.align(Alignment.End),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BecalmButton(
+                    text = stringResource(R.string.schedule_action_add_to_calendar),
+                    onClick = { onCompleteAction(action.id) },
+                    enabled = !loadingDismiss,
+                    loading = loadingComplete,
+                    variant = BecalmButtonVariant.Primary,
+                )
+                if (evidenceKind != null && evidenceId != null) {
+                    BecalmButton(
+                        text = stringResource(R.string.commitment_action_evidence),
+                        onClick = { onOpenEvidence(action.id, evidenceKind, evidenceId) },
+                        enabled = !loadingComplete && !loadingDismiss,
+                        loading = loadingEvidence,
+                        variant = BecalmButtonVariant.Secondary,
+                    )
                 }
-            },
-            enabled = commitmentId != null,
+                BecalmButton(
+                    text = stringResource(R.string.schedule_action_dismiss),
+                    onClick = { onDismissAction(action.id) },
+                    enabled = !loadingComplete,
+                    loading = loadingDismiss,
+                    variant = BecalmButtonVariant.Text,
+                )
+            }
+            return@Column
+        }
+        Column(
             modifier = Modifier.align(Alignment.End),
-            variant = BecalmButtonVariant.Secondary,
-        )
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (evidenceKind != null && evidenceId != null) {
+                    BecalmButton(
+                        text = stringResource(R.string.commitment_action_evidence),
+                        onClick = { onOpenEvidence(action.id, evidenceKind, evidenceId) },
+                        enabled = !loadingComplete && !loadingDismiss,
+                        loading = loadingEvidence,
+                        variant = BecalmButtonVariant.Text,
+                    )
+                }
+                BecalmButton(
+                    text = stringResource(R.string.schedule_action_dismiss),
+                    onClick = { onDismissAction(action.id) },
+                    enabled = !loadingComplete,
+                    loading = loadingDismiss,
+                    variant = BecalmButtonVariant.Text,
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BecalmButton(
+                    text = action.primaryVerb,
+                    onClick = {
+                        if (commitmentId != null) {
+                            onOpenCommitmentDetail(commitmentId)
+                        }
+                    },
+                    enabled = commitmentId != null && !loadingComplete && !loadingDismiss,
+                    variant = BecalmButtonVariant.Secondary,
+                )
+                BecalmButton(
+                    text = stringResource(
+                        if (calendarWriteReady) {
+                            R.string.schedule_action_add_to_calendar
+                        } else {
+                            R.string.commitment_action_complete
+                        },
+                    ),
+                    onClick = { onCompleteAction(action.id) },
+                    enabled = !loadingDismiss,
+                    loading = loadingComplete,
+                    variant = BecalmButtonVariant.Secondary,
+                )
+            }
+        }
     }
 }
 
@@ -769,9 +1068,14 @@ private fun filterScheduleTimelineItems(
     items.filter { item ->
         when (filter) {
             ScheduleStatusFilter.CANDIDATE ->
-                item is TimelineItem.Commitment &&
-                    item.itemType == CommitmentItemType.SCHEDULE &&
-                    item.scheduleStatus == CommitmentScheduleStatus.TENTATIVE
+                when (item) {
+                    is TimelineItem.Commitment ->
+                        item.itemType == CommitmentItemType.SCHEDULE &&
+                            item.scheduleStatus == CommitmentScheduleStatus.TENTATIVE
+                    is TimelineItem.CalendarEvent,
+                    is TimelineItem.Meeting,
+                    -> true
+                }
             ScheduleStatusFilter.CONFIRMED ->
                 when (item) {
                     is TimelineItem.Commitment ->
@@ -1652,10 +1956,10 @@ private fun scheduleLabel(scheduleStatus: String?): String {
 @Composable
 private fun PreviewTodayTimelineScreenWithItems() {
     BecalmTheme {
-        BecalmScaffold(title = "Today") { padding ->
+        BecalmScaffold(title = "일정") { padding ->
             EmptyState(
-                title = "Clear day ahead",
-                message = "No commitments or meetings scheduled for today.",
+                title = "일정 없음",
+                message = "예정된 일정이나 회의가 없습니다.",
                 modifier = Modifier.padding(padding),
             )
         }

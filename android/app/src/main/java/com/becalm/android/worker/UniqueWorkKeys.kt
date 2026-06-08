@@ -50,6 +50,9 @@ public object UniqueWorkKeys {
     /** Durable retry queue for backend source-participant manual/self match mirrors. */
     public const val SOURCE_PARTICIPANT_MIRROR: String = "person.source_participant_mirror"
 
+    /** Durable retry queue for first/manual-memory backend writes. */
+    public const val MANUAL_MEMORY_OUTBOX: String = "manual_memory.outbox"
+
     /** Follow-up backend mirror pagination after a source relation refresh page cap is reached. */
     public const val SOURCE_RELATION_REFRESH_PREFIX: String = "source.relation_refresh"
 

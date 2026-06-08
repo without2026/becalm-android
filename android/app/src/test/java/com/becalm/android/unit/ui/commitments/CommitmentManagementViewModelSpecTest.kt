@@ -14,10 +14,17 @@ import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentAgendaIntent
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
+import com.becalm.android.data.remote.dto.PersonActionEvidenceOriginalDetailDto
+import com.becalm.android.data.remote.dto.PersonActionEvidenceOriginalDto
+import com.becalm.android.data.remote.dto.PersonActionEvidenceRefDto
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionMutationSyncStats
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
@@ -27,6 +34,7 @@ import com.becalm.android.ui.commitments.CommitmentFilter
 import com.becalm.android.ui.commitments.CommitmentManagementViewModel
 import com.becalm.android.ui.commitments.CommitmentPersonGroupType
 import com.becalm.android.ui.commitments.CommitmentUndoSnapshot
+import com.becalm.android.ui.actions.PersonActionFeedStatusKind
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -62,14 +70,17 @@ class CommitmentManagementViewModelSpecTest {
     private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk(relaxed = true)
     private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk(relaxed = true)
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository = mockk(relaxed = true)
+    private val personActionRepository: PersonActionRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
     private val clock = FakeClock(Instant.parse("2026-05-04T03:00:00Z"))
+    private val actionSyncState = MutableStateFlow<PersonActionSyncStateEntity?>(null)
 
     @Before
     fun setUp() {
+        actionSyncState.value = null
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeDisabledCommitmentReminderIds() } returns flowOf(emptySet())
@@ -77,6 +88,19 @@ class CommitmentManagementViewModelSpecTest {
         every {
             scheduleEventLinkRepository.observeForProjectionRefs(any(), any(), any(), any())
         } returns flowOf(emptyList())
+        every { personActionRepository.observeActiveForSurface(any(), any(), any()) } returns flowOf(emptyList())
+        every { personActionRepository.observeSyncState(any(), any(), any()) } returns actionSyncState
+        coEvery { personActionRepository.refresh(any(), any()) } returns
+            BecalmResult.Success(
+                PersonActionRefreshStats(
+                    fetched = 0,
+                    deleted = 0,
+                    serverWatermark = null,
+                    recomputeState = null,
+                ),
+            )
+        coEvery { personActionRepository.completeAction(any(), any(), any()) } returns
+            BecalmResult.Success(PersonActionMutationSyncStats(queued = 1, synced = 1, retryable = 0, failed = 0))
         coEvery { sourceEventParticipantRepository.refreshSince(any(), any(), any()) } returns
             BecalmResult.Success(
                 SourceEventParticipantRepository.RefreshStats(
@@ -155,6 +179,117 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `person action complete calls backend mutation without touching commitment FSM`() = runTest {
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onCompletePersonAction("pa-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.completeAction(userId = "user-1", actionItemId = "pa-1", expectedUpdatedAt = null)
+        }
+        coVerify(exactly = 0) {
+            commitmentRepository.transitionState(any(), any())
+        }
+        assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `person action complete surfaces retryable error when backend mutation cannot be queued`() = runTest {
+        coEvery { personActionRepository.completeAction(any(), any(), any()) } returns
+            BecalmResult.Failure(BecalmError.Network(503, "unavailable"))
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onCompletePersonAction("pa-fail")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.completeAction(userId = "user-1", actionItemId = "pa-fail", expectedUpdatedAt = null)
+        }
+        assertEquals(R.string.commitments_error_action_failed, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `person action evidence fetch opens backend original detail`() = runTest {
+        coEvery {
+            personActionRepository.fetchEvidenceOriginal(
+                userId = "user-1",
+                actionItemId = "pa-1",
+                evidenceKind = "source_event",
+                evidenceId = "source-1",
+            )
+        } returns BecalmResult.Success(
+            evidenceOriginal(
+                actionItemId = "pa-1",
+                evidenceKind = "source_event",
+                evidenceId = "source-1",
+                evidenceLabel = "Gmail thread",
+                evidenceQuote = "Please send the proposal tomorrow.",
+                originalTitle = "Proposal thread",
+                originalQuote = "Full original email body",
+                localOriginalText = "Full original email body",
+                sourceType = "gmail",
+            ),
+        )
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onOpenPersonActionEvidence("pa-1", "source_event", "source-1")
+        advanceUntilIdle()
+
+        val detail = checkNotNull(viewModel.uiState.value.evidenceDetail)
+        assertEquals("pa-1", detail.actionItemId)
+        assertEquals("Gmail thread", detail.evidenceLabel)
+        assertEquals("Please send the proposal tomorrow.", detail.whyText)
+        assertEquals("Proposal thread", detail.originalTitle)
+        assertEquals("Full original email body", detail.originalText)
+        assertEquals("gmail", detail.sourceType)
+        assertNull(viewModel.uiState.value.loadingEvidenceActionId)
+        assertNull(viewModel.uiState.value.error)
+        coVerify(exactly = 1) {
+            personActionRepository.fetchEvidenceOriginal(
+                userId = "user-1",
+                actionItemId = "pa-1",
+                evidenceKind = "source_event",
+                evidenceId = "source-1",
+            )
+        }
+    }
+
+    @Test
+    fun `person action evidence fetch failure surfaces retryable error`() = runTest {
+        coEvery { personActionRepository.fetchEvidenceOriginal(any(), any(), any(), any()) } returns
+            BecalmResult.Failure(BecalmError.Network(503, "unavailable"))
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onOpenPersonActionEvidence("pa-fail", "source_event", "source-fail")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.evidenceDetail)
+        assertNull(viewModel.uiState.value.loadingEvidenceActionId)
+        assertEquals(R.string.commitments_error_evidence_failed, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `person action evidence dismiss clears opened detail`() = runTest {
+        coEvery { personActionRepository.fetchEvidenceOriginal(any(), any(), any(), any()) } returns
+            BecalmResult.Success(evidenceOriginal(actionItemId = "pa-dismiss"))
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onOpenPersonActionEvidence("pa-dismiss", "source_event", "source-event-1")
+        advanceUntilIdle()
+        assertEquals("pa-dismiss", viewModel.uiState.value.evidenceDetail?.actionItemId)
+
+        viewModel.onDismissPersonActionEvidence()
+
+        assertNull(viewModel.uiState.value.evidenceDetail)
+    }
+
+    @Test
     fun `message screenshot management rows hide import timestamp from card source context`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
@@ -209,7 +344,7 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
-    fun `CMT-002 filter tabs isolate give take and closed commitments without schedules`() = runTest {
+    fun `CMT-002 filter tabs isolate give take and normalize legacy closed without schedules`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 entity(id = "give-1", direction = "give"),
@@ -243,8 +378,6 @@ class CommitmentManagementViewModelSpecTest {
                     "give-1",
                     "give-2",
                     "take-1",
-                    "completed-1",
-                    "cancelled-1",
                 ),
                 initial.items.map { it.id },
             )
@@ -264,29 +397,18 @@ class CommitmentManagementViewModelSpecTest {
 
             viewModel.onFilterChange(CommitmentFilter.CLOSED)
             val closedOnly = awaitItem()
-            assertEquals(CommitmentFilter.CLOSED, closedOnly.filter)
-            assertEquals(listOf("completed-1", "cancelled-1"), closedOnly.items.map { it.id })
-            assertTrue(
-                closedOnly.items.all {
-                    it.actionState == CommitmentState.COMPLETED ||
-                        it.actionState == CommitmentState.CANCELLED
-                },
-            )
-
-            viewModel.onFilterChange(CommitmentFilter.ALL)
-            val allAgain = awaitItem()
-            assertEquals(CommitmentFilter.ALL, allAgain.filter)
+            assertEquals(CommitmentFilter.ALL, closedOnly.filter)
             assertEquals(
                 listOf(
                     "give-1",
                     "give-2",
                     "take-1",
-                    "completed-1",
-                    "cancelled-1",
                 ),
-                allAgain.items.map { it.id },
+                closedOnly.items.map { it.id },
             )
-            assertFalse(allAgain.items.any { it.id == "decision-1" })
+            assertTrue(closedOnly.items.none { it.actionState.isClosedForTest() })
+
+            assertFalse(closedOnly.items.any { it.id == "decision-1" })
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -572,7 +694,7 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
-    fun `CMT-009 completed and cancelled sections stay collapsed by default and toggle independently`() = runTest {
+    fun `completed and cancelled history stays hidden from action inbox even through legacy closed filter`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 entity(id = "pending-1", actionState = "pending"),
@@ -591,30 +713,58 @@ class CommitmentManagementViewModelSpecTest {
         assertEquals(true, initial.confirmedSection.expanded)
         assertEquals(true, initial.reviewSection.expanded)
         assertEquals(false, initial.pastSection.expanded)
-        assertEquals(2, initial.completedSection.count)
-        assertEquals(listOf("completed-1", "completed-2"), initial.completedSection.items.map { it.id })
-        assertEquals(false, initial.completedSection.expanded)
-        assertEquals(true, initial.completedSection.dimmed)
-        assertEquals(1, initial.cancelledSection.count)
-        assertEquals(listOf("cancelled-1"), initial.cancelledSection.items.map { it.id })
-        assertEquals(false, initial.cancelledSection.expanded)
-        assertEquals(true, initial.cancelledSection.dimmed)
+        assertEquals(0, initial.completedSection.count)
+        assertEquals(0, initial.cancelledSection.count)
+
+        viewModel.onFilterChange(CommitmentFilter.CLOSED)
+        advanceUntilIdle()
+
+        val closed = viewModel.uiState.value
+        assertEquals(CommitmentFilter.ALL, closed.filter)
+        assertEquals(listOf("pending-1"), closed.items.map { it.id })
+        assertEquals(0, closed.completedSection.count)
+        assertEquals(emptyList<String>(), closed.completedSection.items.map { it.id })
+        assertEquals(0, closed.cancelledSection.count)
+        assertEquals(emptyList<String>(), closed.cancelledSection.items.map { it.id })
 
         viewModel.onToggleCompletedSection()
         val completedExpanded = viewModel.uiState.value
-        assertEquals(true, completedExpanded.completedSection.expanded)
-        assertEquals(false, completedExpanded.cancelledSection.expanded)
+        assertEquals(0, completedExpanded.completedSection.count)
+        assertEquals(emptyList<String>(), completedExpanded.completedSection.items.map { it.id })
 
         viewModel.onToggleCancelledSection()
         val cancelledExpanded = viewModel.uiState.value
-        assertEquals(true, cancelledExpanded.completedSection.expanded)
-        assertEquals(true, cancelledExpanded.cancelledSection.expanded)
+        assertEquals(0, cancelledExpanded.cancelledSection.count)
+        assertEquals(emptyList<String>(), cancelledExpanded.cancelledSection.items.map { it.id })
 
         viewModel.onToggleReviewSection()
         assertEquals(false, viewModel.uiState.value.reviewSection.expanded)
 
         viewModel.onTogglePastSection()
         assertEquals(true, viewModel.uiState.value.pastSection.expanded)
+    }
+
+    @Test
+    fun `service lifecycle notifications stay hidden from action inbox`() = runTest {
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                entity(id = "pending-1", actionState = "pending"),
+                entity(
+                    id = "service-verification",
+                    actionState = "pending",
+                    counterpartyRaw = "Google",
+                    sourceEventTitle = "Google account verification",
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf("pending-1"), state.items.map { it.id })
+        assertEquals(listOf("pending-1"), state.activeItems.map { it.id })
+        assertFalse(state.reviewSection.items.any { it.id == "service-verification" })
     }
 
     @Test
@@ -932,13 +1082,32 @@ class CommitmentManagementViewModelSpecTest {
         coVerify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
     }
 
+    @Test
+    fun `P1-GAP-004 commitment action feed degraded state remains visible with cached rows`() = runTest {
+        actionSyncState.value = actionSyncStateEntity(
+            surfaceKey = "commitment",
+            recomputeState = "degraded",
+            capacityState = "backlog",
+            backlogLagSeconds = 180,
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        val status = viewModel.uiState.value.actionFeedStatus
+        assertEquals(PersonActionFeedStatusKind.DEGRADED, status?.kind)
+        assertEquals(180, status?.backlogLagSeconds)
+    }
+
     private fun buildViewModel(
         productAnalytics: ProductAnalyticsClient = com.becalm.android.core.analytics.NoopProductAnalyticsClient(),
+        personActionRepository: PersonActionRepository = this.personActionRepository,
     ): CommitmentManagementViewModel = CommitmentManagementViewModel(
         commitmentRepository = commitmentRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
         scheduleEventLinkRepository = scheduleEventLinkRepository,
+        personActionRepository = personActionRepository,
         workScheduler = workScheduler,
         reminderScheduler = reminderScheduler,
         userPrefsStore = userPrefsStore,
@@ -951,6 +1120,65 @@ class CommitmentManagementViewModelSpecTest {
 
     private fun propertyValue(instance: Any, name: String): Any? =
         instance::class.memberProperties.first { it.name == name }.getter.call(instance)
+
+    private fun actionSyncStateEntity(
+        surfaceKey: String,
+        recomputeState: String?,
+        capacityState: String?,
+        backlogLagSeconds: Int? = null,
+    ): PersonActionSyncStateEntity =
+        PersonActionSyncStateEntity(
+            userId = "user-1",
+            surfaceKey = surfaceKey,
+            status = "active",
+            serverWatermark = clock.nowInstant(),
+            recomputeState = recomputeState,
+            capacityState = capacityState,
+            capacityBacklogLagSeconds = backlogLagSeconds,
+            lastSyncedAt = clock.nowInstant(),
+            updatedAt = clock.nowInstant(),
+        )
+
+    private fun evidenceOriginal(
+        actionItemId: String = "pa-1",
+        evidenceKind: String = "source_event",
+        evidenceId: String = "source-event-1",
+        evidenceLabel: String = "Gmail thread",
+        evidenceQuote: String? = "Please send the proposal tomorrow.",
+        originalTitle: String? = "Proposal thread",
+        originalQuote: String? = "Please send the proposal tomorrow.",
+        originalSnippet: String? = "Proposal thread snippet",
+        localOriginalText: String? = null,
+        sourceType: String? = "gmail",
+    ): PersonActionEvidenceOriginalDto =
+        PersonActionEvidenceOriginalDto(
+            actionItemId = actionItemId,
+            actionStatus = "active",
+            evidence = PersonActionEvidenceRefDto(
+                kind = evidenceKind,
+                id = evidenceId,
+                sourceRef = "gmail-thread-1",
+                occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                label = evidenceLabel,
+                quote = evidenceQuote,
+            ),
+            original = PersonActionEvidenceOriginalDetailDto(
+                kind = evidenceKind,
+                id = evidenceId,
+                originalAvailable = true,
+                status = "metadata_resolved",
+                sourceType = sourceType,
+                sourceRef = "gmail-thread-1",
+                title = originalTitle,
+                snippet = originalSnippet,
+                quote = originalQuote,
+                occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                rawBodyIncluded = false,
+                localOriginalTitle = originalTitle,
+                localOriginalText = localOriginalText,
+            ),
+            resolvedAt = Instant.parse("2026-06-03T04:05:00Z"),
+        )
 
     private fun entity(
         id: String,
@@ -1049,6 +1277,9 @@ class CommitmentManagementViewModelSpecTest {
             createdAt = Instant.parse("2026-05-04T03:00:00Z"),
             updatedAt = Instant.parse("2026-05-04T03:00:00Z"),
         )
+
+    private fun CommitmentState.isClosedForTest(): Boolean =
+        this == CommitmentState.COMPLETED || this == CommitmentState.CANCELLED
 
     private class RecordingProductAnalyticsClient : ProductAnalyticsClient {
         val events: MutableList<ProductAnalyticsEvent> = mutableListOf()

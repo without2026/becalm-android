@@ -1,5 +1,6 @@
 package com.becalm.android.integration.local.data.repository
 
+import androidx.work.ListenableWorker
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -7,17 +8,22 @@ import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.remote.api.RailwayApi
+import com.becalm.android.data.remote.dto.ManualMemoryCreateRequestDto
 import com.becalm.android.data.remote.dto.ManualMemoryCreateResponseDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.FirstMemoryRepositoryImpl
+import com.becalm.android.data.repository.ManualMemoryOutboxSyncEngine
 import com.becalm.android.domain.onboarding.FirstMemoryInput
 import com.becalm.android.domain.onboarding.FirstMemoryKind
 import com.becalm.android.domain.onboarding.FirstMemoryOrigin
 import com.becalm.android.domain.person.SourceInteractionKind
 import com.becalm.android.integration.local.LocalIntegrationSupport
+import com.becalm.android.worker.ManualMemoryOutboxWorker
+import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -42,12 +48,22 @@ class FirstMemoryRepositoryLocalIntegrationTest {
     }
     private val api: RailwayApi = mockk()
     private val logger: Logger = mockk(relaxed = true)
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
+    private val manualMemoryOutboxSyncEngine = ManualMemoryOutboxSyncEngine(
+        databaseProvider = databaseProvider,
+        outboxDao = db.manualMemoryOutboxDao(),
+        commitmentDao = db.commitmentDao(),
+        api = api,
+        logger = logger,
+    )
     private val repository = FirstMemoryRepositoryImpl(
         userPrefsStore = userPrefsStore,
         databaseProvider = databaseProvider,
         commitmentDao = db.commitmentDao(),
         personIndexDao = db.personIndexDao(),
-        api = api,
+        manualMemoryOutboxDao = db.manualMemoryOutboxDao(),
+        manualMemoryOutboxSyncEngine = manualMemoryOutboxSyncEngine,
+        workScheduler = workScheduler,
         logger = logger,
         ioDispatcher = UnconfinedTestDispatcher(),
     )
@@ -84,6 +100,7 @@ class FirstMemoryRepositoryLocalIntegrationTest {
         assertEquals(SourceType.MANUAL, commitment?.sourceType)
         assertEquals("synced", commitment?.syncStatus)
         assertEquals("give", commitment?.direction)
+        assertTrue(db.manualMemoryOutboxDao().findPendingForUser(USER_ID, limit = 10).isEmpty())
         assertEquals(1, participants.size)
         assertEquals(2, interactions.size)
         assertEquals(1, interactions.count { it.interactionKind == "commitment" })
@@ -134,11 +151,51 @@ class FirstMemoryRepositoryLocalIntegrationTest {
         val commitment = db.commitmentDao().findByIdForUser(USER_ID, commitmentId)
         assertEquals("manual_pending", commitment?.syncStatus)
         assertEquals("수진", db.personIndexDao().findPersonForMemory(USER_ID, success.value.personId)?.displayName)
+        val outbox = db.manualMemoryOutboxDao().findByKey(USER_ID, "client-offline")
+        assertEquals("client-offline", outbox?.clientMemoryId)
+        assertEquals(commitmentId, outbox?.commitmentId)
+        assertEquals("manual_memory:client-offline", outbox?.sourceRef)
+        verify(exactly = 1) { workScheduler.enqueueManualMemoryOutboxRetry() }
+    }
+
+    @Test
+    fun `manual memory outbox worker drains deferred first memory with backend idempotency key`() = runTest {
+        coEvery { api.createManualMemory(any(), any()) } throws java.io.IOException("offline")
+        val input = FirstMemoryInput(
+            clientMemoryId = "client-worker-retry",
+            origin = FirstMemoryOrigin.EMAIL,
+            personName = "하린",
+            promiseText = "월요일 오전까지 온보딩 자료 보내기",
+            kind = FirstMemoryKind.MY_ACTION,
+            dueHint = null,
+        )
+        val result = repository.save(input)
+        assertTrue(result is BecalmResult.Success)
+        val commitmentId = (result as BecalmResult.Success).value.commitmentId
+        assertEquals("manual_pending", db.commitmentDao().findByIdForUser(USER_ID, commitmentId)?.syncStatus)
+
+        coEvery { api.createManualMemory(any(), any()) } coAnswers {
+            val request = secondArg<ManualMemoryCreateRequestDto>()
+            Response.success(
+                ManualMemoryCreateResponseDto(
+                    personId = request.personId,
+                    commitmentId = request.commitmentId,
+                    sourceRef = "manual_memory:${request.clientMemoryId}",
+                    created = false,
+                ),
+            )
+        }
+
+        val workerResult = newManualMemoryOutboxWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, workerResult.javaClass)
+        assertTrue(db.manualMemoryOutboxDao().findPendingForUser(USER_ID, limit = 10).isEmpty())
+        assertEquals("synced", db.commitmentDao().findByIdForUser(USER_ID, commitmentId)?.syncStatus)
     }
 
     private fun stubRemoteSuccess() {
         coEvery { api.createManualMemory(any(), any()) } coAnswers {
-            val request = secondArg<com.becalm.android.data.remote.dto.ManualMemoryCreateRequestDto>()
+            val request = secondArg<ManualMemoryCreateRequestDto>()
             Response.success(
                 ManualMemoryCreateResponseDto(
                     personId = request.personId,
@@ -149,6 +206,17 @@ class FirstMemoryRepositoryLocalIntegrationTest {
             )
         }
     }
+
+    private fun newManualMemoryOutboxWorker(): ManualMemoryOutboxWorker =
+        ManualMemoryOutboxWorker(
+            appContext = LocalIntegrationSupport.appContext(),
+            workerParams = LocalIntegrationSupport.workerParams(),
+            userPrefsStore = userPrefsStore,
+            outboxDao = db.manualMemoryOutboxDao(),
+            syncEngine = manualMemoryOutboxSyncEngine,
+            logger = logger,
+            ioDispatcher = UnconfinedTestDispatcher(),
+        )
 
     private companion object {
         private const val USER_ID = "user-first-memory"

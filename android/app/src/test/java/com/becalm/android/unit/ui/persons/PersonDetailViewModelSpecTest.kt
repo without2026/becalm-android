@@ -2,23 +2,43 @@ package com.becalm.android.unit.ui.persons
 
 import androidx.lifecycle.SavedStateHandle
 import com.becalm.android.R
+import com.becalm.android.core.result.BecalmError
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.ManualMemoryOutboxDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.ManualMemoryOutboxEntity
+import com.becalm.android.data.local.db.entity.ManualMemoryOutboxSyncStatus
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
+import com.becalm.android.data.remote.dto.PersonActionDraftDto
+import com.becalm.android.data.remote.dto.PersonActionDraftProvenanceDto
+import com.becalm.android.data.remote.dto.PersonActionDraftSafetyDto
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.PersonActionDraftEvidenceRef
+import com.becalm.android.data.repository.PersonActionMutationSyncStats
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.ui.persons.ARG_PERSON_ID
+import com.becalm.android.ui.persons.ManualMemorySyncStatusKind
+import com.becalm.android.ui.persons.PersonActionDraftSheetStatus
 import com.becalm.android.ui.persons.PersonDetailViewModel
+import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -42,6 +62,10 @@ class PersonDetailViewModelSpecTest {
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk()
     private val personIndexDao: PersonIndexDao = mockk()
     private val rawIngestionEventDao: RawIngestionEventDao = mockk()
+    private val personActionRepository: PersonActionRepository = mockk(relaxed = true)
+    private val manualMemoryOutboxDao: ManualMemoryOutboxDao = mockk(relaxed = true)
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
+    private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
 
@@ -52,8 +76,21 @@ class PersonDetailViewModelSpecTest {
         every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
         every { personIndexDao.observeIdentitiesForPerson(any(), any()) } returns flowOf(emptyList())
         every { personIndexDao.observeInteractionsForPerson(any(), any(), any()) } returns flowOf(emptyList())
+        every { personActionRepository.observeActiveForPerson(any(), any(), any()) } returns flowOf(emptyList())
+        every { manualMemoryOutboxDao.observeForPerson(any(), any()) } returns flowOf(emptyList())
+        coEvery { personActionRepository.refresh(any(), any()) } returns
+            BecalmResult.Success(
+                PersonActionRefreshStats(
+                    fetched = 0,
+                    deleted = 0,
+                    serverWatermark = null,
+                    recomputeState = null,
+                ),
+            )
+        coEvery { manualMemoryOutboxDao.markFailedForPersonPending(any(), any(), any()) } returns 0
         coEvery { rawIngestionEventDao.findByIdsForUser(any(), any()) } returns emptyList()
         coEvery { rawIngestionEventDao.findBySourceRefsForUser(any(), any()) } returns emptyList()
+        coEvery { userPrefsStore.setCommitmentReminderDisabled(any(), any()) } returns Unit
     }
 
     @After
@@ -222,6 +259,33 @@ class PersonDetailViewModelSpecTest {
 
         val titles = viewModel.uiState.value.sourceEventCards.map { it.title }
         assertEquals(listOf("yesterday", "old"), titles)
+    }
+
+    @Test
+    fun `failed manual memory outbox is visible and retry reenqueues worker`() = runTest {
+        val personId = "person-1"
+        every { manualMemoryOutboxDao.observeForPerson("user-1", personId) } returns MutableStateFlow(
+            listOf(manualMemoryOutbox(personId = personId, syncStatus = ManualMemoryOutboxSyncStatus.FAILED)),
+        )
+        coEvery {
+            manualMemoryOutboxDao.markFailedForPersonPending(userId = "user-1", personId = personId, updatedAt = any())
+        } returns 1
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val status = viewModel.uiState.value.manualMemorySyncStatus
+        assertEquals(ManualMemorySyncStatusKind.FAILED, status?.kind)
+        assertEquals(1, status?.failedCount)
+
+        viewModel.onRetryManualMemorySync()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            manualMemoryOutboxDao.markFailedForPersonPending(userId = "user-1", personId = personId, updatedAt = any())
+        }
+        verify(exactly = 1) { workScheduler.enqueueManualMemoryOutboxRetry(initialDelaySeconds = 0L) }
+        assertFalse(viewModel.uiState.value.retryingManualMemorySync)
     }
 
     @Test
@@ -433,11 +497,407 @@ class PersonDetailViewModelSpecTest {
         assertEquals(1, state.sourceEventCards.size)
     }
 
+    @Test
+    fun `person action completion patches backend action and refreshes person feed`() = runTest {
+        val personId = "person-1"
+        coEvery {
+            personActionRepository.completeAction(
+                userId = "user-1",
+                actionItemId = "pa-1",
+                expectedUpdatedAt = null,
+            )
+        } returns BecalmResult.Success(PersonActionMutationSyncStats(queued = 1, synced = 1, retryable = 0, failed = 0))
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        viewModel.onCompletePersonAction("pa-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.completeAction(
+                userId = "user-1",
+                actionItemId = "pa-1",
+                expectedUpdatedAt = null,
+            )
+        }
+        coVerify(exactly = 2) {
+            personActionRepository.refresh(userId = "user-1", surface = "person")
+        }
+        assertNull(viewModel.uiState.value.loadingCompleteActionId)
+        assertEquals(R.string.person_action_complete_success, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `person action dismissal patches backend action and refreshes person feed`() = runTest {
+        val personId = "person-1"
+        coEvery {
+            personActionRepository.dismissAction(
+                userId = "user-1",
+                actionItemId = "pa-1",
+                reason = "not_actionable",
+                expectedUpdatedAt = null,
+            )
+        } returns BecalmResult.Success(PersonActionMutationSyncStats(queued = 1, synced = 1, retryable = 0, failed = 0))
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        viewModel.onDismissPersonAction("pa-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.dismissAction(
+                userId = "user-1",
+                actionItemId = "pa-1",
+                reason = "not_actionable",
+                expectedUpdatedAt = null,
+            )
+        }
+        coVerify(exactly = 2) {
+            personActionRepository.refresh(userId = "user-1", surface = "person")
+        }
+        assertNull(viewModel.uiState.value.loadingDismissActionId)
+        assertEquals(R.string.person_action_dismiss_success, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `person action reminder snoozes backend action and schedules local commitment alarm`() = runTest {
+        val personId = "person-1"
+        val dueAt = Instant.parse("2030-01-02T03:00:00Z")
+        val expectedSnoozeUntil = Instant.parse("2030-01-01T03:00:00Z")
+        every {
+            personActionRepository.observeActiveForPerson("user-1", personId, any())
+        } returns flowOf(
+            listOf(
+                personActionEntity(
+                    id = "pa-remind-1",
+                    personId = personId,
+                    commitmentId = "commitment-remind-1",
+                    dueAt = dueAt,
+                    reasonCodesCsv = "source:gmail,direction:take,waiting_on",
+                ),
+            ),
+        )
+        coEvery {
+            personActionRepository.snoozeAction(
+                userId = "user-1",
+                actionItemId = "pa-remind-1",
+                snoozedUntil = expectedSnoozeUntil,
+                reason = "user_reminder",
+                expectedUpdatedAt = null,
+            )
+        } returns BecalmResult.Success(PersonActionMutationSyncStats(queued = 1, synced = 1, retryable = 0, failed = 0))
+        coEvery { reminderScheduler.schedule(any(), any()) } returns Unit
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        viewModel.onRemindPersonAction("pa-remind-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.snoozeAction(
+                userId = "user-1",
+                actionItemId = "pa-remind-1",
+                snoozedUntil = expectedSnoozeUntil,
+                reason = "user_reminder",
+                expectedUpdatedAt = null,
+            )
+        }
+        coVerify(exactly = 1) { userPrefsStore.setCommitmentReminderDisabled("commitment-remind-1", false) }
+        coVerify(exactly = 1) { reminderScheduler.schedule("commitment-remind-1", dueAt) }
+        coVerify(exactly = 2) {
+            personActionRepository.refresh(userId = "user-1", surface = "person")
+        }
+        assertNull(viewModel.uiState.value.loadingReminderActionId)
+        assertEquals(R.string.person_action_reminder_scheduled, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `person action draft opens editable sheet from backend draft`() = runTest {
+        val personId = "person-1"
+        every {
+            personActionRepository.observeActiveForPerson("user-1", personId, any())
+        } returns flowOf(
+            listOf(
+                personActionEntity(
+                    id = "pa-draft-1",
+                    personId = personId,
+                    commitmentId = "commitment-1",
+                    dueAt = null,
+                    reasonCodesCsv = "source:gmail,waiting_on",
+                    actionKind = "follow_up",
+                    primaryEvidenceKind = "source_event",
+                    primaryEvidenceId = "source-event-1",
+                    primaryEvidenceLabel = "Gmail thread",
+                ),
+            ),
+        )
+        coEvery {
+            personActionRepository.generateDraft(
+                userId = "user-1",
+                actionItemId = "pa-draft-1",
+                draftKind = "follow_up",
+                channel = "email",
+                evidenceRefs = listOf(PersonActionDraftEvidenceRef(kind = "source_event", evidenceId = "source-event-1")),
+                userInstruction = null,
+            )
+        } returns BecalmResult.Success(draftDto(actionItemId = "pa-draft-1", draftKind = "follow_up"))
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        viewModel.onOpenPersonActionDraft("pa-draft-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            personActionRepository.generateDraft(
+                userId = "user-1",
+                actionItemId = "pa-draft-1",
+                draftKind = "follow_up",
+                channel = "email",
+                evidenceRefs = listOf(PersonActionDraftEvidenceRef(kind = "source_event", evidenceId = "source-event-1")),
+                userInstruction = null,
+            )
+        }
+        val draftSheet = requireNotNull(viewModel.uiState.value.draftSheet)
+        assertEquals(PersonActionDraftSheetStatus.READY, draftSheet.status)
+        assertEquals("Jane Kim proposal reply", draftSheet.subject)
+        assertEquals("Jane님, 제안서 확인했습니다.", draftSheet.body)
+        assertEquals(listOf("Gmail thread"), draftSheet.provenanceLabels)
+        assertTrue(draftSheet.requiresUserReview)
+        assertNull(viewModel.uiState.value.loadingDraftActionId)
+
+        viewModel.onDraftSubjectChange("수정 제목")
+        viewModel.onDraftBodyChange("수정 본문")
+        assertEquals("수정 제목", viewModel.uiState.value.draftSheet?.subject)
+        assertEquals("수정 본문", viewModel.uiState.value.draftSheet?.body)
+
+        viewModel.onDismissPersonActionDraft()
+        assertNull(viewModel.uiState.value.draftSheet)
+    }
+
+    @Test
+    fun `person action draft network failure shows retryable sheet and retries`() = runTest {
+        val personId = "person-1"
+        every {
+            personActionRepository.observeActiveForPerson("user-1", personId, any())
+        } returns flowOf(
+            listOf(
+                personActionEntity(
+                    id = "pa-draft-1",
+                    personId = personId,
+                    commitmentId = "commitment-1",
+                    dueAt = null,
+                    reasonCodesCsv = "source:gmail,waiting_on",
+                    actionKind = "reply",
+                    primaryEvidenceKind = "source_event",
+                    primaryEvidenceId = "source-event-1",
+                ),
+            ),
+        )
+        coEvery {
+            personActionRepository.generateDraft(
+                userId = "user-1",
+                actionItemId = "pa-draft-1",
+                draftKind = "reply",
+                channel = "email",
+                evidenceRefs = listOf(PersonActionDraftEvidenceRef(kind = "source_event", evidenceId = "source-event-1")),
+                userInstruction = null,
+            )
+        } returns BecalmResult.Failure(BecalmError.Network(0, "timeout"))
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        viewModel.onOpenPersonActionDraft("pa-draft-1")
+        advanceUntilIdle()
+
+        var draftSheet = requireNotNull(viewModel.uiState.value.draftSheet)
+        assertEquals(PersonActionDraftSheetStatus.ERROR, draftSheet.status)
+        assertEquals(R.string.person_action_draft_failed, draftSheet.error?.resId)
+        assertTrue(draftSheet.canRetry)
+
+        viewModel.onRetryPersonActionDraft()
+        advanceUntilIdle()
+
+        draftSheet = requireNotNull(viewModel.uiState.value.draftSheet)
+        assertEquals(PersonActionDraftSheetStatus.ERROR, draftSheet.status)
+        coVerify(exactly = 2) {
+            personActionRepository.generateDraft(
+                userId = "user-1",
+                actionItemId = "pa-draft-1",
+                draftKind = "reply",
+                channel = "email",
+                evidenceRefs = listOf(PersonActionDraftEvidenceRef(kind = "source_event", evidenceId = "source-event-1")),
+                userInstruction = null,
+            )
+        }
+    }
+
+    @Test
+    fun `P1-GAP-002 person action draft timeout preserves existing local edits`() = runTest {
+        val personId = "person-1"
+        every {
+            personActionRepository.observeActiveForPerson("user-1", personId, any())
+        } returns flowOf(
+            listOf(
+                personActionEntity(
+                    id = "pa-draft-1",
+                    personId = personId,
+                    commitmentId = "commitment-1",
+                    dueAt = null,
+                    reasonCodesCsv = "source:gmail,waiting_on",
+                    actionKind = "reply",
+                    primaryEvidenceKind = "source_event",
+                    primaryEvidenceId = "source-event-1",
+                ),
+            ),
+        )
+        coEvery {
+            personActionRepository.generateDraft(
+                userId = "user-1",
+                actionItemId = "pa-draft-1",
+                draftKind = "reply",
+                channel = "email",
+                evidenceRefs = listOf(PersonActionDraftEvidenceRef(kind = "source_event", evidenceId = "source-event-1")),
+                userInstruction = null,
+            )
+        } returnsMany listOf(
+            BecalmResult.Success(draftDto(actionItemId = "pa-draft-1", draftKind = "reply")),
+            BecalmResult.Failure(BecalmError.Network(0, "timeout")),
+        )
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        viewModel.onOpenPersonActionDraft("pa-draft-1")
+        advanceUntilIdle()
+        viewModel.onDraftSubjectChange("사용자가 고친 제목")
+        viewModel.onDraftBodyChange("사용자가 고친 본문")
+
+        viewModel.onOpenPersonActionDraft("pa-draft-1")
+        advanceUntilIdle()
+
+        val draftSheet = requireNotNull(viewModel.uiState.value.draftSheet)
+        assertEquals(PersonActionDraftSheetStatus.READY, draftSheet.status)
+        assertEquals("사용자가 고친 제목", draftSheet.subject)
+        assertEquals("사용자가 고친 본문", draftSheet.body)
+        assertEquals(R.string.person_action_draft_failed, draftSheet.error?.resId)
+        assertTrue(draftSheet.canRetry)
+        assertNull(viewModel.uiState.value.loadingDraftActionId)
+        coVerify(exactly = 2) {
+            personActionRepository.generateDraft(
+                userId = "user-1",
+                actionItemId = "pa-draft-1",
+                draftKind = "reply",
+                channel = "email",
+                evidenceRefs = listOf(PersonActionDraftEvidenceRef(kind = "source_event", evidenceId = "source-event-1")),
+                userInstruction = null,
+            )
+        }
+    }
+
+    @Test
+    fun `P1-GAP-002 person action draft unauthorized opens auth required sheet without retry`() = runTest {
+        val personId = "person-1"
+        every {
+            personActionRepository.observeActiveForPerson("user-1", personId, any())
+        } returns flowOf(
+            listOf(
+                personActionEntity(
+                    id = "pa-draft-auth",
+                    personId = personId,
+                    commitmentId = "commitment-1",
+                    dueAt = null,
+                    reasonCodesCsv = "source:gmail,waiting_on",
+                    actionKind = "reply",
+                    primaryEvidenceKind = "source_event",
+                    primaryEvidenceId = "source-event-1",
+                ),
+            ),
+        )
+        coEvery {
+            personActionRepository.generateDraft(
+                userId = "user-1",
+                actionItemId = "pa-draft-auth",
+                draftKind = "reply",
+                channel = "email",
+                evidenceRefs = listOf(PersonActionDraftEvidenceRef(kind = "source_event", evidenceId = "source-event-1")),
+                userInstruction = null,
+            )
+        } returns BecalmResult.Failure(BecalmError.Unauthorized)
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        viewModel.onOpenPersonActionDraft("pa-draft-auth")
+        advanceUntilIdle()
+
+        val draftSheet = requireNotNull(viewModel.uiState.value.draftSheet)
+        assertEquals(PersonActionDraftSheetStatus.AUTH_REQUIRED, draftSheet.status)
+        assertEquals(R.string.person_action_draft_auth_failed, draftSheet.error?.resId)
+        assertFalse(draftSheet.canRetry)
+        assertNull(viewModel.uiState.value.loadingDraftActionId)
+        coVerify(exactly = 1) {
+            personActionRepository.generateDraft(
+                userId = "user-1",
+                actionItemId = "pa-draft-auth",
+                draftKind = "reply",
+                channel = "email",
+                evidenceRefs = listOf(PersonActionDraftEvidenceRef(kind = "source_event", evidenceId = "source-event-1")),
+                userInstruction = null,
+            )
+        }
+    }
+
+    @Test
+    fun `unsupported person action draft opens unsupported sheet without backend call`() = runTest {
+        val personId = "person-1"
+        every {
+            personActionRepository.observeActiveForPerson("user-1", personId, any())
+        } returns flowOf(
+            listOf(
+                personActionEntity(
+                    id = "pa-review-1",
+                    personId = personId,
+                    commitmentId = null,
+                    dueAt = null,
+                    reasonCodesCsv = "review_match",
+                    actionKind = "review_match",
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        viewModel.onOpenPersonActionDraft("pa-review-1")
+        advanceUntilIdle()
+
+        val draftSheet = requireNotNull(viewModel.uiState.value.draftSheet)
+        assertEquals(PersonActionDraftSheetStatus.UNSUPPORTED, draftSheet.status)
+        assertEquals(R.string.person_action_draft_unsupported, draftSheet.error?.resId)
+        coVerify(exactly = 0) {
+            personActionRepository.generateDraft(
+                userId = any(),
+                actionItemId = any(),
+                draftKind = any(),
+                channel = any(),
+                evidenceRefs = any(),
+                userInstruction = any(),
+            )
+        }
+    }
+
     private fun buildViewModel(personId: String): PersonDetailViewModel =
         PersonDetailViewModel(
             personEnrichmentRepository = personEnrichmentRepository,
             personIndexDao = personIndexDao,
             rawIngestionEventDao = rawIngestionEventDao,
+            personActionRepository = personActionRepository,
+            manualMemoryOutboxDao = manualMemoryOutboxDao,
+            workScheduler = workScheduler,
+            reminderScheduler = reminderScheduler,
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
             logger = logger,
@@ -493,5 +953,102 @@ class PersonDetailViewModelSpecTest {
             title = title,
             snippet = snippet,
             confidence = 1.0,
+        )
+
+    private fun personActionEntity(
+        id: String,
+        personId: String,
+        commitmentId: String?,
+        dueAt: Instant?,
+        reasonCodesCsv: String,
+        actionKind: String = "follow_up",
+        primaryEvidenceKind: String? = null,
+        primaryEvidenceId: String? = null,
+        primaryEvidenceLabel: String? = null,
+    ): PersonActionItemCacheEntity =
+        PersonActionItemCacheEntity(
+            id = id,
+            userId = "user-1",
+            personId = personId,
+            personDisplayName = "Alice",
+            personSortKey = "alice",
+            surfacesCsv = "person,commitment",
+            actionKind = actionKind,
+            status = "active",
+            title = "의견서 회신 받기",
+            primaryVerb = "리마인드",
+            shortReason = "기한: 2030-01-02",
+            commitmentId = commitmentId,
+            calendarEventId = null,
+            sourceEventId = "source-event-1",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-message-1",
+            dueAt = dueAt,
+            dueHint = "2030-01-02",
+            dueIsApproximate = false,
+            staleAfter = null,
+            urgencyScore = 92.0,
+            importanceScore = 70.0,
+            confidence = 0.9,
+            reasonCodesCsv = reasonCodesCsv,
+            inputWatermark = Instant.parse("2026-06-03T02:00:00Z"),
+            serverWatermark = Instant.parse("2026-06-03T03:00:00Z"),
+            computedAt = Instant.parse("2026-06-03T02:00:01Z"),
+            updatedAt = Instant.parse("2026-06-03T02:00:02Z"),
+            snoozedUntil = null,
+            completedAt = null,
+            dismissedAt = null,
+            primaryEvidenceKind = primaryEvidenceKind,
+            primaryEvidenceId = primaryEvidenceId,
+            primaryEvidenceLabel = primaryEvidenceLabel,
+        )
+
+    private fun draftDto(
+        actionItemId: String,
+        draftKind: String,
+    ): PersonActionDraftDto =
+        PersonActionDraftDto(
+            draftId = "draft-1",
+            actionItemId = actionItemId,
+            draftKind = draftKind,
+            channel = "email",
+            status = "ready",
+            subject = "Jane Kim proposal reply",
+            body = "Jane님, 제안서 확인했습니다.",
+            provenance = listOf(
+                PersonActionDraftProvenanceDto(
+                    kind = "source_event",
+                    evidenceId = "source-event-1",
+                    label = "Gmail thread",
+                ),
+            ),
+            safety = PersonActionDraftSafetyDto(
+                containsSourceQuote = false,
+                requiresUserReview = true,
+            ),
+            generatedAt = Instant.parse("2026-06-03T04:05:00Z"),
+        )
+
+    private fun manualMemoryOutbox(
+        personId: String,
+        syncStatus: String,
+    ): ManualMemoryOutboxEntity =
+        ManualMemoryOutboxEntity(
+            userId = "user-1",
+            clientMemoryId = "client-1",
+            personId = personId,
+            commitmentId = "commitment-1",
+            sourceRef = "manual_memory:client-1",
+            personDisplayName = "Alice",
+            originChannel = "email",
+            memoryKind = "my_action",
+            title = "자료 보내기",
+            occurredAt = Instant.fromEpochMilliseconds(3_000),
+            dueAt = null,
+            dueHint = null,
+            payloadHash = "hash",
+            syncStatus = syncStatus,
+            createdAt = Instant.fromEpochMilliseconds(3_000),
+            updatedAt = Instant.fromEpochMilliseconds(3_000),
         )
 }

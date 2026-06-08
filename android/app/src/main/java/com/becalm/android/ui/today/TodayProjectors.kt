@@ -14,6 +14,7 @@ import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.isActive
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
+import com.becalm.android.ui.actions.personActionFeedStatusFor
 import com.becalm.android.ui.actions.toPersonActionItemUi
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.components.isCalendarSource
@@ -166,6 +167,7 @@ internal object TodaySyncProjector {
             personFocus = emptyList(),
             scheduleActions = snapshot.scheduleActions
                 .map { it.toPersonActionItemUi() },
+            scheduleActionFeedStatus = personActionFeedStatusFor(snapshot.scheduleActionSyncState),
             scheduleRangeFilter = snapshot.rangeFilter,
             today = snapshot.today,
             scheduleConflictReviewItems = buildScheduleConflictReviewItems(

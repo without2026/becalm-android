@@ -56,7 +56,7 @@ behaviors:
   - id: ENR-006
     type: lifecycle
     description: "매칭 실패 fallback — persons_enrichment에 해당 person_ref 레코드가 없으면 UI에서 person_ref 원본값(전화번호/이메일/표시이름)을 그대로 표시한다"
-    trigger: "PersonsScreen 또는 CommitmentManagementScreen 렌더링 시 persons_enrichment 조인 결과 없음"
+    trigger: "PersonsScreen 또는 CommitmentActionInboxScreen 렌더링 시 persons_enrichment 조인 결과 없음"
     precondition: "Room에 person_ref='unknown@domain.com' 이벤트 존재. persons_enrichment에 해당 레코드 없음"
     expected: "UI에서 'unknown@domain.com' 그대로 표시됨. 크래시 없음. 앱 기능 정상 동작"
     source: phase2-acceptance

@@ -17,17 +17,44 @@ version: 1
 # 별도 status chip을 만들지 않는다.
 #
 # Error envelope for all Railway endpoints:
-#   4xx/5xx: { error: string, message: string, request_id?: string }
+#   4xx/5xx: { error: string, message: string, request_id?: string, retryable?: boolean, retry_after_seconds?: int, client_action?: string }
+# Android must not infer retryability from status code alone when retryable/client_action are present.
+# Beta cutover rule:
+#   - Every Android-facing Railway endpoint consumed during beta MUST return ErrorEnvelope for non-2xx.
+#   - Legacy {error,message} shapes are tolerated only if Android ApiErrorNormalizer maps them to ClientRecoverableError.
+#   - Empty/malformed 5xx/429/network errors are retryable by default and must not crash UI or workers.
+#   - A non-retryable error must carry a user repair, support, upgrade, discard, or feature-disable path.
+# client_action values:
+#   retry_later | full_refresh | login | reconnect_source | open_source_settings | review_quarantine |
+#   refresh_action | discard_local_mutation | fix_input | upgrade_app | contact_support |
+#   disable_feature | force_upgrade | maintenance_wait | report_issue
 # Rate limiting: HTTP 429 with Retry-After header (seconds).
 # Write success semantics for every Railway insert/update endpoint:
 #   - HTTP 200/201 = durable commit completed in user-scoped server storage.
 #   - HTTP 202 = accepted/queued only and MUST NOT be treated as synced by Android.
 #   - Batch write endpoints MUST return row-level results keyed by client-generated ids; count-only ack is forbidden.
 #
+# Robust backend API rules for the person-action feed:
+#   - A source/commitment/calendar/person/correction write that returns durable success and can affect actions
+#     must have already enqueued or coalesced backend recomputation.
+#   - GET /v1/person_action_items delta responses are snapshot-consistent and include rows, deleted_ids,
+#     server_watermark, input_watermarks, and recompute_state together.
+#   - PATCH/feedback requests use client_mutation_id as the idempotency key. Same key+payload returns the
+#     committed result; same key with different payload returns 409 idempotency_conflict.
+#   - Android advances person_action_sync_state watermarks only after transactional apply and never locally generates
+#     replacement actions on 404/429/503.
+#   - Retryability is contract data carried by ErrorEnvelope/Retry-After, not a client guess from status code.
+#
 # REST + CRUD ownership pattern:
-#   - Android Room/local files are the canonical client-side source of truth for user-visible data.
-#   - Resource endpoints are CRUD mirrors/coordinators. Android writes locally first, marks rows
-#     sync_status='pending', then mirrors via Railway REST. UI reads Room projections first.
+#   - Source origin and product-decision ownership are separate.
+#   - Android Room/local files are the canonical client-side source of truth for device-owned
+#     source originals, mutation outboxes, and local projection caches.
+#   - Backend Railway is the product decision owner for person action items: urgency, grouping,
+#     ranking, and action state are computed server-side and mirrored into Android cache.
+#   - Resource endpoints are CRUD mirrors/coordinators for source facts. Android writes local-origin
+#     rows locally first, marks rows
+#     sync_status='pending', then mirrors bounded structured context via Railway REST. UI may render
+#     only the last backend-computed action cache while sync is pending.
 #   - Resource create/update/delete must be represented as POST/PATCH/DELETE-or-soft-delete on
 #     resource endpoints, never as ad hoc command endpoints.
 #   - Command endpoints are reserved for non-resource work such as extraction, provider sync,
@@ -40,6 +67,14 @@ auth: bearer_jwt
 
 # Shared types
 types:
+  ErrorEnvelope:
+    error: string
+    message: string
+    request_id?: string
+    retryable?: boolean
+    retry_after_seconds?: int
+    client_action?: string
+
   FailedEvent:
     client_event_id: uuid       # 실패한 이벤트의 멱등 키
     reason: string              # "schema_invalid" | "source_type_unknown" | "timestamp_parse_error" | "internal_error"
@@ -117,6 +152,12 @@ types:
     connected: boolean
     account_email?: string
     display_name?: string
+    sync_state?: string          # idle | queued | running | synced | needs_reauth | failed_retryable | failed_terminal
+    job_id?: uuid
+    retry_after_seconds?: int
+    last_sync_at?: datetime
+    last_error_code?: string
+    # connected=true means token/connection row exists. synced requires terminal provider fetch + durable persistence + Android mirror refresh.
 
   MailOAuthStart:
     provider: string
@@ -129,6 +170,23 @@ types:
     connected: boolean
     account_email?: string
     display_name?: string
+    sync_state?: string          # idle | queued | running | synced | needs_reauth | failed_retryable | failed_terminal
+    job_id?: uuid
+    retry_after_seconds?: int
+    last_sync_at?: datetime
+    last_error_code?: string
+    # connected=true means token/connection row exists. synced requires terminal provider fetch + durable persistence + Android mirror refresh.
+
+  SourceSyncTriggerResponse:
+    accepted: boolean
+    synced?: int                 # legacy compatibility count; not sufficient for terminal sync proof
+    job_id?: uuid
+    status: string               # queued | running | succeeded | retry | needs_reauth | failed_terminal
+    retry_after_seconds?: int
+    source_type?: string
+    provider?: string
+    counts?: object
+    # Android treats accepted/queued/running as background work only. It must not mark source synced or refresh action watermarks until terminal succeeded + mirror refresh.
 
   SourceExtractedItem:
     type: string              # "action" | "schedule" | "decision"
@@ -173,7 +231,221 @@ types:
     deleted_at?: datetime
     supersedes_commitment_id?: uuid
 
+  PersonActionEvidenceRef:
+    kind: string              # commitment | calendar_event | source_event | source_participant | commitment_participant | person_memory | source_status | user_correction
+    id: string
+    source_ref?: string
+    occurred_at?: datetime
+    label: string             # <=80 chars
+    quote?: string            # <=200 chars; never full body/transcript/OCR/raw model output/local path
+
+  PersonActionItem:
+    id: string                # deterministic stable id; sha256 of user/action/evidence identity/action_version
+    user_id: uuid
+    person_id?: uuid
+    person_display_name?: string
+    person_sort_key?: string
+    surfaces: "string[]"      # person | schedule | commitment
+    action_kind: string       # do_work | attend | prepare | reply | follow_up | wait | confirm_schedule | review_person | review_extraction | source_reconnect
+    status: string            # active | completed | dismissed | snoozed | superseded | stale
+    title: string             # Korean-first, <=120 chars
+    primary_verb: string      # <=20 chars
+    short_reason: string      # <=160 chars
+    commitment_id?: uuid
+    calendar_event_id?: uuid
+    source_event_id?: uuid
+    source_type?: string
+    source_ref?: string
+    due_at?: datetime
+    due_hint?: string
+    due_is_approximate: boolean
+    stale_after?: datetime
+    urgency_score: float
+    importance_score: float
+    confidence: float
+    reason_codes: "string[]"
+    evidence_refs: "PersonActionEvidenceRef[]"
+    input_watermark: datetime
+    input_watermarks: "PersonActionInputWatermark[]"
+    computed_at: datetime
+    updated_at: datetime
+    snoozed_until?: datetime
+    completed_at?: datetime
+    dismissed_at?: datetime
+
+  PersonActionStatePatch:
+    client_mutation_id: uuid   # Android-generated idempotency key; stable across retries
+    status: string            # completed | dismissed | snoozed | active
+    snoozed_until?: datetime  # required when status=snoozed
+    reason?: string
+    expected_updated_at?: datetime # optional optimistic concurrency guard
+    updated_at: datetime
+
+  PersonActionFeedback:
+    client_mutation_id: uuid   # Android-generated idempotency key; stable across retries
+    feedback_type: string     # wrong_person | wrong_priority | not_actionable | missing_context | useful | other
+    reason?: string
+    corrected_person_id?: uuid
+    corrected_due_at?: datetime
+    updated_at: datetime
+
+  PersonActionInputWatermark:
+    input_kind: string         # source_event | commitment | calendar_event | person_graph | person_memory | source_status | user_correction
+    source_type?: string
+    high_watermark: datetime
+    row_count?: int
+    digest?: string            # bounded hash/fingerprint only; never raw content
+
+  PersonActionRecoveryAction:
+    kind: string               # retry_now | full_refresh | open_source_settings | reconnect_source | review_quarantine | refresh_action | discard_mutation | upgrade_app | contact_support
+    label: string              # user-facing CTA label, localized by Android when possible
+    source_id?: string
+    action_item_id?: string
+    mutation_id?: uuid
+    reason_code?: string
+
+  PersonActionCapacityState:
+    state: string              # normal | backlog | degraded
+    backlog_lag_seconds?: int
+    last_caught_up_at?: datetime
+    incident_id?: string       # non-secret operator-visible id when degraded
+
+  PersonActionEmptyState:
+    state: string              # no_action_caught_up | setup_required | sync_pending | feature_disabled | maintenance | endpoint_unavailable
+    title?: string
+    message?: string
+    source_id?: string
+    reason_code?: string
+    recovery_actions?: "PersonActionRecoveryAction[]"
+
+  PersonActionFeedResponse:
+    data: "PersonActionItem[]"
+    deleted_ids: "string[]"    # action ids deleted/superseded since changed_since; Android must tombstone cache rows
+    cursor?: string             # present when has_more=true; bound to snapshot_id for action-feed pages
+    has_more: boolean
+    snapshot_id?: string       # required when has_more=true; binds paginated full refresh/delta pages to one backend snapshot
+    snapshot_expires_at?: datetime
+    watermark_scope?: string   # main_feed | filtered_history. Android advances main cache watermark only for main_feed.
+    server_watermark: datetime # advance only after transactional cache apply
+    input_watermarks: "PersonActionInputWatermark[]"
+    recompute_state: string    # caught_up | pending | stale | degraded
+    capacity_state?: "PersonActionCapacityState"
+    changed_since_min?: datetime # earliest watermark still covered by tombstones; older clients must full refresh
+    tombstone_window_days?: int
+    recovery_actions?: "PersonActionRecoveryAction[]" # required when recompute_state is stale/degraded or pending needs user repair
+    empty_state?: "PersonActionEmptyState" # required when data=[] and no cached rows can explain the product state
+
+  ClientFeatureFlags:
+    action_feed_enabled: boolean
+    person_action_mutations_enabled: boolean
+    gmail_enabled: boolean
+    outlook_mail_enabled: boolean
+    google_calendar_enabled: boolean
+    outlook_calendar_enabled: boolean
+    naver_imap_enabled: boolean
+    daum_imap_enabled: boolean
+    meeting_ingestion_enabled: boolean
+    message_screenshot_enabled: boolean
+
+  ClientRuntimeConfigResponse:
+    environment: string           # dev | staging | production
+    server_time: datetime
+    min_supported_version_code: int
+    latest_version_code?: int
+    force_upgrade: boolean
+    maintenance_mode: boolean
+    retry_after_seconds?: int
+    feature_flags: "ClientFeatureFlags"
+    disabled_sources: "string[]"
+    message?: string              # short localized server-controlled maintenance/update copy; no raw debug text
+    incident_id?: string          # non-secret id when maintenance/degraded state is active
+
+  BetaReadinessEvent:
+    event_id: uuid
+    event_name: string            # app_crash_sanitized | api_recoverable_error | api_unrecoverable_error | action_feed_first_value_visible | beta_aha_action_seen | outbox_stuck | room_migration_failed | data_integrity_violation
+    occurred_at: datetime
+    app_version_code: int
+    app_version_name: string
+    build_type: string            # debug | release | internal
+    session_id: uuid
+    user_id_hash?: string
+    source_type?: string
+    endpoint?: string
+    status_code?: int
+    request_id?: string
+    incident_id?: string
+    reason_code?: string
+    retryable?: boolean
+    properties?: object           # allowlisted non-PII primitives only
+
 endpoints:
+  # ========== RAILWAY — RUNTIME READINESS / CLIENT CONFIG ==========
+
+  - method: GET
+    path: /health
+    auth: none
+    response:
+      200:
+        status: string            # ok | degraded
+        service: string
+        environment: string
+        process_role: string      # web | worker
+        build_sha?: string
+        worker_queues?: object
+        dependencies?: object     # secret-safe dependency readiness only
+      503: "ErrorEnvelope"        # client_action=retry_later|maintenance_wait
+    notes:
+      - "Android does not block normal cached UI on /health failure, but beta release gates require live health to prove API/Supabase/worker readiness."
+      - "Response must not include secrets, DSNs, tokens, raw provider ids, or user data."
+    spec_refs: [BETA-001, BETA-008]
+
+  - method: GET
+    path: /v1/client_config
+    auth: optional
+    query:
+      platform: string            # android
+      version_code: int
+      version_name?: string
+      locale?: string
+    response:
+      200: "ClientRuntimeConfigResponse"
+      401: "ErrorEnvelope"        # optional auth; authenticated fetch may return login but anonymous safe config must still be available
+      429: "ErrorEnvelope"        # client_action=retry_later
+      503: "ErrorEnvelope"        # client_action=maintenance_wait|retry_later
+    notes:
+      - "Android fetches this on cold start, login, foreground, and every 6h while authenticated."
+      - "If config fetch fails, Android uses last good config or baked-in safe defaults; it must not blank the app."
+      - "force_upgrade=true or min_supported_version_code > current build routes to update-required UI and stops background writes except telemetry/session cleanup."
+      - "Feature disable returns disabled-with-reason UI state. It must not revive local action generation."
+    spec_refs: [BETA-007, ERR-019]
+
+  - method: POST
+    path: /v1/product_events/batch
+    auth: optional
+    idempotency: event_id
+    body:
+      events: "BetaReadinessEvent[]"
+    constraints:
+      max_batch_size: 100
+      max_body_bytes: 262144
+      privacy: "allowlisted non-PII properties only"
+    response:
+      200:
+        acknowledged: int
+      202:
+        accepted: int
+      400: "ErrorEnvelope"        # client_action=fix_input|discard_local_mutation
+      401: "ErrorEnvelope"        # client_action=login for authenticated-only events; anonymous crash/config events may be accepted
+      413: "ErrorEnvelope"        # client_action=fix_input
+      422: "ErrorEnvelope"        # client_action=fix_input|discard_local_mutation
+      429: "ErrorEnvelope"        # client_action=retry_later
+      503: "ErrorEnvelope"        # client_action=retry_later
+    notes:
+      - "This endpoint is the beta readiness telemetry mirror. Losing telemetry must not block user workflows, but failed batches remain bounded and retried/drop-reported without crashing."
+      - "Server validates property depth/size and PII allowlist. Android must sanitize before enqueue."
+      - "Duplicate event_id is idempotent."
+    spec_refs: [BETA-008, BETA-009, BETA-012]
+
   # ========== SUPABASE AUTH (client calls directly) ==========
 
   - method: POST
@@ -285,7 +557,9 @@ endpoints:
       502:
         error: string              # "output_truncated" | "schema_violation" | "vertex_upstream_error"
         message: string
-        # output_truncated: Gemini finish_reason=MAX_TOKENS 또는 JSON 파싱 실패 — 단일 호출로 처리 불가. raw_event는 quarantine되며 post-MVP overlap-chunk 경로 예약.
+        retryable?: boolean
+        client_action?: string     # review_quarantine | retry_later
+        # output_truncated: Gemini finish_reason=MAX_TOKENS 또는 JSON 파싱 실패 — 단일 호출로 처리 불가. raw_event는 quarantine되며 ERR-005 review_quarantine 경로로 사용자가 repair/discard한다.
         # schema_violation: responseSchema 미준수(enum/필수필드 위반)
       503: { error: string, message: string }    # Vertex AI 일시 downstream 장애 — retryable
     notes:
@@ -308,11 +582,14 @@ endpoints:
       limit?: int             # Default 20
       since?: string          # ISO datetime — commitments updated after this time
       person_id?: string      # Filter by canonical person_id through commitment_participants
+      source_type?: string    # Optional preview/history filter: gmail | outlook_mail | naver_imap | daum_imap | meeting | voice | ...
+      source_connection_id?: string # Optional backend-provider connection scoped preview/debug filter
       item_type?: string      # action | schedule | decision
       direction?: string      # give | take
       action_state?: string   # pending | reminded | followed_up | completed | overdue | cancelled
-    query:
       include_deleted?: boolean  # default false — deleted_at IS NOT NULL 레코드를 응답에 포함할지 여부. MVP 클라이언트는 항상 false로 호출 (휴지통 UI 없음)
+      include_unresolved_counterparty?: boolean # default false for normal list; true for onboarding/activation preview so unresolved but actionable/reviewable items are not hidden.
+      preview_mode?: boolean # true allows partial preview rows while backend sync/extraction continues; does not imply source sync terminal completion.
     response:
       200:
         data: "Commitment[]"
@@ -327,8 +604,13 @@ endpoints:
         # 서버는 기본값으로 deleted_at IS NULL 필터를 적용. include_deleted=true인 경우에만 soft-deleted row도 반환.
         cursor: string
         has_more: boolean
+        preview_state?: string # complete | partial | pending | empty | blocked
+        retry_after_seconds?: int
       401: { error: string, message: string }
-    spec_refs: [TDY-004, CMT-010]
+    notes:
+      - "Activation preview uses source_type/provider filters plus include_unresolved_counterparty=true. It must not hide reviewable items solely because person resolution is pending."
+      - "preview_mode=true is a UI value path, not a sync completion proof. Android must keep background sync/extraction running after partial preview."
+    spec_refs: [NAP-COMMITMENT-001, NAP-SYNC-001, BREG-003]
 
   - method: GET
     path: /v1/commitments/{id}
@@ -337,7 +619,7 @@ endpoints:
       200: { data: Commitment }
       401: { error: string, message: string }
       404: { error: string, message: string }
-    spec_refs: [CMT-003]
+    spec_refs: [NAP-EVIDENCE-001]
 
   - method: PATCH
     path: /v1/commitments/{id}
@@ -369,7 +651,7 @@ endpoints:
       #   - invalid action_state value or illegal transition (server enforces transition matrix; see data-model.yml commitments.action_state comment)
       #   - immutable_field: body에 quote 또는 기타 금지 필드 포함
       #   - validation_failed: title 길이·direction enum·due_at ISO8601·counterparty_ref 정규화 실패
-    spec_refs: [CMT-005, CMT-006, CMT-007, CMT-011, CMT-012, CMT-013, EDIT-003, EDIT-005, EDIT-006]
+    spec_refs: [NAP-ACTION-001, NAP-ACTION-003, NAP-ACTION-004, EDIT-003, EDIT-005, EDIT-006]
 
   - method: POST
     path: /v1/commitments
@@ -450,7 +732,96 @@ endpoints:
       429: { error: string, message: string }
       500: { error: string, message: string }
       503: { error: string, message: string }
-    spec_refs: [SYNC-001, SYNC-002, SYNC-003, SYNC-005, CMT-005, CMT-006, CMT-007, CMT-011, CMT-012, EDIT-003, EDIT-005, EDIT-006, MAN-003]
+    spec_refs: [SYNC-001, SYNC-002, SYNC-003, SYNC-005, NAP-ACTION-001, NAP-ACTION-003, EDIT-003, EDIT-005, EDIT-006, MAN-003]
+
+  # ========== RAILWAY — PERSON ACTION ITEMS (backend-computed product feed) ==========
+
+  - method: GET
+    path: /v1/person_action_items
+    auth: required
+    query:
+      cursor?: string
+      snapshot_id?: string     # required with cursor when the previous response had has_more=true
+      limit?: int             # Default 50, max 100
+      changed_since?: string  # ISO datetime — action rows updated after this time
+      surface?: string        # person | schedule | commitment. Filters rows whose surfaces[] contains the value.
+      status?: string         # active | completed | dismissed | snoozed | superseded | stale. Default active.
+      person_id?: string
+      commitment_id?: string
+      calendar_event_id?: string
+      include_stale?: boolean # default true for offline cache refresh, false for first-screen active-only fetches
+    response:
+      200: "PersonActionFeedResponse"
+      401: "ErrorEnvelope"  # client_action=login
+      404: "ErrorEnvelope"  # client_action=upgrade_app|retry_later. Endpoint not enabled; Android may render stale cache but must not locally recompute actions.
+      409: "ErrorEnvelope"  # client_action=full_refresh. changed_since is too old/unknown; Android must perform full action-feed refresh.
+      429: "ErrorEnvelope"  # client_action=retry_later
+      503: "ErrorEnvelope"  # client_action=retry_later|contact_support
+    notes:
+      - "Railway is the product decision owner for action grouping, urgency, ranking, and generated state."
+      - "Android renders Room person_action_item_cache populated only from this endpoint; it must not generate local replacement action rows."
+      - "Returned rows are canonical product projections but not canonical source facts. Commitments/calendar/person graph/source rows remain the source-fact truth."
+      - "Rows include input_watermark and computed_at so Android can show stale/pending-context state when local-origin source uploads are not yet reflected."
+      - "Delta responses are snapshot-consistent: data, deleted_ids, server_watermark, input_watermarks, and recompute_state describe one backend read snapshot."
+      - "When has_more=true, response must include snapshot_id and snapshot_expires_at. Follow-up requests pass cursor+snapshot_id; Android advances person_action_sync_state.server_watermark only after the final has_more=false page is transactionally applied."
+      - "A cursor without the matching snapshot_id, an expired snapshot_id, or a changed_since outside changed_since_min returns 409 client_action=full_refresh."
+      - "Delta page order is updated_at ASC, id ASC for deterministic apply. UI urgency ordering is applied after cache commit and must not define delta cursor order."
+      - "Android must apply data and deleted_ids in one Room transaction before persisting server_watermark. A crash before commit must refetch with the previous watermark."
+      - "capacity_state is normal unless the person-action-recompute worker is behind SLO or degraded. backlog/degraded responses include backlog_lag_seconds and recovery_actions or incident_id."
+      - "changed_since older than changed_since_min or outside the 90-day tombstone window returns 409 client_action=full_refresh; Railway must not serve an incomplete delta."
+      - "If recompute_state is stale/degraded, response must include at least one recovery_actions item or an operator-visible incident id in reason_code; no silent stuck state is allowed."
+      - "evidence_refs are bounded handles only. Server responses must not include full email bodies, transcripts, OCR text, source_artifacts originals, raw_model_text, filesystem paths, signed URLs, or cloud object paths."
+      - "status defaults to active. Completed/dismissed/snoozed/history rows must not repopulate first-screen tabs unless explicitly requested."
+      - "When data=[] and Android has no cache, a 200 response includes empty_state so the UI can render caught-up/setup/sync-pending/maintenance state instead of a blank dashboard."
+      - "404/503 on fresh install is still recoverable: ErrorEnvelope.client_action must be upgrade_app, retry_later, maintenance_wait, or contact_support; Android must not route to legacy local action generation."
+    spec_refs: [NAP-001, NAP-003, NAP-005, NAP-007, NAP-009, NAP-013, NAP-017, NAP-SYNC-003, NAP-SYNC-004, NAP-SYNC-005, ERR-010, ERR-012, ERR-013, ERR-015]
+
+  - method: PATCH
+    path: /v1/person_action_items/{id}
+    auth: required
+    idempotency: client_mutation_id
+    body: "PersonActionStatePatch"
+    response:
+      200:
+        data: "PersonActionItem"
+      400: "ErrorEnvelope"  # client_action=fix_input|discard_local_mutation
+      401: "ErrorEnvelope"  # client_action=login
+      404: "ErrorEnvelope"  # client_action=refresh_action. Action absent; Android keeps pending mutation retry/error state, not authoritative local state.
+      409: "ErrorEnvelope"  # client_action=refresh_action|discard_local_mutation. idempotency_conflict or stale expected_updated_at.
+      422: "ErrorEnvelope"  # client_action=fix_input|discard_local_mutation
+      429: "ErrorEnvelope"  # client_action=retry_later
+      503: "ErrorEnvelope"  # client_action=retry_later
+    notes:
+      - "This endpoint is the canonical user action-state mutation for generated person action items."
+      - "When a PersonActionItem is backed by a commitment, Railway applies the required commitment action_state change atomically or rejects the mutation."
+      - "Duplicate client_mutation_id with the same payload returns the same committed PersonActionItem. Duplicate id with different payload returns 409 idempotency_conflict."
+      - "Railway computes and stores a server-side payload_hash in PersonActionMutationLedger before applying side effects. Idempotency is not inferred only from the latest action state row."
+      - "Android stores failed/offline mutations in person_action_mutation_queue and retries. It must not treat local queued state as canonical after backend rejection."
+      - "Every non-200 response must map to a queue transition: retry later, refetch action, user edit, discard local mutation, or login. A failed queue row without CTA/auto retry is forbidden."
+    spec_refs: [NAP-004, NAP-010, NAP-014, NAP-COMMITMENT-002, ERR-011]
+
+  - method: POST
+    path: /v1/person_action_items/{id}:feedback
+    auth: required
+    idempotency: client_mutation_id
+    body: "PersonActionFeedback"
+    response:
+      200:
+        data: "PersonActionItem"
+      400: "ErrorEnvelope"  # client_action=fix_input|discard_local_mutation
+      401: "ErrorEnvelope"  # client_action=login
+      404: "ErrorEnvelope"  # client_action=refresh_action
+      409: "ErrorEnvelope"  # client_action=refresh_action|discard_local_mutation. idempotency_conflict.
+      422: "ErrorEnvelope"  # client_action=fix_input|discard_local_mutation
+      429: "ErrorEnvelope"  # client_action=retry_later
+      503: "ErrorEnvelope"  # client_action=retry_later
+    notes:
+      - "Feedback is canonical product correction input. It may create user_corrections, person match review state, or priority feedback before recomputing affected action rows."
+      - "Duplicate client_mutation_id with the same payload returns the same committed PersonActionItem. Duplicate id with different payload returns 409 idempotency_conflict."
+      - "Railway stores a server-side payload_hash/result in PersonActionMutationLedger before any linked correction or recompute trigger is acknowledged."
+      - "Android must not re-rank locally after feedback; it applies the returned backend row or refetches changed rows."
+      - "Every non-200 response must map to a queue transition: retry later, refetch action, user edit, discard local mutation, or login. A failed queue row without CTA/auto retry is forbidden."
+    spec_refs: [NAP-001, NAP-004, NAP-010, NAP-014, NAP-REL-001, ERR-011]
 
   # ========== RAILWAY — SOURCE STATUS ==========
 
@@ -471,7 +842,7 @@ endpoints:
       401: { error: string, message: string }
       500: { error: string, message: string }
       503: { error: string, message: string }
-    spec_refs: [TDY-003, TDY-008, SMG-001, SMG-002, ERR-002, ERR-003]
+    spec_refs: [NAP-SYNC-002, SMG-001, SMG-002, ERR-002, ERR-003]
 
   # ========== RAILWAY — CALENDAR EVENTS ==========
 
@@ -487,16 +858,21 @@ endpoints:
       200: { data: "CalendarEvent[]", cursor: string, has_more: boolean }
       # CalendarEvent includes: id, user_id, source_type, source_ref, title, start_at, end_at, attendees_raw, status (confirmed|cancelled), recurring_event_id, original_start_at
       401: { error: string, message: string }
-    spec_refs: [TDY-005, ING-009, ING-010]
+    spec_refs: [NAP-SCHEDULE-001, ING-009, ING-010]
 
   - method: POST
     path: /v1/calendar_events:sync
     auth: required
     response:
-      200: { synced: int }
-      401: { error: string, message: string }
-      429: { error: string, message: string }
-    spec_refs: [TDY-005]
+      200: "SourceSyncTriggerResponse"
+      202: "SourceSyncTriggerResponse"
+      401: "ErrorEnvelope"
+      429: "ErrorEnvelope"
+      503: "ErrorEnvelope"
+    notes:
+      - "accepted/queued/running is not synced. Android waits for terminal succeeded or source_status mirror before marking source synced."
+      - "retry_after_seconds drives polling/backoff; foreground polling has a bounded budget."
+    spec_refs: [NAP-SCHEDULE-001, BREG-002]
 
   # ========== RAILWAY — MAIL ==========
 
@@ -506,12 +882,16 @@ endpoints:
     query:
       provider?: string       # gmail | outlook_mail. Omit for backend default/all enabled mail sources.
     response:
-      200: { synced: int }
-      401: { error: string, message: string }
-      429: { error: string, message: string }
-      500: { error: string, message: string }
-      503: { error: string, message: string }
-    spec_refs: [ING-006, ING-007, SMG-005]
+      200: "SourceSyncTriggerResponse"
+      202: "SourceSyncTriggerResponse"
+      401: "ErrorEnvelope"
+      429: "ErrorEnvelope"
+      500: "ErrorEnvelope"
+      503: "ErrorEnvelope"
+    notes:
+      - "OAuth callback success only proves browser/token return. This endpoint accepts or observes backend provider sync; Android must not treat accepted/queued/running as source synced."
+      - "Active job reuse must return current job_id/status/sync_mode progress so preview-mode requests are not blocked behind opaque full-sync jobs."
+    spec_refs: [ING-006, ING-007, SMG-005, BREG-002, BREG-003]
 
   - method: GET
     path: /v1/oauth/mail/{provider}:start
@@ -535,7 +915,8 @@ endpoints:
       404: { error: string, message: string }
     notes:
       - "callback 이후 user_mail_connections 존재 여부를 Android가 polling하는 최소 external integration surface"
-    spec_refs: [ONB-004, SMG-003]
+      - "connected=true is connection durability only. Android must still observe sync_state/job_id or source_status before showing synced."
+    spec_refs: [ONB-004, SMG-003, BREG-002]
 
   - method: GET
     path: /v1/oauth/calendar/{provider}:start
@@ -559,7 +940,8 @@ endpoints:
       404: { error: string, message: string }
     notes:
       - "callback 이후 user_calendar_connections 존재 여부를 Android가 polling하는 최소 external integration surface"
-    spec_refs: [ONB-001, SMG-003]
+      - "connected=true is connection durability only. Android must still observe sync_state/job_id or source_status before showing synced."
+    spec_refs: [ONB-001, SMG-003, BREG-002]
 
   # ========== RAILWAY — RELATION INTELLIGENCE / PERSONS ==========
 
@@ -576,7 +958,7 @@ endpoints:
       401: { error: string, message: string }
     notes:
       - "Canonical backend source-person relation feed. Android mirrors this into Room source_event_participants; no source_person_candidates compatibility cache is part of the active contract."
-    spec_refs: [SRC-001, SRC-008]
+    spec_refs: [NAP-REL-001, NAP-REL-002]
 
   - method: GET
     path: /v1/commitment_participants
@@ -592,7 +974,7 @@ endpoints:
       401: { error: string, message: string }
     notes:
       - "Canonical backend commitment-person edge feed. Android mirrors this into Room commitment_participants before running PersonInteractionIndexWorker."
-    spec_refs: [SRC-001, SRC-008]
+    spec_refs: [NAP-REL-001, NAP-REL-002]
 
   - method: GET
     path: /v1/persons
@@ -606,7 +988,7 @@ endpoints:
       401: { error: string, message: string }
     notes:
       - "Returns first-class persons rows aggregated with person_interactions and commitment_participants. Response identity key is `person_id`; no `person_ref` alias is part of the current Android contract."
-    spec_refs: [SRC-001, SRC-003, SRC-006]
+    spec_refs: [NAP-REL-001]
 
   - method: GET
     path: /v1/persons/{person_id}/events
@@ -618,7 +1000,7 @@ endpoints:
       200: { data: "RawIngestionEvent[]", cursor: string, has_more: boolean }
       401: { error: string, message: string }
       404: { error: string, message: string }
-    spec_refs: [SRC-002]
+    spec_refs: [NAP-EVIDENCE-001, NAP-REL-002]
 
   - method: GET
     path: /v1/persons/{person_id}/commitments
@@ -630,14 +1012,14 @@ endpoints:
       200: { data: "Commitment[]", cursor: string, has_more: boolean }
       401: { error: string, message: string }
       404: { error: string, message: string }
-    spec_refs: [SRC-002]
+    spec_refs: [NAP-EVIDENCE-001, NAP-REL-002]
 
   - method: PUT
     path: /v1/persons/{person_id}/memory
     auth: required
     content_type: application/json
     body:
-      schema_version: 1
+      schema_version: 2
       content_markdown: string       # validated person memory Markdown, max 64 KiB UTF-8
       content_hash: string           # sha256 hex of canonical Markdown bytes after replacing frontmatter content_hash with 64 zeroes
       generated_at: datetime
@@ -661,11 +1043,12 @@ endpoints:
     notes:
       - "Android ProfileMemoryWorker generates memory.md from structured Room data and uploads through Railway; Android must not write Supabase Storage directly."
       - "Railway writes Supabase Storage bucket `person-memory` object `{user_id}/{person_id}/memory.md` with metadata user_id, person_id, schema_version, content_hash, generated_at."
-      - "No Supabase table is created for person memory. It is a derived artifact, not canonical person data."
+      - "No Supabase table is created for person memory. It is a derived business-context artifact, not canonical person data and not a UI source of truth."
       - "content_markdown must not include full email body, full transcript, source_artifacts original Markdown, audio transcript, or raw_model_text."
       - "Decision commitments are consumed here as compact relationship facts using decision_status, not action_state."
-      - "UI rendering, source ingestion, person matching, and person_interactions rebuild must not depend on upload success."
-    spec_refs: [PMEM-001, PMEM-002, PMEM-003, PMEM-004, PMEM-005]
+      - "Backend PersonActionItem computation may use structured semantic-index/context signals from the same inputs, but Android UI must not parse memory.md content at runtime."
+      - "UI rendering, source ingestion, person matching, person_interactions rebuild, and backend action recomputation must not depend on upload success."
+    spec_refs: [PMEM-001, PMEM-002, PMEM-003, PMEM-004, PMEM-005, PMEM-008]
 
   - method: GET
     path: /v1/persons/{person_id}/memory
@@ -682,7 +1065,8 @@ endpoints:
       404: { error: string, message: string }  # person or memory artifact absent
       503: { error: string, message: string }
     notes:
-      - "Reserved for cross-device restore/future assistant context. Current Android UI remains local-first and may ignore missing remote memory."
+      - "Reserved for cross-device restore/future assistant context. Android UI remains action-cache-first and may ignore missing remote memory."
+      - "Response content is not parsed by runtime tab projections. It can be displayed as optional context or used offline to rebuild bounded semantic-index inputs after explicit restore."
     spec_refs: [PMEM-001, PMEM-005]
 
   # ========== RAILWAY — USER PROFILE ==========

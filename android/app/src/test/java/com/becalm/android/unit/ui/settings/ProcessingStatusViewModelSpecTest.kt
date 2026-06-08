@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.settings
 
 import app.cash.turbine.test
 import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
@@ -10,11 +11,14 @@ import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.settings.ProcessingStatusEffect
 import com.becalm.android.ui.settings.ProcessingStatusRecoveryActionType
 import com.becalm.android.ui.settings.ProcessingStatusViewModel
+import com.becalm.android.ui.sources.SourceReconnectDestination
 import com.becalm.android.ui.sources.SourceSyncPort
 import io.mockk.coEvery
 import io.mockk.every
@@ -41,6 +45,7 @@ class ProcessingStatusViewModelSpecTest {
     private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
     private val audioProcessingConfirmationRepository: AudioProcessingConfirmationRepository = mockk(relaxed = true)
     private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
+    private val sourceConnectionRepository: SourceConnectionRepository = mockk()
     private val authRepository: AuthRepository = mockk()
 
     @Before
@@ -49,6 +54,7 @@ class ProcessingStatusViewModelSpecTest {
         coEvery { authRepository.currentSession() } returns session()
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
         every { rawIngestionRepository.observeActiveProcessingItems("user-1", any()) } returns MutableStateFlow(emptyList())
+        every { sourceConnectionRepository.observeAll("user-1") } returns MutableStateFlow(emptyList())
     }
 
     @After
@@ -87,6 +93,7 @@ class ProcessingStatusViewModelSpecTest {
             rawIngestionRepository = rawIngestionRepository,
             audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
             sourceSyncPort = sourceSyncPort,
+            sourceConnectionRepository = sourceConnectionRepository,
             authRepository = authRepository,
         )
 
@@ -119,6 +126,7 @@ class ProcessingStatusViewModelSpecTest {
             rawIngestionRepository = rawIngestionRepository,
             audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
             sourceSyncPort = sourceSyncPort,
+            sourceConnectionRepository = sourceConnectionRepository,
             authRepository = authRepository,
         )
 
@@ -153,6 +161,7 @@ class ProcessingStatusViewModelSpecTest {
             rawIngestionRepository = rawIngestionRepository,
             audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
             sourceSyncPort = sourceSyncPort,
+            sourceConnectionRepository = sourceConnectionRepository,
             authRepository = authRepository,
         )
 
@@ -192,6 +201,7 @@ class ProcessingStatusViewModelSpecTest {
             rawIngestionRepository = rawIngestionRepository,
             audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
             sourceSyncPort = sourceSyncPort,
+            sourceConnectionRepository = sourceConnectionRepository,
             authRepository = authRepository,
         )
 
@@ -206,6 +216,100 @@ class ProcessingStatusViewModelSpecTest {
         }
     }
 
+    @Test
+    fun `reconnect recovery effect carries failed provider connection id`() = runTest {
+        every { processingStatusRepository.observeAll() } returns MutableStateFlow(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.GMAIL,
+                    phase = ProcessingPhase.ERROR,
+                    message = "reauth required",
+                    updatedAt = Instant.fromEpochMilliseconds(6_000),
+                ),
+            ),
+        )
+        every { sourceStatusRepository.observeSources() } returns MutableStateFlow(
+            mapOf(SourceType.GMAIL to status(SourceType.GMAIL, SourceConnectionStatus.ERROR)),
+        )
+        every { sourceConnectionRepository.observeAll("user-1") } returns MutableStateFlow(
+            listOf(
+                sourceConnection(id = "conn-synced", status = "synced"),
+                sourceConnection(id = "conn-failed", status = "needs_reauth"),
+            ),
+        )
+
+        val viewModel = ProcessingStatusViewModel(
+            processingStatusRepository = processingStatusRepository,
+            sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepository = rawIngestionRepository,
+            audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
+            sourceSyncPort = sourceSyncPort,
+            sourceConnectionRepository = sourceConnectionRepository,
+            authRepository = authRepository,
+        )
+
+        viewModel.effects.test {
+            viewModel.onRecoveryAction(SourceType.GMAIL, ProcessingStatusRecoveryActionType.RECONNECT_SOURCE)
+
+            assertEquals(
+                ProcessingStatusEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.GMAIL,
+                    sourceType = SourceType.GMAIL,
+                    sourceConnectionId = "conn-failed",
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `reconnect recovery omits target id when provider has multiple accounts`() = runTest {
+        every { processingStatusRepository.observeAll() } returns MutableStateFlow(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.GMAIL,
+                    phase = ProcessingPhase.ERROR,
+                    message = "reauth required",
+                    updatedAt = Instant.fromEpochMilliseconds(6_000),
+                ),
+            ),
+        )
+        every { sourceStatusRepository.observeSources() } returns MutableStateFlow(
+            mapOf(SourceType.GMAIL to status(SourceType.GMAIL, SourceConnectionStatus.ERROR)),
+        )
+        every { sourceConnectionRepository.observeAll("user-1") } returns MutableStateFlow(
+            listOf(
+                sourceConnection(id = "conn-synced", status = "synced", accountIdentifier = "current@example.com"),
+                sourceConnection(id = "conn-stale", status = "needs_reauth", accountIdentifier = "old@example.com"),
+            ),
+        )
+
+        val viewModel = ProcessingStatusViewModel(
+            processingStatusRepository = processingStatusRepository,
+            sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepository = rawIngestionRepository,
+            audioProcessingConfirmationRepository = audioProcessingConfirmationRepository,
+            sourceSyncPort = sourceSyncPort,
+            sourceConnectionRepository = sourceConnectionRepository,
+            authRepository = authRepository,
+        )
+
+        viewModel.effects.test {
+            viewModel.onRecoveryAction(SourceType.GMAIL, ProcessingStatusRecoveryActionType.RECONNECT_SOURCE)
+
+            assertEquals(
+                ProcessingStatusEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.GMAIL,
+                    sourceType = SourceType.GMAIL,
+                    sourceConnectionId = null,
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun status(
         sourceType: String,
         connectionStatus: SourceConnectionStatus,
@@ -214,6 +318,24 @@ class ProcessingStatusViewModelSpecTest {
         status = connectionStatus,
         lastSyncedAt = null,
         errorMessage = null,
+    )
+
+    private fun sourceConnection(
+        id: String,
+        status: String,
+        accountIdentifier: String = "user@example.com",
+    ): SourceConnectionEntity = SourceConnectionEntity(
+        id = id,
+        userId = "user-1",
+        provider = "google",
+        capability = "mail",
+        accountIdentifier = accountIdentifier,
+        accountDisplayName = "User",
+        ownership = "self",
+        status = status,
+        linkedSelfAnchorId = null,
+        lastSyncAt = Instant.fromEpochMilliseconds(7_000),
+        lastError = if (status == "needs_reauth") "token expired" else null,
     )
 
     private fun session(): SupabaseSession = SupabaseSession(

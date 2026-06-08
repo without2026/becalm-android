@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -23,6 +24,9 @@ import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusUi
+import com.becalm.android.ui.actions.PersonActionEvidenceUi
+import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.actions.PersonActionProviderWriteUi
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -122,6 +126,36 @@ class TodayTimelineScreenTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.today_error_load_failed)).assertIsDisplayed()
+    }
+
+    @Test
+    fun today_auth_failure_opens_recovery_without_retry_loop() {
+        var recoveryClicks = 0
+        var retryClicks = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        error = UiMessage.resource(R.string.today_error_sign_in_required),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = { retryClicks += 1 },
+                    onRecoverAuth = { recoveryClicks += 1 },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.auth_recovery_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.today_error_sign_in_required)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.error_state_retry)).assertCountEquals(0)
+        composeTestRule.onNodeWithText(string(R.string.auth_recovery_login_cta)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, recoveryClicks)
+            assertEquals(0, retryClicks)
+        }
     }
 
     @Test
@@ -257,6 +291,161 @@ class TodayTimelineScreenTest {
         composeTestRule.onNodeWithTag("source-chip-gmail").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
     }
+
+    @Test
+    fun schedule_action_evidence_button_forwards_backend_lookup_ids() {
+        var openedActionId: String? = null
+        var openedEvidenceKind: String? = null
+        var openedEvidenceId: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        today = LocalDate(2026, 4, 23),
+                        scheduleActions = listOf(scheduleAction()),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onOpenScheduleActionEvidence = { actionId, evidenceKind, evidenceId ->
+                        openedActionId = actionId
+                        openedEvidenceKind = evidenceKind
+                        openedEvidenceId = evidenceId
+                    },
+                )
+            }
+        }
+
+        composeTestRule.onAllNodesWithText(string(R.string.commitment_action_evidence))
+            .onFirst()
+            .performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("schedule-pa-1", openedActionId)
+            assertEquals("schedule_link", openedEvidenceKind)
+            assertEquals("schedule-link-1", openedEvidenceId)
+        }
+    }
+
+    @Test
+    fun schedule_action_dismiss_button_forwards_backend_mutation_id() {
+        var dismissedActionId: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        today = LocalDate(2026, 4, 23),
+                        scheduleActions = listOf(scheduleAction()),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onDismissScheduleAction = { dismissedActionId = it },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.schedule_action_dismiss)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("schedule-pa-1", dismissedActionId)
+        }
+    }
+
+    @Test
+    fun schedule_action_primary_button_opens_candidate_detail_without_claiming_calendar_write() {
+        var openedCommitmentId: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        today = LocalDate(2026, 4, 23),
+                        scheduleActions = listOf(scheduleAction()),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onOpenCommitmentDetail = { openedCommitmentId = it },
+                )
+            }
+        }
+
+        composeTestRule.onAllNodesWithText(string(R.string.schedule_action_add_to_calendar)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("일정 추가").assertCountEquals(0)
+        composeTestRule.onNodeWithText("후보 확인").performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("commitment-1", openedCommitmentId)
+        }
+    }
+
+    @Test
+    fun schedule_action_provider_write_ready_shows_add_to_calendar_button() {
+        var completedActionId: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        today = LocalDate(2026, 4, 23),
+                        scheduleActions = listOf(scheduleAction(providerWriteReady = true)),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onCompleteScheduleAction = { completedActionId = it },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.schedule_action_add_to_calendar)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("schedule-pa-1", completedActionId)
+        }
+    }
+
+    private fun scheduleAction(providerWriteReady: Boolean = false): PersonActionItemUi = PersonActionItemUi(
+        id = "schedule-pa-1",
+        personId = "person-1",
+        personDisplayName = "김철수",
+        actionKind = "add_to_calendar",
+        title = "김철수 미팅 일정 잡기",
+        primaryVerb = "후보 확인",
+        shortReason = "메일에는 있는데 캘린더에 없습니다.",
+        commitmentId = "commitment-1",
+        calendarEventId = null,
+        sourceEventId = "source-event-1",
+        sourceType = "gmail",
+        sourceRef = "mail-1",
+        dueAt = null,
+        dueHint = "내일 오후",
+        urgencyScore = 0.91,
+        confidence = 0.88,
+        reasonCodes = listOf("schedule:missing"),
+        evidence = PersonActionEvidenceUi(
+            kind = "schedule_link",
+            id = "schedule-link-1",
+            sourceRef = "mail-1",
+            occurredAt = null,
+            label = "메일 일정 후보",
+            quote = "내일 오후에 뵙겠습니다.",
+        ),
+        providerWrite = if (providerWriteReady) {
+            PersonActionProviderWriteUi(
+                kind = "add_to_calendar",
+                state = "ready",
+                provider = "google_calendar",
+                sourceConnectionId = "conn-calendar-write",
+                scheduleEventLinkId = "schedule-link-1",
+            )
+        } else {
+            null
+        },
+    )
 
     private fun string(resId: Int, vararg args: Any): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)

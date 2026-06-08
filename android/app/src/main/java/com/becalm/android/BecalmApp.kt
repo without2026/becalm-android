@@ -7,6 +7,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.becalm.android.core.analytics.NoopProductAnalyticsClient
@@ -14,9 +16,11 @@ import com.becalm.android.core.analytics.ProductAnalyticsClient
 import com.becalm.android.core.analytics.ProductAnalyticsEvent
 import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.ui.components.BecalmBottomNavigation
+import com.becalm.android.ui.main.MainTabNavViewModel
 import com.becalm.android.ui.navigation.BecalmNavHost
 import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.DeepLinkNavigationPolicy
 import java.util.UUID
 import kotlinx.datetime.Clock
 
@@ -43,15 +47,23 @@ public fun BecalmApp(
     productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
 ) {
     val navController = rememberNavController()
+    val mainTabNavViewModel: MainTabNavViewModel = hiltViewModel()
+    val mainTabNavState by mainTabNavViewModel.state.collectAsStateWithLifecycle()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     TrackScreenTelemetry(currentRoute, productAnalytics)
 
-    LaunchedEffect(pendingDeepLinkRoute) {
-        if (!pendingDeepLinkRoute.isNullOrBlank()) {
-            navController.navigate(pendingDeepLinkRoute)
-            onDeepLinkConsumed()
+    LaunchedEffect(pendingDeepLinkRoute, currentRoute) {
+        val route = pendingDeepLinkRoute?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        if (DeepLinkNavigationPolicy.shouldDeferNavigation(route, currentRoute)) {
+            return@LaunchedEffect
         }
+        if (DeepLinkNavigationPolicy.shouldConsumeWithoutNavigation(route, currentRoute)) {
+            onDeepLinkConsumed()
+            return@LaunchedEffect
+        }
+        navController.navigate(route)
+        onDeepLinkConsumed()
     }
 
     Scaffold(
@@ -60,6 +72,7 @@ public fun BecalmApp(
                 BecalmBottomNavigation(
                     currentRoute = currentRoute,
                     navController = navController,
+                    personActionBadgeCount = mainTabNavState.personActionBadgeCount,
                 )
             }
         },

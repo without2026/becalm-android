@@ -7,9 +7,11 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.CalendarWriteJobPrefsSnapshot
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.CalendarWriteJobStatus
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
@@ -24,8 +26,11 @@ import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.UserCorrectionRepository
+import com.becalm.android.ui.actions.PersonActionEvidenceDetailUi
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.actions.PersonActionFeedStatusUi
 import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.actions.toPersonActionEvidenceDetailUi
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.domain.schedule.ScheduleRowRef
@@ -36,8 +41,11 @@ import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.SourceParticipantRefreshScope
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -46,6 +54,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -53,18 +62,19 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.seconds
 
 // ─── UI types ─────────────────────────────────────────────────────────────────
 
 /**
- * A single entry in the Today timeline, sorted by its logical timestamp.
+ * A single entry in the schedule timeline, sorted by its logical timestamp.
  */
 public sealed class TimelineItem {
     public abstract val sortKey: Instant
     public abstract val timelineAt: Instant?
     public abstract val isTimed: Boolean
 
-    /** Display title rendered as the row headline by the Today timeline. */
+    /** Display title rendered as the row headline by the schedule timeline. */
     public abstract val title: String
 
     /**
@@ -180,6 +190,32 @@ public data class ScheduleConflictReviewItem(
     val evidence: String?,
 )
 
+public enum class CalendarWriteJobStatusKind {
+    QUEUED,
+    RUNNING,
+    RETRY,
+    SUCCEEDED,
+    FAILED,
+    NEEDS_REAUTH,
+    CANCELLED,
+    CHECK_FAILED,
+}
+
+public data class CalendarWriteJobUi(
+    val jobId: String,
+    val actionItemId: String,
+    val title: String,
+    val provider: String?,
+    val scheduleEventLinkId: String?,
+    val status: CalendarWriteJobStatusKind,
+    val retryAfterSeconds: Int? = null,
+    val attempts: Int = 0,
+    val errorCode: String? = null,
+    val errorMessage: String? = null,
+    val clientAction: String? = null,
+    val checking: Boolean = false,
+)
+
 public fun buildTodayPersonFocus(timeline: List<TimelineItem>): List<TodayPersonFocus> {
     val countsByName = linkedMapOf<String?, Int>()
     timeline.forEach { item ->
@@ -226,6 +262,12 @@ public data class TodayUiState(
     val scheduleRangeFilter: ScheduleRangeFilter = ScheduleRangeFilter.NEXT_7_DAYS,
     val today: LocalDate? = null,
     val scheduleActions: List<PersonActionItemUi> = emptyList(),
+    val scheduleActionFeedStatus: PersonActionFeedStatusUi? = null,
+    val evidenceDetail: PersonActionEvidenceDetailUi? = null,
+    val loadingEvidenceActionId: String? = null,
+    val loadingScheduleActionId: String? = null,
+    val loadingScheduleDismissActionId: String? = null,
+    val calendarWriteJobs: List<CalendarWriteJobUi> = emptyList(),
     val sourceStatus: Map<String, SourceStatusUi> = emptyMap(),
     val overallSyncing: Boolean = false,
     val overall: OverallSyncState = OverallSyncState.Idle,
@@ -246,6 +288,19 @@ public sealed interface TodayEffect {
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "TodayViewModel"
+private const val SCHEDULE_ACTION_DISMISS_REASON = "not_actionable"
+
+private data class TodayEvidenceState(
+    val detail: PersonActionEvidenceDetailUi?,
+    val loadingActionId: String?,
+    val loadingScheduleActionId: String?,
+    val loadingScheduleDismissActionId: String?,
+)
+
+private data class TodayScheduleTransientState(
+    val deletingRows: Set<ScheduleRowRef>,
+    val calendarWriteJobs: List<CalendarWriteJobUi>,
+)
 
 /**
  * ViewModel for the Today screen (TDY-001..010).
@@ -280,7 +335,7 @@ public class TodayViewModel @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
     private val authRepository: AuthRepository,
-    userPrefsStore: UserPrefsStore,
+    private val userPrefsStore: UserPrefsStore,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
     clock: Clock,
     private val logger: Logger,
@@ -312,9 +367,37 @@ public class TodayViewModel @Inject constructor(
     private val refreshingFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private val refreshMessageFlow: MutableStateFlow<UiMessage?> = MutableStateFlow(null)
     private val scheduleRangeFilterFlow: MutableStateFlow<ScheduleRangeFilter> =
-        MutableStateFlow(ScheduleRangeFilter.ALL)
+        MutableStateFlow(ScheduleRangeFilter.NEXT_7_DAYS)
+    private val evidenceDetailFlow: MutableStateFlow<PersonActionEvidenceDetailUi?> = MutableStateFlow(null)
+    private val loadingEvidenceActionIdFlow: MutableStateFlow<String?> = MutableStateFlow(null)
+    private val loadingScheduleActionIdFlow: MutableStateFlow<String?> = MutableStateFlow(null)
+    private val loadingScheduleDismissActionIdFlow: MutableStateFlow<String?> = MutableStateFlow(null)
+    private val evidenceStateFlow = combine(
+        evidenceDetailFlow,
+        loadingEvidenceActionIdFlow,
+        loadingScheduleActionIdFlow,
+        loadingScheduleDismissActionIdFlow,
+    ) { detail, loadingActionId, loadingScheduleActionId, loadingScheduleDismissActionId ->
+        TodayEvidenceState(
+            detail = detail,
+            loadingActionId = loadingActionId,
+            loadingScheduleActionId = loadingScheduleActionId,
+            loadingScheduleDismissActionId = loadingScheduleDismissActionId,
+        )
+    }
     private val dismissedProcessingKeyFlow: MutableStateFlow<String?> = MutableStateFlow(null)
     private val deletingRowsFlow: MutableStateFlow<Set<ScheduleRowRef>> = MutableStateFlow(emptySet())
+    private val calendarWriteJobsFlow: MutableStateFlow<List<CalendarWriteJobUi>> = MutableStateFlow(emptyList())
+    private val calendarWritePollingJobs: MutableMap<String, Job> = mutableMapOf()
+    private val scheduleTransientFlow = combine(
+        deletingRowsFlow,
+        calendarWriteJobsFlow,
+    ) { deletingRows, calendarWriteJobs ->
+        TodayScheduleTransientState(
+            deletingRows = deletingRows,
+            calendarWriteJobs = calendarWriteJobs,
+        )
+    }
 
     private val baseState: StateFlow<TodayUiState> = stateSource.observeUiState(
         userIdFlow = userIdFlow,
@@ -336,9 +419,10 @@ public class TodayViewModel @Inject constructor(
     public val state: StateFlow<TodayUiState> = combine(
         baseState,
         refreshMessageFlow,
+        evidenceStateFlow,
         dismissedProcessingKeyFlow,
-        deletingRowsFlow,
-    ) { state, message, dismissedKey, deletingRows ->
+        scheduleTransientFlow,
+    ) { state, message, evidenceState, dismissedKey, scheduleTransient ->
         val processingStatus = state.processingStatus
         state.copy(
             processingStatus = if (
@@ -350,7 +434,12 @@ public class TodayViewModel @Inject constructor(
                 processingStatus
             },
             message = message,
-            deletingRows = deletingRows,
+            evidenceDetail = evidenceState.detail,
+            loadingEvidenceActionId = evidenceState.loadingActionId,
+            loadingScheduleActionId = evidenceState.loadingScheduleActionId,
+            loadingScheduleDismissActionId = evidenceState.loadingScheduleDismissActionId,
+            deletingRows = scheduleTransient.deletingRows,
+            calendarWriteJobs = scheduleTransient.calendarWriteJobs,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -360,6 +449,162 @@ public class TodayViewModel @Inject constructor(
 
     public fun onMessageShown() {
         refreshMessageFlow.value = null
+    }
+
+    public fun onOpenScheduleActionEvidence(
+        actionItemId: String,
+        evidenceKind: String?,
+        evidenceId: String?,
+    ) {
+        if (actionItemId.isBlank() || evidenceKind.isNullOrBlank() || evidenceId.isNullOrBlank()) {
+            refreshMessageFlow.value = UiMessage.resource(R.string.commitments_error_evidence_failed)
+            return
+        }
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userIdFlow.value ?: authRepository.currentSession()?.userId
+            if (userId == null) {
+                refreshMessageFlow.value = UiMessage.resource(R.string.today_error_sign_in_required)
+                return@launch
+            }
+            loadingEvidenceActionIdFlow.value = actionItemId
+            refreshMessageFlow.value = null
+            when (
+                val result = personActionRepository.fetchEvidenceOriginal(
+                    userId = userId,
+                    actionItemId = actionItemId,
+                    evidenceKind = evidenceKind,
+                    evidenceId = evidenceId,
+                )
+            ) {
+                is BecalmResult.Success -> {
+                    evidenceDetailFlow.value = result.value.toPersonActionEvidenceDetailUi()
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "schedule action evidence failed id=${hashId(actionItemId)}: ${result.error}")
+                    refreshMessageFlow.value = UiMessage.resource(R.string.commitments_error_evidence_failed)
+                }
+            }
+            loadingEvidenceActionIdFlow.value = null
+        }
+    }
+
+    public fun onDismissScheduleActionEvidence() {
+        evidenceDetailFlow.value = null
+    }
+
+    public fun onCompleteScheduleAction(actionItemId: String) {
+        if (
+            actionItemId.isBlank() ||
+            loadingScheduleActionIdFlow.value == actionItemId ||
+            loadingScheduleDismissActionIdFlow.value == actionItemId
+        ) return
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userIdFlow.value ?: authRepository.currentSession()?.userId
+            if (userId == null) {
+                refreshMessageFlow.value = UiMessage.resource(R.string.today_error_sign_in_required)
+                return@launch
+            }
+            loadingScheduleActionIdFlow.value = actionItemId
+            refreshMessageFlow.value = null
+            try {
+                val action = state.value.scheduleActions.firstOrNull { it.id == actionItemId }
+                val providerWrite = action?.providerWrite?.toRequest()
+                val result = if (providerWrite != null) {
+                    personActionRepository.completeActionWithProviderWrite(
+                        userId = userId,
+                        actionItemId = actionItemId,
+                        providerWrite = providerWrite,
+                    )
+                } else {
+                    personActionRepository.completeAction(userId = userId, actionItemId = actionItemId)
+                }
+                when (result) {
+                    is BecalmResult.Success -> {
+                        val jobId = result.value.providerWriteJobId?.takeIf { it.isNotBlank() }
+                        if (jobId != null && providerWrite != null) {
+                            val calendarAction = checkNotNull(action)
+                            upsertCalendarWriteJob(
+                                CalendarWriteJobUi(
+                                    jobId = jobId,
+                                    actionItemId = calendarAction.id,
+                                    title = calendarAction.title,
+                                    provider = providerWrite.provider,
+                                    scheduleEventLinkId = providerWrite.scheduleEventLinkId,
+                                    status = CalendarWriteJobStatusKind.QUEUED,
+                                    checking = true,
+                                ),
+                            )
+                            startCalendarWriteJobPolling(userId = userId, jobId = jobId)
+                        }
+                        refreshScheduleActions(userId)
+                        refreshMessageFlow.value = UiMessage.resource(
+                            if (providerWrite != null) {
+                                R.string.schedule_action_add_to_calendar_success
+                            } else {
+                                R.string.schedule_action_complete_success
+                            },
+                        )
+                    }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "schedule action complete failed id=${hashId(actionItemId)}: ${result.error}")
+                        refreshMessageFlow.value = UiMessage.resource(R.string.schedule_action_complete_failed)
+                    }
+                }
+            } finally {
+                loadingScheduleActionIdFlow.value = null
+            }
+        }
+    }
+
+    public fun onRetryCalendarWriteJob(jobId: String) {
+        if (jobId.isBlank()) return
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userIdFlow.value ?: authRepository.currentSession()?.userId
+            if (userId == null) {
+                refreshMessageFlow.value = UiMessage.resource(R.string.today_error_sign_in_required)
+                return@launch
+            }
+            val job = calendarWriteJobsFlow.value.firstOrNull { it.jobId == jobId } ?: return@launch
+            upsertCalendarWriteJob(job.copy(checking = true))
+            startCalendarWriteJobPolling(userId = userId, jobId = jobId)
+        }
+    }
+
+    public fun onDismissScheduleAction(actionItemId: String) {
+        if (
+            actionItemId.isBlank() ||
+            loadingScheduleActionIdFlow.value == actionItemId ||
+            loadingScheduleDismissActionIdFlow.value == actionItemId
+        ) return
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userIdFlow.value ?: authRepository.currentSession()?.userId
+            if (userId == null) {
+                refreshMessageFlow.value = UiMessage.resource(R.string.today_error_sign_in_required)
+                return@launch
+            }
+            loadingScheduleDismissActionIdFlow.value = actionItemId
+            refreshMessageFlow.value = null
+            try {
+                when (
+                    val result = personActionRepository.dismissAction(
+                        userId = userId,
+                        actionItemId = actionItemId,
+                        reason = SCHEDULE_ACTION_DISMISS_REASON,
+                    )
+                ) {
+                    is BecalmResult.Success -> {
+                        refreshScheduleActions(userId)
+                        refreshMessageFlow.value = UiMessage.resource(R.string.schedule_action_dismiss_success)
+                    }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "schedule action dismiss failed id=${hashId(actionItemId)}: ${result.error}")
+                        refreshMessageFlow.value = UiMessage.resource(R.string.schedule_action_dismiss_failed)
+                    }
+                }
+            } finally {
+                loadingScheduleDismissActionIdFlow.value = null
+            }
+        }
     }
 
     public fun onScheduleRangeChange(filter: ScheduleRangeFilter) {
@@ -397,8 +642,225 @@ public class TodayViewModel @Inject constructor(
         }
     }
 
+    private fun startCalendarWriteJobPolling(userId: String, jobId: String) {
+        calendarWritePollingJobs.remove(jobId)?.cancel()
+        calendarWritePollingJobs[jobId] = viewModelScope.launch(ioDispatcher) {
+            try {
+                pollCalendarWriteJob(userId = userId, jobId = jobId)
+            } finally {
+                calendarWritePollingJobs.remove(jobId)
+            }
+        }
+    }
+
+    private suspend fun pollCalendarWriteJob(userId: String, jobId: String) {
+        repeat(CALENDAR_WRITE_JOB_MAX_POLLS) {
+            when (val result = personActionRepository.fetchCalendarWriteJobStatus(userId = userId, jobId = jobId)) {
+                is BecalmResult.Success -> {
+                    val current = calendarWriteJobsFlow.value.firstOrNull { it.jobId == jobId }
+                    val next = result.value.toCalendarWriteJobUi(previous = current)
+                    val terminal = next.status.isCalendarWriteTerminal()
+                    upsertCalendarWriteJob(next.copy(checking = !terminal))
+                    if (terminal) {
+                        if (next.status == CalendarWriteJobStatusKind.SUCCEEDED) {
+                            refreshScheduleActions(userId)
+                        }
+                        return
+                    }
+                    delay((next.retryAfterSeconds ?: CALENDAR_WRITE_JOB_DEFAULT_POLL_SECONDS).coerceIn(1, 10).seconds)
+                }
+                is BecalmResult.Failure -> {
+                    val current = calendarWriteJobsFlow.value.firstOrNull { it.jobId == jobId } ?: return
+                    logger.w(TAG, "calendar write job poll failed id=${hashId(jobId)}: ${result.error}")
+                    upsertCalendarWriteJob(
+                        current.copy(
+                            status = CalendarWriteJobStatusKind.CHECK_FAILED,
+                            errorCode = "calendar_write_status_unavailable",
+                            checking = false,
+                            clientAction = "retry_later",
+                        ),
+                    )
+                    return
+                }
+            }
+        }
+        val current = calendarWriteJobsFlow.value.firstOrNull { it.jobId == jobId } ?: return
+        upsertCalendarWriteJob(current.copy(checking = false))
+    }
+
+    private fun upsertCalendarWriteJob(job: CalendarWriteJobUi) {
+        calendarWriteJobsFlow.value = listOf(job) +
+            calendarWriteJobsFlow.value.filterNot { it.jobId == job.jobId }
+        persistCalendarWriteJobSnapshots(calendarWriteJobsFlow.value)
+    }
+
+    private fun restoreCalendarWriteJobSnapshots() {
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                val (restoredUserId, snapshots) = combine(
+                    userIdFlow,
+                    userPrefsStore.observeCalendarWriteJobSnapshots(),
+                ) { userId, jobs ->
+                    userId to jobs
+                }.first { (userId, _) -> !userId.isNullOrBlank() }
+                val userId = restoredUserId ?: return@launch
+                val restoredJobs = snapshots
+                    .mapNotNull { it.toCalendarWriteJobUi() }
+                    .take(CALENDAR_WRITE_JOB_SNAPSHOT_LIMIT)
+                if (restoredJobs.isEmpty() || calendarWriteJobsFlow.value.isNotEmpty()) return@launch
+                calendarWriteJobsFlow.value = restoredJobs
+                restoredJobs
+                    .filter { !it.status.isCalendarWriteTerminal() }
+                    .forEach { job ->
+                        startCalendarWriteJobPolling(userId = userId, jobId = job.jobId)
+                    }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                logger.w(TAG, "calendar write job snapshot restore failed: ${error.message}")
+            }
+        }
+    }
+
+    private fun persistCalendarWriteJobSnapshots(jobs: List<CalendarWriteJobUi>) {
+        val snapshots = jobs
+            .mapNotNull { it.toCalendarWriteJobPrefsSnapshot() }
+            .take(CALENDAR_WRITE_JOB_SNAPSHOT_LIMIT)
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                userPrefsStore.setCalendarWriteJobSnapshots(snapshots)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                logger.w(TAG, "calendar write job snapshot persist failed: ${error.message}")
+            }
+        }
+    }
+
+    private fun CalendarWriteJobPrefsSnapshot.toCalendarWriteJobUi(): CalendarWriteJobUi? {
+        if (jobId.isBlank() || actionItemId.isBlank() || status.isBlank()) return null
+        val kind = status.toCalendarWriteJobStatusKind()
+        return CalendarWriteJobUi(
+            jobId = jobId,
+            actionItemId = actionItemId,
+            title = title.takeIf { it.isNotBlank() } ?: actionItemId,
+            provider = provider,
+            scheduleEventLinkId = scheduleEventLinkId,
+            status = kind,
+            retryAfterSeconds = retryAfterSeconds,
+            attempts = attempts,
+            errorCode = errorCode,
+            clientAction = clientAction,
+            checking = !kind.isCalendarWriteTerminal(),
+        )
+    }
+
+    private fun CalendarWriteJobUi.toCalendarWriteJobPrefsSnapshot(): CalendarWriteJobPrefsSnapshot? {
+        if (!status.shouldPersistCalendarWriteSnapshot()) return null
+        if (jobId.isBlank() || actionItemId.isBlank()) return null
+        return CalendarWriteJobPrefsSnapshot(
+            jobId = jobId,
+            actionItemId = actionItemId,
+            title = title,
+            provider = provider,
+            scheduleEventLinkId = scheduleEventLinkId,
+            status = status.toCalendarWriteJobStatusString(),
+            retryAfterSeconds = retryAfterSeconds,
+            attempts = attempts,
+            errorCode = errorCode,
+            clientAction = clientAction,
+        )
+    }
+
+    private fun CalendarWriteJobStatus.toCalendarWriteJobUi(
+        previous: CalendarWriteJobUi?,
+    ): CalendarWriteJobUi =
+        CalendarWriteJobUi(
+            jobId = jobId,
+            actionItemId = actionItemId?.takeIf { it.isNotBlank() } ?: previous?.actionItemId.orEmpty(),
+            title = previous?.title?.takeIf { it.isNotBlank() }
+                ?: actionItemId?.takeIf { it.isNotBlank() }
+                ?: jobId,
+            provider = provider?.takeIf { it.isNotBlank() } ?: previous?.provider,
+            scheduleEventLinkId = scheduleEventLinkId?.takeIf { it.isNotBlank() } ?: previous?.scheduleEventLinkId,
+            status = status.toCalendarWriteJobStatusKind(),
+            retryAfterSeconds = retryAfterSeconds,
+            attempts = attempts,
+            errorCode = errorCode,
+            errorMessage = errorMessage,
+            clientAction = clientAction,
+        )
+
+    private fun String.toCalendarWriteJobStatusKind(): CalendarWriteJobStatusKind =
+        when (lowercase()) {
+            "pending",
+            "queued",
+            -> CalendarWriteJobStatusKind.QUEUED
+            "running" -> CalendarWriteJobStatusKind.RUNNING
+            "retry" -> CalendarWriteJobStatusKind.RETRY
+            "succeeded" -> CalendarWriteJobStatusKind.SUCCEEDED
+            "failed" -> CalendarWriteJobStatusKind.FAILED
+            "needs_reauth" -> CalendarWriteJobStatusKind.NEEDS_REAUTH
+            "cancelled" -> CalendarWriteJobStatusKind.CANCELLED
+            else -> CalendarWriteJobStatusKind.CHECK_FAILED
+        }
+
+    private fun CalendarWriteJobStatusKind.toCalendarWriteJobStatusString(): String =
+        when (this) {
+            CalendarWriteJobStatusKind.QUEUED -> "queued"
+            CalendarWriteJobStatusKind.RUNNING -> "running"
+            CalendarWriteJobStatusKind.RETRY -> "retry"
+            CalendarWriteJobStatusKind.SUCCEEDED -> "succeeded"
+            CalendarWriteJobStatusKind.FAILED -> "failed"
+            CalendarWriteJobStatusKind.NEEDS_REAUTH -> "needs_reauth"
+            CalendarWriteJobStatusKind.CANCELLED -> "cancelled"
+            CalendarWriteJobStatusKind.CHECK_FAILED -> "check_failed"
+        }
+
+    private fun CalendarWriteJobStatusKind.isCalendarWriteTerminal(): Boolean =
+        when (this) {
+            CalendarWriteJobStatusKind.SUCCEEDED,
+            CalendarWriteJobStatusKind.FAILED,
+            CalendarWriteJobStatusKind.NEEDS_REAUTH,
+            CalendarWriteJobStatusKind.CANCELLED,
+            CalendarWriteJobStatusKind.CHECK_FAILED,
+            -> true
+            CalendarWriteJobStatusKind.QUEUED,
+            CalendarWriteJobStatusKind.RUNNING,
+            CalendarWriteJobStatusKind.RETRY,
+            -> false
+        }
+
+    private fun CalendarWriteJobStatusKind.shouldPersistCalendarWriteSnapshot(): Boolean =
+        when (this) {
+            CalendarWriteJobStatusKind.SUCCEEDED,
+            CalendarWriteJobStatusKind.CANCELLED,
+            -> false
+            CalendarWriteJobStatusKind.QUEUED,
+            CalendarWriteJobStatusKind.RUNNING,
+            CalendarWriteJobStatusKind.RETRY,
+            CalendarWriteJobStatusKind.FAILED,
+            CalendarWriteJobStatusKind.NEEDS_REAUTH,
+            CalendarWriteJobStatusKind.CHECK_FAILED,
+            -> true
+        }
+
     init {
         logger.d(TAG, "init")
+        restoreCalendarWriteJobSnapshots()
+        viewModelScope.launch(ioDispatcher) {
+            var lastRefreshedUserId: String? = null
+            userIdFlow.collect { userId ->
+                val currentUserId = userId?.takeIf { it.isNotBlank() }
+                if (currentUserId != null && currentUserId != lastRefreshedUserId) {
+                    lastRefreshedUserId = currentUserId
+                    refreshScheduleActions(currentUserId)
+                }
+                if (currentUserId == null) {
+                    lastRefreshedUserId = null
+                }
+            }
+        }
         viewModelScope.launch {
             var hadActiveWork = false
             baseState
@@ -447,12 +909,8 @@ public class TodayViewModel @Inject constructor(
                     }
                 }
                 if (userId != null) {
-                    when (val result = personActionRepository.refresh(userId = userId, surface = "schedule")) {
-                        is BecalmResult.Success -> Unit
-                        is BecalmResult.Failure -> {
-                            failed = true
-                            logger.w(TAG, "schedule action refresh failed: ${result.error}")
-                        }
+                    if (!refreshScheduleActions(userId)) {
+                        failed = true
                     }
                     when (val result = relationRefreshCoordinator().refresh(
                         userId = userId,
@@ -493,6 +951,16 @@ public class TodayViewModel @Inject constructor(
             logger = logger,
         )
 
+    private suspend fun refreshScheduleActions(userId: String): Boolean {
+        return when (val result = personActionRepository.refresh(userId = userId, surface = "schedule")) {
+            is BecalmResult.Success -> true
+            is BecalmResult.Failure -> {
+                logger.w(TAG, "schedule action refresh failed: ${result.error}")
+                false
+            }
+        }
+    }
+
     /** TDY-007 settings entry from the top-right icon. */
     public fun onOpenSettings() {
         _effects.tryEmit(TodayEffect.NavigateToSettings)
@@ -519,7 +987,12 @@ public class TodayViewModel @Inject constructor(
 
     private companion object {
         private const val PULL_REFRESH_SOURCE = "today_pull_refresh"
+        private const val CALENDAR_WRITE_JOB_MAX_POLLS = 8
+        private const val CALENDAR_WRITE_JOB_DEFAULT_POLL_SECONDS = 2
+        private const val CALENDAR_WRITE_JOB_SNAPSHOT_LIMIT = 3
     }
+
+    private fun hashId(id: String): String = "%08x".format(id.hashCode())
 
 }
 
@@ -527,6 +1000,27 @@ private object NoopPersonActionRepository : PersonActionRepository {
     override fun observeActiveForSurface(
         userId: String,
         surface: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForPerson(
+        userId: String,
+        personId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForCommitment(
+        userId: String,
+        commitmentId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForCalendarEvent(
+        userId: String,
+        calendarEventId: String,
         limit: Int,
     ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
         flowOf(emptyList())
@@ -543,4 +1037,47 @@ private object NoopPersonActionRepository : PersonActionRepository {
                 recomputeState = null,
             ),
         )
+
+    override suspend fun completeAction(
+        userId: String,
+        actionItemId: String,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun dismissAction(
+        userId: String,
+        actionItemId: String,
+        reason: String?,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun snoozeAction(
+        userId: String,
+        actionItemId: String,
+        snoozedUntil: kotlinx.datetime.Instant,
+        reason: String?,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun submitActionFeedback(
+        userId: String,
+        actionItemId: String,
+        feedbackType: String,
+        reason: String?,
+        correctedPersonId: String?,
+        correctedDueAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun syncPendingMutations(
+        userId: String,
+        limit: Int,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    private fun noopMutationStats(): com.becalm.android.data.repository.PersonActionMutationSyncStats =
+        com.becalm.android.data.repository.PersonActionMutationSyncStats(queued = 0, synced = 0, retryable = 0, failed = 0)
 }

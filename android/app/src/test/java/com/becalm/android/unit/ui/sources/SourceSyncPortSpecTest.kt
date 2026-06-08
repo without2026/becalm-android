@@ -25,6 +25,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.NoopUserCorrectionRepository
 import com.becalm.android.ui.sources.DefaultSourceSyncPort
 import com.becalm.android.worker.WorkScheduler
+import com.squareup.moshi.Moshi
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -32,6 +33,8 @@ import io.mockk.verify
 import javax.inject.Provider
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -71,6 +74,7 @@ class SourceSyncPortSpecTest {
         userCorrectionRepository = NoopUserCorrectionRepository,
         workScheduler = workScheduler,
         logger = logger,
+        moshi = Moshi.Builder().build(),
         productAnalytics = productAnalytics,
     )
 
@@ -307,6 +311,152 @@ class SourceSyncPortSpecTest {
     }
 
     @Test
+    fun `manual gmail sync surfaces backend llm processing retry as automatic retry wait`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(
+            listOf(sourceConnection("conn-gmail", provider = "google", capability = "mail")),
+        )
+        coEvery { api.syncSourceConnection("conn-gmail") } returns Response.success(
+            SourceSyncJobResponse(
+                jobId = "job-mail-processing-retry",
+                status = "retry",
+                accepted = true,
+                retryAfterSeconds = 20,
+                provider = "gmail",
+                capability = "mail",
+                sourceConnectionId = "conn-gmail",
+                errorCode = "llm_processing_retrying",
+                errorMessage = "Vertex AI returned 403: permission denied",
+                message = "LLM processing is temporarily unavailable; retrying automatically",
+                stage = "retry_waiting",
+            ),
+        )
+
+        val result = subject.requestManualSync(SourceType.GMAIL)
+
+        assertTrue(result is BecalmResult.Success)
+        coVerify(exactly = 0) { api.getSourceSyncJob(any()) }
+        coVerify(exactly = 0) { rawIngestionRepository.refreshSince(any(), any(), any()) }
+        coVerify(exactly = 0) { sourceStatusRepository.recordSyncSuccess(any(), any()) }
+        coVerify(exactly = 1) {
+            processingStatusRepository.recordScanning(
+                SourceType.GMAIL,
+                ProcessingStatusMessages.LLM_PROCESSING_RETRYING,
+            )
+        }
+        verify(exactly = 1) { workScheduler.enqueueSourceRelationRefresh(SourceType.GMAIL, 45L, true) }
+    }
+
+    @Test
+    fun `manual gmail sync records safe processing code for terminal llm infra failure`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(
+            listOf(sourceConnection("conn-gmail", provider = "google", capability = "mail")),
+        )
+        coEvery { api.syncSourceConnection("conn-gmail") } returns Response.success(
+            SourceSyncJobResponse(
+                jobId = "job-mail-processing-failed",
+                status = "failed",
+                accepted = false,
+                provider = "gmail",
+                capability = "mail",
+                sourceConnectionId = "conn-gmail",
+                errorCode = "llm_processing_failed",
+                errorMessage = "Vertex AI returned 403: permission denied for internal project",
+            ),
+        )
+
+        val result = subject.requestManualSync(SourceType.GMAIL)
+
+        assertTrue(result is BecalmResult.Failure)
+        coVerify(exactly = 0) { api.getSourceSyncJob(any()) }
+        coVerify(exactly = 0) { rawIngestionRepository.refreshSince(any(), any(), any()) }
+        coVerify(exactly = 1) {
+            sourceStatusRepository.recordSyncError(
+                SourceType.GMAIL,
+                ProcessingStatusMessages.LLM_PROCESSING_FAILED,
+                any(),
+            )
+        }
+        coVerify(exactly = 1) {
+            processingStatusRepository.recordError(
+                SourceType.GMAIL,
+                ProcessingStatusMessages.LLM_PROCESSING_FAILED,
+            )
+        }
+    }
+
+    @Test
+    fun `manual gmail sync stops locally when source connection needs reauth`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(
+            listOf(sourceConnection("conn-gmail", provider = "google", capability = "mail", status = "needs_reauth")),
+        )
+
+        val result = subject.requestManualSync(SourceType.GMAIL)
+
+        assertTrue(result is BecalmResult.Failure)
+        coVerify(exactly = 0) { api.syncSourceConnection(any()) }
+        coVerify(exactly = 1) {
+            sourceStatusRepository.recordSyncError(
+                SourceType.GMAIL,
+                "needs_reauth",
+                any(),
+            )
+        }
+        coVerify(exactly = 1) {
+            processingStatusRepository.recordError(
+                SourceType.GMAIL,
+                "needs_reauth",
+            )
+        }
+    }
+
+    @Test
+    fun `manual gmail sync maps backend immediate reauth envelope to reconnect status`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(
+            listOf(sourceConnection("conn-gmail", provider = "google", capability = "mail", status = "connected")),
+        )
+        coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
+        coEvery { api.syncSourceConnection("conn-gmail") } returns Response.error(
+            409,
+            """
+            {
+              "error": "source_connection_needs_reauth",
+              "message": "Reconnect this source before syncing.",
+              "retryable": false,
+              "client_action": "reconnect_source"
+            }
+            """.trimIndent().toResponseBody("application/json".toMediaType()),
+        )
+
+        val result = subject.requestManualSync(SourceType.GMAIL)
+
+        assertTrue(result is BecalmResult.Failure)
+        coVerify(exactly = 1) { api.syncSourceConnection("conn-gmail") }
+        coVerify(exactly = 0) { api.getSourceSyncJob(any()) }
+        coVerify(exactly = 0) { rawIngestionRepository.refreshSince(any(), any(), any()) }
+        coVerify(exactly = 2) { sourceConnectionRepository.refresh("user-1") }
+        coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) {
+            sourceStatusRepository.recordSyncError(
+                SourceType.GMAIL,
+                "needs_reauth",
+                any(),
+            )
+        }
+        coVerify(exactly = 1) {
+            processingStatusRepository.recordError(
+                SourceType.GMAIL,
+                "needs_reauth",
+            )
+        }
+        assertEquals("validation", productAnalytics.events.last().properties["result"])
+        assertEquals(false, productAnalytics.events.last().properties["retryable"])
+    }
+
+    @Test
     fun `manual backend sync tracks failed source sync without throwing`() = runTest {
         coEvery { authRepository.currentSession() } returns null
 
@@ -456,6 +606,7 @@ class SourceSyncPortSpecTest {
         id: String,
         provider: String,
         capability: String,
+        status: String = "connected",
     ): SourceConnectionEntity = SourceConnectionEntity(
         id = id,
         userId = "user-1",
@@ -464,7 +615,7 @@ class SourceSyncPortSpecTest {
         accountIdentifier = "$id@example.com",
         accountDisplayName = id,
         ownership = "user",
-        status = "connected",
+        status = status,
         linkedSelfAnchorId = null,
         lastSyncAt = null,
         lastError = null,

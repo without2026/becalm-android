@@ -19,10 +19,10 @@ public object AppDeepLinks {
             "commitments" -> uri.pathSegments
                 ?.lastOrNull { it.isNotBlank() }
                 ?.let { BecalmRoute.CommitmentDetail(it).path }
-            // OAuth callback success is not the same thing as source sync success. Keep the
-            // foreground source screen in place so its lifecycle refresh can recover the selected
-            // provider without collapsing onboarding and settings into the same route.
-            "oauth-complete" -> null
+            // OAuth callback success is not the same thing as source sync success. Query-bearing
+            // completion links open Sources so the app can refresh server-authoritative status even
+            // after process death; bare legacy links keep the foreground screen in place.
+            "oauth-complete" -> oauthCompleteRoute(uri)
             "settings" -> when (uri.pathSegments) {
                 emptyList<String>() -> BecalmRoute.Settings.path
                 listOf("privacy") -> BecalmRoute.PrivacyManagement.path
@@ -53,5 +53,16 @@ public object AppDeepLinks {
             }
             else -> null
         }
+    }
+
+    private fun oauthCompleteRoute(uri: Uri): String? {
+        val result = uri.getQueryParameter("result")
+            ?.takeIf { it == "success" || it == "error" }
+            ?: return null
+        return BecalmRoute.SettingsSources.oauthResultPath(
+            result = result,
+            provider = uri.getQueryParameter("provider")?.takeIf { it.isNotBlank() },
+            family = uri.getQueryParameter("family")?.takeIf { it.isNotBlank() },
+        )
     }
 }

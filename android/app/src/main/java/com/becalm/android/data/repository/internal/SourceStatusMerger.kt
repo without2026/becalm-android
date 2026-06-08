@@ -10,6 +10,7 @@ import com.becalm.android.data.repository.SERVER_CONNECTION_STATE_CLIENT_MANAGED
 import com.becalm.android.data.repository.SERVER_CONNECTION_STATE_CONNECTED
 import com.becalm.android.data.repository.SERVER_CONNECTION_STATE_NEEDS_REAUTH
 import com.becalm.android.data.repository.SERVER_CONNECTION_STATE_NEVER_CONNECTED
+import kotlinx.datetime.Clock
 
 // ─── Wire-state constants (api-contract.yml § GET /v1/source_status) ─────────
 
@@ -52,6 +53,7 @@ internal suspend fun mergeServerState(
     lastSyncedAt: (String) -> Preferences.Key<Long>,
     lastError: (String) -> Preferences.Key<String>,
     inProgress: (String) -> Preferences.Key<Boolean>,
+    inProgressStartedAt: (String) -> Preferences.Key<Long>,
     connectionState: (String) -> Preferences.Key<String>,
 ) {
     userPrefs.edit { prefs ->
@@ -83,6 +85,7 @@ internal suspend fun mergeServerState(
             }
             if (serverConnectionState == SERVER_CONNECTION_STATE_NEVER_CONNECTED) {
                 prefs.remove(inProgress(item.sourceType))
+                prefs.remove(inProgressStartedAt(item.sourceType))
                 prefs.remove(lastError(item.sourceType))
                 prefs.remove(lastSyncedAt(item.sourceType))
                 continue
@@ -90,10 +93,12 @@ internal suspend fun mergeServerState(
             when (syncState) {
                 WIRE_STATE_SYNCING -> {
                     prefs[inProgress(item.sourceType)] = true
+                    prefs[inProgressStartedAt(item.sourceType)] = Clock.System.now().toEpochMilliseconds()
                     prefs.remove(lastError(item.sourceType))
                 }
                 WIRE_STATE_SYNCED -> {
                     prefs.remove(inProgress(item.sourceType))
+                    prefs.remove(inProgressStartedAt(item.sourceType))
                     prefs.remove(lastError(item.sourceType))
                     val at = item.lastSyncAt
                     if (at != null) {
@@ -102,6 +107,7 @@ internal suspend fun mergeServerState(
                 }
                 WIRE_STATE_ERROR -> {
                     prefs.remove(inProgress(item.sourceType))
+                    prefs.remove(inProgressStartedAt(item.sourceType))
                     prefs[lastError(item.sourceType)] = item.lastError ?: "error"
                     val at = item.lastSyncAt
                     if (at != null) {
@@ -110,6 +116,7 @@ internal suspend fun mergeServerState(
                 }
                 WIRE_STATE_IDLE -> {
                     prefs.remove(inProgress(item.sourceType))
+                    prefs.remove(inProgressStartedAt(item.sourceType))
                     prefs.remove(lastError(item.sourceType))
                     val at = item.lastSyncAt
                     if (at != null) {

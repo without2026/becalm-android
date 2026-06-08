@@ -49,10 +49,15 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.core.util.KST
+import com.becalm.android.ui.actions.PersonActionEvidenceDialog
+import com.becalm.android.ui.actions.PersonActionFeedStatusLine
 import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.actions.personActionFeedCompactStatusMessage
+import com.becalm.android.ui.actions.shouldOfferReminder
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmTopChrome
 import com.becalm.android.ui.components.CommitmentCard
 import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.ui.components.CollectFlowEffect
@@ -61,8 +66,10 @@ import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
+import com.becalm.android.ui.components.MainTabCompactSourceAttentionLine
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
+import com.becalm.android.ui.components.hasSourceWarningForCompactLine
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.evidence.EvidenceImportFloatingActionButton
@@ -72,6 +79,7 @@ import com.becalm.android.ui.evidence.EvidenceImportViewModel
 import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
 import com.becalm.android.ui.evidence.rememberEvidenceImportActions
 import com.becalm.android.ui.main.MainTabHeaderState
+import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
@@ -101,14 +109,17 @@ private val CommitmentListBottomPadding = 144.dp
 public fun CommitmentManagementScreen(
     viewModel: CommitmentManagementViewModel = hiltViewModel(),
     evidenceImportViewModel: EvidenceImportViewModel = hiltViewModel(),
+    headerViewModel: MainTabHeaderViewModel = hiltViewModel(),
     onOpenDetail: (id: String) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenSources: () -> Unit = onOpenSettings,
+    onOpenSource: ((String) -> Unit)? = null,
     onOpenProcessingStatus: () -> Unit = {},
     onOpenUnassigned: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
+    val headerState by headerViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val pullState = rememberPullRefreshState(
@@ -185,7 +196,13 @@ public fun CommitmentManagementScreen(
         onConsentRequiredClick = onOpenSettings,
         onOpenSettings = onOpenSettings,
         onOpenSources = onOpenSources,
+        onOpenSource = onOpenSource,
+        headerState = headerState,
         onOpenDetail = viewModel::onCommitmentSelected,
+        onCompletePersonAction = viewModel::onCompletePersonAction,
+        onOpenPersonActionEvidence = viewModel::onOpenPersonActionEvidence,
+        onDismissPersonActionEvidence = viewModel::onDismissPersonActionEvidence,
+        onRemindPersonAction = viewModel::onRemindPersonAction,
         onToggleConfirmedSection = viewModel::onToggleConfirmedSection,
         onToggleReviewSection = viewModel::onToggleReviewSection,
         onTogglePastSection = viewModel::onTogglePastSection,
@@ -204,6 +221,10 @@ public fun CommitmentManagementScreenContent(
     onMessageScreenshotImport: () -> Unit,
     onMeetingAudioImport: () -> Unit,
     onOpenDetail: (String) -> Unit,
+    onCompletePersonAction: (String) -> Unit = {},
+    onOpenPersonActionEvidence: (String, String?, String?) -> Unit = { _, _, _ -> },
+    onDismissPersonActionEvidence: () -> Unit = {},
+    onRemindPersonAction: (String) -> Unit = {},
     onToggleConfirmedSection: () -> Unit = {},
     onToggleReviewSection: () -> Unit = {},
     onTogglePastSection: () -> Unit = {},
@@ -224,19 +245,28 @@ public fun CommitmentManagementScreenContent(
     onOpenSettings: () -> Unit = {},
     onConsentRequiredClick: () -> Unit = onOpenSettings,
     onOpenSources: () -> Unit = onOpenSettings,
+    onOpenSource: ((String) -> Unit)? = null,
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
+    val showEvidenceImportFab = !state.loading && state.topActions.isEmpty()
+    val hasSourceWarning = headerState.hasSourceWarningForCompactLine()
+    val actionFeedStatus = state.actionFeedStatus
+    val actionFeedStatusMessage = actionFeedStatus?.let { personActionFeedCompactStatusMessage(it) }
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.commitments_title),
+        topChrome = BecalmTopChrome.MainTab,
         actions = {
             MainTabHeaderActions(
                 onOpenSettings = onOpenSettings,
+                compact = true,
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            EvidenceImportFloatingActionButton(onClick = evidenceImportController::openSheet)
+            if (showEvidenceImportFab) {
+                EvidenceImportFloatingActionButton(onClick = evidenceImportController::openSheet)
+            }
         },
     ) { padding ->
         Column(
@@ -244,6 +274,25 @@ public fun CommitmentManagementScreenContent(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            if (hasSourceWarning) {
+                MainTabCompactSourceAttentionLine(
+                    state = headerState,
+                    onOpenSources = onOpenSources,
+                    onOpenSource = onOpenSource,
+                    supportingStatusText = actionFeedStatusMessage,
+                    onOpenSupportingStatus = onStatusDetailsClick,
+                    testTagPrefix = "commitments-source",
+                )
+            } else if (actionFeedStatus != null) {
+                PersonActionFeedStatusLine(
+                    status = actionFeedStatus,
+                    onOpenProcessingStatus = onStatusDetailsClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    testTag = "commitments-action-feed-statusline",
+                )
+            }
             FilterChipRow(
                 selectedFilter = state.filter,
                 onFilterSelect = onFilterChange,
@@ -260,32 +309,28 @@ public fun CommitmentManagementScreenContent(
                     state.loading -> {
                         CommitmentListSkeleton()
                     }
-                    state.items.isEmpty() -> {
+                    state.items.isEmpty() && state.topActions.isEmpty() -> {
                         EmptyState(
                             title = stringResource(R.string.commitments_empty_title),
                             message = stringResource(R.string.commitments_empty_message),
                         )
 	                    }
 	                    else -> {
+                            val deferLegacySections = state.topActions.isNotEmpty()
+                            val confirmedSection = state.confirmedSection.deferWhen(deferLegacySections)
+                            val reviewSection = state.reviewSection.deferWhen(deferLegacySections)
+                            val pastSection = state.pastSection.deferWhen(deferLegacySections)
 	                        val confirmedHeader = stringResource(
 	                            R.string.commitment_section_confirmed_fmt,
-	                            state.confirmedSection.count,
+	                            confirmedSection.count,
 	                        )
 	                        val reviewHeader = stringResource(
 	                            R.string.commitment_section_review_fmt,
-	                            state.reviewSection.count,
+	                            reviewSection.count,
 	                        )
 	                        val pastHeader = stringResource(
 	                            R.string.commitment_section_past_fmt,
-	                            state.pastSection.count,
-	                        )
-	                        val completedHeader = stringResource(
-	                            R.string.commitment_section_completed_fmt,
-	                            state.completedSection.count,
-	                        )
-	                        val cancelledHeader = stringResource(
-	                            R.string.commitment_section_cancelled_fmt,
-	                            state.cancelledSection.count,
+	                            pastSection.count,
 	                        )
 	                        LazyColumn(
 	                            contentPadding = PaddingValues(
@@ -302,7 +347,12 @@ public fun CommitmentManagementScreenContent(
                                     item(key = "commitment-action-panel") {
                                         CommitmentActionPanel(
                                             actions = state.topActions,
+                                            loadingEvidenceActionId = state.loadingEvidenceActionId,
+                                            loadingReminderActionId = state.loadingReminderActionId,
                                             onOpenDetail = onOpenDetail,
+                                            onCompleteAction = onCompletePersonAction,
+                                            onOpenEvidence = onOpenPersonActionEvidence,
+                                            onRemind = onRemindPersonAction,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(bottom = 12.dp),
@@ -313,8 +363,8 @@ public fun CommitmentManagementScreenContent(
 	                            commitmentBucketSection(
 	                                sectionKey = "confirmed",
 	                                title = confirmedHeader,
-	                                section = state.confirmedSection,
-	                                showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
+	                                section = confirmedSection,
+	                                showWhenEmpty = !deferLegacySections,
 	                                onToggle = onToggleConfirmedSection,
 	                                onReviewRequiredClick = onReviewRequiredClick,
 	                                onOpenDetail = onOpenDetail,
@@ -323,8 +373,8 @@ public fun CommitmentManagementScreenContent(
 	                            commitmentBucketSection(
 	                                sectionKey = "review",
 	                                title = reviewHeader,
-	                                section = state.reviewSection,
-	                                showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
+	                                section = reviewSection,
+	                                showWhenEmpty = !deferLegacySections,
 	                                onToggle = onToggleReviewSection,
 	                                onReviewRequiredClick = onReviewRequiredClick,
 	                                onOpenDetail = onOpenDetail,
@@ -333,54 +383,13 @@ public fun CommitmentManagementScreenContent(
 	                            commitmentBucketSection(
 	                                sectionKey = "past",
 	                                title = pastHeader,
-	                                section = state.pastSection,
-	                                showWhenEmpty = state.filter != CommitmentFilter.CLOSED,
+	                                section = pastSection,
+	                                showWhenEmpty = !deferLegacySections,
 	                                onToggle = onTogglePastSection,
 	                                onReviewRequiredClick = onReviewRequiredClick,
 	                                onOpenDetail = onOpenDetail,
 	                            )
 
-	                            if (state.completedSection.visible) {
-	                                item(key = "header-completed") {
-	                                    ExpandableSectionHeader(
-	                                        title = completedHeader,
-	                                        expanded = state.completedSection.expanded,
-	                                        onToggle = onToggleCompletedSection,
-	                                    )
-	                                }
-	                                if (state.completedSection.expanded) {
-	                                    items(
-	                                        items = state.completedSection.items,
-	                                        key = { "completed-${it.id}" },
-	                                    ) { row ->
-	                                        CommitmentRowCard(
-	                                            row = row,
-	                                            onOpenDetail = onOpenDetail,
-	                                        )
-	                                    }
-	                                }
-	                            }
-
-	                            if (state.cancelledSection.visible) {
-	                                item(key = "header-cancelled") {
-	                                    ExpandableSectionHeader(
-	                                        title = cancelledHeader,
-	                                        expanded = state.cancelledSection.expanded,
-	                                        onToggle = onToggleCancelledSection,
-	                                    )
-	                                }
-	                                if (state.cancelledSection.expanded) {
-	                                    items(
-	                                        items = state.cancelledSection.items,
-	                                        key = { "cancelled-${it.id}" },
-	                                    ) { row ->
-	                                        CommitmentRowCard(
-	                                            row = row,
-	                                            onOpenDetail = onOpenDetail,
-	                                        )
-	                                    }
-	                                }
-	                            }
 	                        }
 	                    }
 	                }
@@ -392,6 +401,13 @@ public fun CommitmentManagementScreenContent(
                 )
             }
         }
+    }
+
+    state.evidenceDetail?.let { detail ->
+        PersonActionEvidenceDialog(
+            detail = detail,
+            onDismiss = onDismissPersonActionEvidence,
+        )
     }
 
     EvidenceImportSheetHost(
@@ -412,6 +428,9 @@ public fun CommitmentManagementScreenContent(
     )
 }
 
+private fun CommitmentSectionUiState.deferWhen(defer: Boolean): CommitmentSectionUiState =
+    if (defer && count > 0) copy(expanded = false) else this
+
 /**
  * CMT-013 undo window. Spec pins it at 5 seconds; Material3's [SnackbarDuration.Long]
  * is the closest built-in (~10 s), so the call-site races it against this timeout.
@@ -421,7 +440,12 @@ private const val UNDO_WINDOW_MS: Long = 5_000L
 @Composable
 private fun CommitmentActionPanel(
     actions: List<PersonActionItemUi>,
+    loadingEvidenceActionId: String?,
+    loadingReminderActionId: String?,
     onOpenDetail: (String) -> Unit,
+    onCompleteAction: (String) -> Unit,
+    onOpenEvidence: (String, String?, String?) -> Unit,
+    onRemind: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     EvidenceCard(
@@ -448,7 +472,12 @@ private fun CommitmentActionPanel(
             actions.forEach { action ->
                 CommitmentActionRow(
                     action = action,
+                    loadingEvidence = loadingEvidenceActionId == action.id,
+                    loadingReminder = loadingReminderActionId == action.id,
                     onOpenDetail = onOpenDetail,
+                    onCompleteAction = onCompleteAction,
+                    onOpenEvidence = onOpenEvidence,
+                    onRemind = onRemind,
                 )
             }
         }
@@ -458,7 +487,12 @@ private fun CommitmentActionPanel(
 @Composable
 private fun CommitmentActionRow(
     action: PersonActionItemUi,
+    loadingEvidence: Boolean,
+    loadingReminder: Boolean,
     onOpenDetail: (String) -> Unit,
+    onCompleteAction: (String) -> Unit,
+    onOpenEvidence: (String, String?, String?) -> Unit,
+    onRemind: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val commitmentId = action.commitmentId
@@ -508,17 +542,44 @@ private fun CommitmentActionRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        BecalmButton(
-            text = action.primaryVerb,
-            onClick = {
-                if (commitmentId != null) {
-                    onOpenDetail(commitmentId)
-                }
-            },
-            enabled = commitmentId != null,
+        val evidence = action.evidence
+        Row(
             modifier = Modifier.align(Alignment.End),
-            variant = BecalmButtonVariant.Secondary,
-        )
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (evidence?.kind != null && evidence.id != null) {
+                BecalmButton(
+                    text = stringResource(R.string.commitment_action_evidence),
+                    onClick = { onOpenEvidence(action.id, evidence.kind, evidence.id) },
+                    loading = loadingEvidence,
+                    variant = BecalmButtonVariant.Text,
+                )
+            }
+            if (action.shouldOfferReminder()) {
+                BecalmButton(
+                    text = stringResource(R.string.commitment_action_remind),
+                    onClick = { onRemind(action.id) },
+                    loading = loadingReminder,
+                    variant = BecalmButtonVariant.Text,
+                )
+            }
+            BecalmButton(
+                text = action.primaryVerb,
+                onClick = {
+                    if (commitmentId != null) {
+                        onOpenDetail(commitmentId)
+                    }
+                },
+                enabled = commitmentId != null,
+                variant = BecalmButtonVariant.Secondary,
+            )
+            BecalmButton(
+                text = stringResource(R.string.commitment_action_complete),
+                onClick = { onCompleteAction(action.id) },
+                variant = BecalmButtonVariant.Secondary,
+            )
+        }
     }
 }
 
@@ -758,7 +819,6 @@ private fun FilterChipRow(
         CommitmentFilter.ALL to stringResource(R.string.commitments_filter_all),
         CommitmentFilter.GIVE to stringResource(R.string.commitments_filter_give),
         CommitmentFilter.TAKE to stringResource(R.string.commitments_filter_take),
-        CommitmentFilter.CLOSED to stringResource(R.string.commitments_filter_closed),
     )
     LazyRow(
         modifier = modifier,

@@ -8,11 +8,13 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.worker.SourceConnectionLocalStateHydrator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -104,6 +106,8 @@ public class SourcesListViewModel @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val contactsPermissionChecker: ContactsPermissionChecker,
     private val userPrefsStore: UserPrefsStore,
+    private val sourceConnectionLocalStateHydrator: SourceConnectionLocalStateHydrator,
+    private val sourceSyncPort: SourceSyncPort,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -113,6 +117,7 @@ public class SourcesListViewModel @Inject constructor(
     /** One-shot navigation stream for row taps. */
     public val navigation: SharedFlow<SourcesListNavigation> = _navigation.asSharedFlow()
     private var refreshStatusesJob: Job? = null
+    private val handledSourceConnectionResults = mutableSetOf<String>()
 
     /**
      * Observable state consumed by the sources list composable.
@@ -173,10 +178,76 @@ public class SourcesListViewModel @Inject constructor(
     public fun refreshStatuses() {
         if (refreshStatusesJob?.isActive == true) return
         refreshStatusesJob = viewModelScope.launch {
+            hydrateSourceState()
+        }
+    }
+
+    /**
+     * Handles backend OAuth completion links that land on Settings > Sources.
+     *
+     * A completed browser callback only proves that the provider connection row exists. It does
+     * not prove provider fetch, source-event persistence, or next-action projection. Trigger one
+     * immediate backend-managed sync here so Settings behaves like onboarding instead of waiting
+     * for the next periodic worker pass.
+     */
+    public fun onSourceConnectionResult(
+        result: String?,
+        provider: String?,
+        family: String?,
+    ) {
+        val key = listOf(result.orEmpty(), provider.orEmpty(), family.orEmpty()).joinToString("|")
+        if (!handledSourceConnectionResults.add(key)) return
+        viewModelScope.launch {
+            hydrateSourceState()
+            val sourceType = sourceTypeForSuccessfulOAuthResult(
+                result = result,
+                provider = provider,
+                family = family,
+            ) ?: return@launch
+            when (sourceSyncPort.requestManualSync(sourceType)) {
+                is BecalmResult.Success -> logger.d(TAG, "post-OAuth source sync requested sourceType=$sourceType")
+                is BecalmResult.Failure -> logger.w(TAG, "post-OAuth source sync failed sourceType=$sourceType")
+            }
+        }
+    }
+
+    private suspend fun hydrateSourceState() {
+        val userId = authRepository.currentSession()?.userId
+        if (userId.isNullOrBlank()) {
+            logger.w(TAG, "source status refresh skipped without authenticated user")
+            return
+        }
+        runCatching {
+            sourceConnectionLocalStateHydrator.hydrate(userId)
+        }.onSuccess {
+            logger.d(TAG, "source connection local state hydrated from sources list")
+        }.onFailure {
+            logger.w(TAG, "source connection hydration failed from sources list")
             when (sourceStatusRepository.refreshFromServer()) {
-                is BecalmResult.Success -> logger.d(TAG, "source statuses refreshed")
+                is BecalmResult.Success -> logger.d(TAG, "source statuses refreshed after hydration failure")
                 is BecalmResult.Failure -> logger.w(TAG, "source status refresh failed")
             }
+        }
+    }
+
+    private fun sourceTypeForSuccessfulOAuthResult(
+        result: String?,
+        provider: String?,
+        family: String?,
+    ): String? {
+        if (result != "success") return null
+        val normalizedProvider = provider?.trim()?.lowercase().orEmpty()
+        val normalizedFamily = family?.trim()?.lowercase().orEmpty()
+        return when {
+            normalizedProvider == SourceType.GMAIL -> SourceType.GMAIL
+            normalizedProvider == SourceType.OUTLOOK_MAIL -> SourceType.OUTLOOK_MAIL
+            normalizedProvider == SourceType.GOOGLE_CALENDAR -> SourceType.GOOGLE_CALENDAR
+            normalizedProvider == SourceType.OUTLOOK_CALENDAR -> SourceType.OUTLOOK_CALENDAR
+            normalizedProvider == "google" && normalizedFamily == "mail" -> SourceType.GMAIL
+            normalizedProvider == "outlook" && normalizedFamily == "mail" -> SourceType.OUTLOOK_MAIL
+            normalizedProvider == "google" && normalizedFamily == "calendar" -> SourceType.GOOGLE_CALENDAR
+            normalizedProvider == "outlook" && normalizedFamily == "calendar" -> SourceType.OUTLOOK_CALENDAR
+            else -> null
         }
     }
 

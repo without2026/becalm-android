@@ -10,9 +10,12 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.CommitmentExtractionJobCreateRequest
+import com.becalm.android.data.remote.dto.ExtractionUploadPrepareRequest
 import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.SourceExtractionInputAdapter
+import com.becalm.android.data.repository.SourceExtractionRequestParts
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -21,8 +24,12 @@ import com.squareup.moshi.Moshi
 import java.io.IOException
 import java.util.UUID
 import kotlinx.datetime.Clock
+import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
+import okio.BufferedSink
+import retrofit2.Response
 
 internal data class SourceExtractionUploadRequest(
     val userId: String,
@@ -68,6 +75,9 @@ internal class SourceExtractionUploadRunner(
             request = request,
             result = "started",
         )
+        directUploadMedia(request)?.let { media ->
+            return uploadWithPreparedStorage(request, parts, media)
+        }
         val response = try {
             sourceExtractionApi.commitmentExtract(
                 audio = request.audioPart,
@@ -99,105 +109,148 @@ internal class SourceExtractionUploadRunner(
             return handleTransientFailure(request)
         }
 
+        return handleCommitmentExtractionResponse(response, request)
+    }
+
+    private suspend fun uploadWithPreparedStorage(
+        request: SourceExtractionUploadRequest,
+        parts: SourceExtractionRequestParts,
+        media: DirectUploadMedia,
+    ): ListenableWorker.Result {
+        val contentType = media.part.body.contentType()?.toString() ?: defaultMediaContentType(media.kind)
+        val contentLength = runCatching {
+            media.part.body.contentLength()
+        }.getOrDefault(-1L).takeIf { it > 0L }
+
+        val prepareResponse = try {
+            sourceExtractionApi.prepareCommitmentExtractionUpload(
+                ExtractionUploadPrepareRequest(
+                    inputModality = request.inputModality,
+                    sourceType = request.entity.sourceType,
+                    rawEventId = request.rawEventId,
+                    contentType = contentType,
+                    contentLength = contentLength,
+                ),
+            )
+        } catch (e: IOException) {
+            logger.w(
+                tag,
+                "direct upload prepare network error id=${redact(request.rawEventId)} " +
+                    "attempt=$runAttemptCount: ${e.message}",
+            )
+            trackExtraction(
+                eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                request = request,
+                result = "direct_upload_prepare_network_error",
+                retryable = true,
+            )
+            return handleTransientFailure(request)
+        }
+        if (prepareResponse.code() != 200) {
+            return handleExtractionHttpFailure(
+                httpStatus = prepareResponse.code(),
+                retryAfterSeconds = prepareResponse.headers()[HEADER_RETRY_AFTER]?.toLongOrNull(),
+                errorBodyString = prepareResponse.errorBody()?.string(),
+                request = request,
+            )
+        }
+        val prepare = prepareResponse.body() ?: return handleTransientFailure(request)
+        val uploadResponse = try {
+            sourceExtractionApi.uploadExtractionMediaToSignedUrl(
+                signedUploadUrl = prepare.signedUploadUrl,
+                file = media.part.toSignedUploadPart(prepare.uploadContentType),
+            )
+        } catch (e: IOException) {
+            logger.w(
+                tag,
+                "signed media upload network error id=${redact(request.rawEventId)} " +
+                    "attempt=$runAttemptCount: ${e.message}",
+            )
+            trackExtraction(
+                eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                request = request,
+                result = "signed_upload_network_error",
+                retryable = true,
+            )
+            return handleTransientFailure(request)
+        }
+        uploadResponse.body()?.close()
+        if (!uploadResponse.isSuccessful) {
+            uploadResponse.errorBody()?.close()
+            logger.w(
+                tag,
+                "signed media upload HTTP ${uploadResponse.code()} id=${redact(request.rawEventId)}",
+            )
+            if (uploadResponse.code() == 413) {
+                processingStatusRepository.recordError(request.entity.sourceType, request.nonRetryableErrorMessage)
+                request.onMarkFailed("signed_upload_too_large")
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "signed_upload_too_large",
+                    retryable = false,
+                )
+                return ListenableWorker.Result.success()
+            }
+            trackExtraction(
+                eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                request = request,
+                result = "signed_upload_http_${uploadResponse.code()}",
+                retryable = true,
+            )
+            return handleTransientFailure(request)
+        }
+
+        val jobResponse = try {
+            sourceExtractionApi.createCommitmentExtractionJob(
+                CommitmentExtractionJobCreateRequest(
+                    inputModality = request.inputModality,
+                    sourceType = request.entity.sourceType,
+                    clientEventId = request.entity.clientEventId,
+                    rawEventId = request.rawEventId,
+                    timestamp = request.entity.timestamp.toString(),
+                    storageRef = prepare.storageRef,
+                    durationSeconds = request.entity.durationSeconds
+                        ?: if (request.inputModality == MEDIA_KIND_AUDIO) 0 else null,
+                    counterpartyRef = request.entity.counterpartyRef,
+                    eventTitle = request.entity.eventTitle,
+                    folder = request.entity.folder,
+                    conversationRef = request.entity.conversationRef,
+                    previousThreadContext = null,
+                    selfSpeakerId = request.selfSpeakerId,
+                    processingConfirmed = request.processingConfirmed,
+                ),
+            )
+        } catch (e: IOException) {
+            logger.w(
+                tag,
+                "direct extraction job create network error id=${redact(request.rawEventId)} " +
+                    "attempt=$runAttemptCount: ${e.message}",
+            )
+            trackExtraction(
+                eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                request = request,
+                result = "direct_job_create_network_error",
+                retryable = true,
+            )
+            return handleTransientFailure(request)
+        }
+        return handleCommitmentExtractionResponse(jobResponse, request)
+    }
+
+    private suspend fun handleCommitmentExtractionResponse(
+        response: Response<SourceExtractionResponse>,
+        request: SourceExtractionUploadRequest,
+    ): ListenableWorker.Result {
         return when (response.code()) {
             200 -> persistSuccess(response.body() ?: return handleTransientFailure(request), request)
             202 -> handleJobAccepted(response.body(), request)
-            401 -> {
-                logger.w(tag, "HTTP 401 after refresh id=${redact(request.rawEventId)} — marking failed")
-                processingStatusRepository.recordError(request.entity.sourceType, "Unauthorized")
-                request.onMarkFailed("unauthorized")
-                trackExtraction(
-                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
-                    request = request,
-                    result = "unauthorized",
-                    retryable = false,
-                )
-                ListenableWorker.Result.success()
-            }
-            403, 413, 422 -> {
-                logger.w(tag, "HTTP ${response.code()} non-retryable id=${redact(request.rawEventId)} — quarantining")
-                processingStatusRepository.recordError(request.entity.sourceType, request.nonRetryableErrorMessage)
-                request.onMarkFailed("non_retryable_http_${response.code()}")
-                trackExtraction(
-                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
-                    request = request,
-                    result = "non_retryable_http_${response.code()}",
-                    retryable = false,
-                )
-                ListenableWorker.Result.success()
-            }
-            502 -> handle502(response.errorBody()?.string(), request)
-            429 -> {
-                val envelope = parseExtractionErrorEnvelope(
-                    errorBodyString = response.errorBody()?.string(),
-                    request = request,
-                    httpStatus = 429,
-                )
-                val errorCode = envelope?.error
-                if (errorCode == ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED) {
-                    processingStatusRepository.recordBlocked(
-                        request.entity.sourceType,
-                        ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED,
-                    )
-                } else {
-                    processingStatusRepository.recordGemini(
-                        request.entity.sourceType,
-                        ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING,
-                    )
-                }
-                trackExtraction(
-                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
-                    request = request,
-                    result = errorCode ?: "rate_limited",
-                    retryable = true,
-                )
-                request.onRateLimited?.invoke(response.headers()[HEADER_RETRY_AFTER]?.toLongOrNull())
-                    ?: handleTransientFailure(request)
-            }
-            500, 503 -> {
-                val envelope = parseExtractionErrorEnvelope(
-                    errorBodyString = response.errorBody()?.string(),
-                    request = request,
-                    httpStatus = response.code(),
-                )
-                if (
-                    response.code() == 503 &&
-                    request.onRestartSpeakerPreview != null &&
-                    envelope.isSpeakerPreviewUnavailable()
-                ) {
-                    logger.w(
-                        tag,
-                        "speaker preview unavailable id=${redact(request.rawEventId)} — restarting preview",
-                    )
-                    trackExtraction(
-                        eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
-                        request = request,
-                        result = SourceExtractionErrorEnvelope.SPEAKER_PREVIEW_UNAVAILABLE,
-                        retryable = true,
-                    )
-                    return request.onRestartSpeakerPreview.invoke()
-                }
-                logger.w(tag, "HTTP ${response.code()} transient id=${redact(request.rawEventId)} attempt=$runAttemptCount")
-                trackExtraction(
-                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
-                    request = request,
-                    result = envelope?.error ?: "transient_http_${response.code()}",
-                    retryable = true,
-                )
-                handleTransientFailure(request)
-            }
-            else -> {
-                logger.w(tag, "HTTP ${response.code()} unexpected id=${redact(request.rawEventId)} — marking failed")
-                processingStatusRepository.recordError(request.entity.sourceType, "Unexpected HTTP ${response.code()}")
-                request.onMarkFailed("unexpected_http_${response.code()}")
-                trackExtraction(
-                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
-                    request = request,
-                    result = "unexpected_http_${response.code()}",
-                    retryable = false,
-                )
-                ListenableWorker.Result.success()
-            }
+            else -> handleExtractionHttpFailure(
+                httpStatus = response.code(),
+                retryAfterSeconds = response.headers()[HEADER_RETRY_AFTER]?.toLongOrNull(),
+                errorBodyString = response.errorBody()?.string(),
+                request = request,
+            )
         }
     }
 
@@ -472,6 +525,112 @@ internal class SourceExtractionUploadRunner(
         }
     }
 
+    private suspend fun handleExtractionHttpFailure(
+        httpStatus: Int,
+        retryAfterSeconds: Long?,
+        errorBodyString: String?,
+        request: SourceExtractionUploadRequest,
+    ): ListenableWorker.Result {
+        return when (httpStatus) {
+            401 -> {
+                logger.w(tag, "HTTP 401 after refresh id=${redact(request.rawEventId)} — marking failed")
+                processingStatusRepository.recordError(request.entity.sourceType, "Unauthorized")
+                request.onMarkFailed("unauthorized")
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "unauthorized",
+                    retryable = false,
+                )
+                ListenableWorker.Result.success()
+            }
+            403, 413, 422, 428 -> {
+                logger.w(tag, "HTTP $httpStatus non-retryable id=${redact(request.rawEventId)} — quarantining")
+                processingStatusRepository.recordError(request.entity.sourceType, request.nonRetryableErrorMessage)
+                request.onMarkFailed("non_retryable_http_$httpStatus")
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "non_retryable_http_$httpStatus",
+                    retryable = false,
+                )
+                ListenableWorker.Result.success()
+            }
+            502 -> handle502(errorBodyString, request)
+            429 -> {
+                val envelope = parseExtractionErrorEnvelope(
+                    errorBodyString = errorBodyString,
+                    request = request,
+                    httpStatus = 429,
+                )
+                val errorCode = envelope?.error
+                if (errorCode == ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED) {
+                    processingStatusRepository.recordBlocked(
+                        request.entity.sourceType,
+                        ProcessingStatusMessages.LLM_DAILY_BUDGET_EXCEEDED,
+                    )
+                } else {
+                    processingStatusRepository.recordGemini(
+                        request.entity.sourceType,
+                        ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING,
+                    )
+                }
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = errorCode ?: "rate_limited",
+                    retryable = true,
+                )
+                request.onRateLimited?.invoke(retryAfterSeconds)
+                    ?: handleTransientFailure(request)
+            }
+            500, 503 -> {
+                val envelope = parseExtractionErrorEnvelope(
+                    errorBodyString = errorBodyString,
+                    request = request,
+                    httpStatus = httpStatus,
+                )
+                if (
+                    httpStatus == 503 &&
+                    request.onRestartSpeakerPreview != null &&
+                    envelope.isSpeakerPreviewUnavailable()
+                ) {
+                    logger.w(
+                        tag,
+                        "speaker preview unavailable id=${redact(request.rawEventId)} — restarting preview",
+                    )
+                    trackExtraction(
+                        eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                        request = request,
+                        result = SourceExtractionErrorEnvelope.SPEAKER_PREVIEW_UNAVAILABLE,
+                        retryable = true,
+                    )
+                    return request.onRestartSpeakerPreview.invoke()
+                }
+                logger.w(tag, "HTTP $httpStatus transient id=${redact(request.rawEventId)} attempt=$runAttemptCount")
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = envelope?.error ?: "transient_http_$httpStatus",
+                    retryable = true,
+                )
+                handleTransientFailure(request)
+            }
+            else -> {
+                logger.w(tag, "HTTP $httpStatus unexpected id=${redact(request.rawEventId)} — marking failed")
+                processingStatusRepository.recordError(request.entity.sourceType, "Unexpected HTTP $httpStatus")
+                request.onMarkFailed("unexpected_http_$httpStatus")
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "unexpected_http_$httpStatus",
+                    retryable = false,
+                )
+                ListenableWorker.Result.success()
+            }
+        }
+    }
+
     private fun parseExtractionErrorEnvelope(
         errorBodyString: String?,
         request: SourceExtractionUploadRequest,
@@ -538,6 +697,7 @@ internal class SourceExtractionUploadRunner(
     private companion object {
         private const val HEADER_RETRY_AFTER: String = "Retry-After"
         private const val STATUS_PENDING: String = "pending"
+        private const val MEDIA_KIND_AUDIO: String = "audio"
         private const val JOB_STATUS_PENDING: String = "pending"
         private const val JOB_STATUS_PROCESSING: String = "processing"
         private const val JOB_STATUS_SUCCEEDED: String = "succeeded"
@@ -551,3 +711,51 @@ private fun SourceExtractionErrorEnvelope?.isSpeakerPreviewUnavailable(): Boolea
             error == SourceExtractionErrorEnvelope.SPEAKER_PREVIEW_UNAVAILABLE ||
                 clientAction == SourceExtractionErrorEnvelope.RESTART_MEETING_SPEAKER_PREVIEW
             )
+
+private data class DirectUploadMedia(
+    val kind: String,
+    val part: MultipartBody.Part,
+)
+
+private fun directUploadMedia(request: SourceExtractionUploadRequest): DirectUploadMedia? {
+    if (!request.speakerPreviewId.isNullOrBlank() || !request.speakerMappingsJson.isNullOrBlank()) {
+        return null
+    }
+    request.imagePart?.let { return DirectUploadMedia("image", it) }
+    request.audioPart?.let { return DirectUploadMedia("audio", it) }
+    return null
+}
+
+private fun MultipartBody.Part.toSignedUploadPart(uploadContentType: String): MultipartBody.Part =
+    MultipartBody.Part.createFormData(
+        "file",
+        fileName() ?: "extraction-media",
+        UploadContentTypeRequestBody(body, uploadContentType),
+    )
+
+private fun MultipartBody.Part.fileName(): String? =
+    headers
+        ?.get("Content-Disposition")
+        ?.let { DirectUploadFilenameRegex.find(it)?.groupValues?.getOrNull(1) }
+        ?.takeIf { it.isNotBlank() }
+
+private fun defaultMediaContentType(kind: String): String =
+    if (kind == "audio") "audio/m4a" else "image/png"
+
+private val DirectUploadFilenameRegex = Regex("""filename="([^"]+)"""")
+
+private class UploadContentTypeRequestBody(
+    private val delegate: RequestBody,
+    private val uploadContentType: String,
+) : RequestBody() {
+    override fun contentType(): MediaType? =
+        uploadContentType.toMediaTypeOrNull() ?: delegate.contentType()
+
+    override fun contentLength(): Long = delegate.contentLength()
+
+    override fun isOneShot(): Boolean = true
+
+    override fun writeTo(sink: BufferedSink) {
+        delegate.writeTo(sink)
+    }
+}

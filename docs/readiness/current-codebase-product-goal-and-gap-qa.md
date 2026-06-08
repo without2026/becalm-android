@@ -469,6 +469,19 @@ conditional이어야 한다. 이 beta는 failure를 발견하기 위한 단계�
 Fresh user proof는 별도 runbook으로 분리했다:
 `docs/readiness/beta-fresh-no-user-data-test-plan.md`.
 
+추가 current-tree proof: 2026-06-05 KST에
+`qa/device/scripts/person_action_live_dev_device_smoke.py --confirm-live-dev --confirm-clear-data`
+가 Samsung SM-F721N에서 통과했다. 이 경로는 dev backend에 임시 auth user와 manual
+memory를 만들고, `/v1/person_action_items?surface=person` 200/count 1/caught_up을
+확인한 뒤, 실제 `pm clear com.becalm.android`로 local Room/token/DataStore를 지우고,
+debug session 재주입 후 Android Room refresh와 People action-first UI 렌더링을 검증한다.
+Report `qa/device/reports/person-action-live-dev-20260604-220941/summary.env`는
+`android_refresh_logged_success=true`, `action_title_present=true`,
+`person_name_present=true`, `secret_free_report=true`, `fatal_anr_oom_count=0`,
+`issues=`를 기록했다. 같은 시간대 Railway dev 로그의 smoke 관련 호출은
+`/health` 200, `/v1/manual_memories` 201, `/v1/person_action_items` 200이며
+`error OR exception OR 503` matches는 0이었다.
+
 핵심 원칙:
 
 - Android `pm clear com.becalm.android`는 local no-user-data만 보장한다.

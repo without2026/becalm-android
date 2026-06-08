@@ -1,17 +1,22 @@
 /**
  * SP-51: Root scaffold wrapper for BeCalm Android screens.
  *
- * Provides the warm frosted canvas, subtle ambient wash, and a centered
+ * Provides the ink-mist app canvas, optional ambient wash, and a centered
  * [TopAppBar] pattern that all screens in the app share. Delegates all slot
  * forwarding (bottom bar, FAB, snackbar) to Material3 [Scaffold].
  */
 package com.becalm.android.ui.components
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
@@ -24,12 +29,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -39,9 +46,14 @@ import com.becalm.android.ui.theme.becalmColors
 
 // ─── BecalmScaffold ───────────────────────────────────────────────────────────
 
+public enum class BecalmTopChrome {
+    Standard,
+    MainTab,
+}
+
 /**
- * Root scaffold that composes the warm background canvas, top-half ambient
- * wash, and a transparent [CenterAlignedTopAppBar] over a Material3
+ * Root scaffold that composes the app background canvas, optional top-half
+ * ambient wash, and a transparent [CenterAlignedTopAppBar] over a Material3
  * [Scaffold] with a transparent container.
  *
  * The ambient wash is drawn with [drawWithCache] using a radial gradient from
@@ -57,6 +69,9 @@ import com.becalm.android.ui.theme.becalmColors
  * @param bottomBar       Bottom navigation bar slot. Defaults to empty.
  * @param snackbarHost    Snackbar host slot. Defaults to empty.
  * @param floatingActionButton FAB slot. Defaults to empty.
+ * @param topChrome       Top chrome variant. Main tabs use a compact status
+ *                        row so the action-first content stays in the first
+ *                        viewport like the HTML prototype.
  * @param content         Screen content, receives [PaddingValues] from the inner
  *                        [Scaffold] to respect top/bottom bar insets.
  */
@@ -70,6 +85,7 @@ public fun BecalmScaffold(
     bottomBar: @Composable () -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
+    topChrome: BecalmTopChrome = BecalmTopChrome.Standard,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val becalmColors = MaterialTheme.becalmColors
@@ -109,24 +125,31 @@ public fun BecalmScaffold(
             containerColor = Color.Transparent,
             contentColor = onSurface,
             topBar = {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    navigationIcon = navigationIcon ?: {},
-                    actions = actions,
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = Color.Transparent,
-                        titleContentColor = onSurface,
-                        actionIconContentColor = onSurface,
-                        navigationIconContentColor = onSurface,
-                    ),
-                )
+                if (topChrome == BecalmTopChrome.MainTab && navigationIcon == null) {
+                    BecalmMainTabTopBar(
+                        title = title,
+                        actions = actions,
+                    )
+                } else {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        navigationIcon = navigationIcon ?: {},
+                        actions = actions,
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.Transparent,
+                            titleContentColor = onSurface,
+                            actionIconContentColor = onSurface,
+                            navigationIconContentColor = onSurface,
+                        ),
+                    )
+                }
             },
             bottomBar = bottomBar,
             snackbarHost = snackbarHost,
@@ -134,6 +157,40 @@ public fun BecalmScaffold(
             content = content,
         )
     }
+}
+
+@Composable
+private fun BecalmMainTabTopBar(
+    title: String,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .padding(start = 18.dp, end = 18.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SpacerForBalancedChrome()
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+            content = actions,
+        )
+    }
+}
+
+@Composable
+private fun SpacerForBalancedChrome() {
+    Box(modifier = Modifier.width(36.dp))
 }
 
 // ─── Previews ─────────────────────────────────────────────────────────────────

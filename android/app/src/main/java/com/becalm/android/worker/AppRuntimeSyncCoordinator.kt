@@ -5,6 +5,7 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.di.MainDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.ManualMemoryOutboxDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
@@ -32,6 +33,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private val workScheduler: WorkScheduler,
     private val userPrefsStore: UserPrefsStore,
     private val rawIngestionEventDao: RawIngestionEventDao,
+    private val manualMemoryOutboxDao: ManualMemoryOutboxDao,
     private val meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao,
     private val personIndexDao: PersonIndexDao,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -48,6 +50,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private var backendMailScheduled: Boolean = false
     private var commonRecurringWorkScheduled: Boolean = false
     private var sourceParticipantMirrorRetryScheduledForUser: String? = null
+    private var manualMemoryOutboxRetryScheduledForUser: String? = null
     private var staleLinkedSourceProjectionRepairScheduledForUser: String? = null
     private var staleRawSourceProjectionRepairScheduledForUser: String? = null
     private var staleLocalProcessingStateRepairScheduledForUser: String? = null
@@ -87,6 +90,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         backendMailScheduled = false
         commonRecurringWorkScheduled = false
         sourceParticipantMirrorRetryScheduledForUser = null
+        manualMemoryOutboxRetryScheduledForUser = null
         staleLinkedSourceProjectionRepairScheduledForUser = null
         staleRawSourceProjectionRepairScheduledForUser = null
         staleLocalProcessingStateRepairScheduledForUser = null
@@ -120,6 +124,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
             backendMailScheduled = false
             commonRecurringWorkScheduled = false
             sourceParticipantMirrorRetryScheduledForUser = null
+            manualMemoryOutboxRetryScheduledForUser = null
             staleLinkedSourceProjectionRepairScheduledForUser = null
             staleRawSourceProjectionRepairScheduledForUser = null
             staleLocalProcessingStateRepairScheduledForUser = null
@@ -153,6 +158,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
             commonRecurringWorkScheduled = true
         }
         enqueuePendingSourceParticipantMirrorsIfNeeded(userId)
+        enqueuePendingManualMemoryOutboxIfNeeded(userId)
         enqueueStaleLinkedSourceProjectionRepairIfNeeded(userId)
         enqueueStaleRawSourceProjectionRepairIfNeeded(userId)
         repairStaleLocalProcessingStateIfNeeded(userId)
@@ -168,6 +174,19 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
             workScheduler.enqueueSourceParticipantMirrorRetry()
             sourceParticipantMirrorRetryScheduledForUser = userId
             logger.d(TAG, "pending source participant mirror retry scheduled")
+        }
+    }
+
+    private suspend fun enqueuePendingManualMemoryOutboxIfNeeded(userId: String) {
+        if (manualMemoryOutboxRetryScheduledForUser == userId) return
+        val hasPendingManualMemory = manualMemoryOutboxDao.findPendingForUser(
+            userId = userId,
+            limit = 1,
+        ).isNotEmpty()
+        if (hasPendingManualMemory) {
+            workScheduler.enqueueManualMemoryOutboxRetry()
+            manualMemoryOutboxRetryScheduledForUser = userId
+            logger.d(TAG, "pending manual memory outbox retry scheduled")
         }
     }
 

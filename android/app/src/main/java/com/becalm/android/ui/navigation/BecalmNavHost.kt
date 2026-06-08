@@ -26,6 +26,7 @@ import com.becalm.android.ui.onboarding.GoogleCalendarOAuthScreen
 import com.becalm.android.ui.onboarding.GmailOAuthScreen
 import com.becalm.android.ui.onboarding.ImapSetupScreen
 import com.becalm.android.ui.onboarding.NotificationPermissionScreen
+import com.becalm.android.ui.onboarding.ONBOARDING_COMPLETE_GENERIC_PERSON_ID
 import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentScreen
 import com.becalm.android.ui.onboarding.OnboardingCompleteScreen
 import com.becalm.android.ui.onboarding.OnboardingSetupScreen
@@ -416,7 +417,9 @@ public fun BecalmNavHost(
                 override(backStackEntry)
             } else {
                 LaunchedEffect(navController) {
-                    navController.navigate(BecalmNavigationDefaults.authenticatedHomeRoute) {
+                    navController.navigate(
+                        BecalmRoute.OnboardingComplete(ONBOARDING_COMPLETE_GENERIC_PERSON_ID).path,
+                    ) {
                         popUpTo(BecalmRoute.OnboardingColdSync.path) { inclusive = true }
                         launchSingleTop = true
                     }
@@ -444,7 +447,11 @@ public fun BecalmNavHost(
             if (override != null) {
                 override(backStackEntry)
             } else {
-                PersonsScreen(navController = navController)
+                PersonsScreen(
+                    navController = navController,
+                    showShareImportNotice = showShareImportNotice,
+                    onShareImportNoticeShown = onShareImportNoticeShown,
+                )
             }
         }
 
@@ -509,6 +516,11 @@ public fun BecalmNavHost(
                     },
                     onOpenSources = {
                         navController.navigate(BecalmRoute.SettingsSources.path) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onOpenSource = { sourceType ->
+                        navController.navigate(BecalmRoute.SourceDetail(sourceType).path) {
                             launchSingleTop = true
                         }
                     },
@@ -707,7 +719,10 @@ public fun BecalmNavHost(
             if (override != null) {
                 override(backStackEntry)
             } else {
-                SettingsSourceConnectionsScreen(navController = navController)
+                SettingsSourceConnectionsScreen(
+                    navController = navController,
+                    targetSourceConnectionId = navController.sourceReconnectTargetConnectionId(),
+                )
             }
         }
 
@@ -726,6 +741,7 @@ public fun BecalmNavHost(
                 SettingsSourceConnectionsScreen(
                     navController = navController,
                     targetProviderSlug = entry.stringArg(BecalmRoute.SettingsSourceConnection.ARG_PROVIDER),
+                    targetSourceConnectionId = navController.sourceReconnectTargetConnectionId(),
                 )
             }
         }

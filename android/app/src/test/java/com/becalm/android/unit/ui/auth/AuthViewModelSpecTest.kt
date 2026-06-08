@@ -21,6 +21,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -89,7 +90,7 @@ class AuthViewModelSpecTest {
         advanceUntilIdle()
 
         assertEquals(AuthUiState.SignedOut(termsAccepted = false), viewModel.uiState.value)
-        coVerify(exactly = 0) { runtimeBootstrap.startForUser(any()) }
+        verify(exactly = 0) { runtimeBootstrap.startForUserAsync(any()) }
     }
 
     @Test
@@ -105,7 +106,7 @@ class AuthViewModelSpecTest {
             AuthUiState.SignedIn(userId = "user-123", onboardingCompleted = true),
             viewModel.uiState.value,
         )
-        coVerify(exactly = 1) { runtimeBootstrap.startForUser("user-123") }
+        verify(exactly = 1) { runtimeBootstrap.startForUserAsync("user-123") }
     }
 
     @Test
@@ -276,7 +277,7 @@ class AuthViewModelSpecTest {
             viewModel.uiState.value,
         )
         coVerify(exactly = 1) { sessionStore.load() }
-        coVerify(exactly = 1) { runtimeBootstrap.startForUser("user-123") }
+        verify(exactly = 1) { runtimeBootstrap.startForUserAsync("user-123") }
     }
 
     @Test
@@ -292,7 +293,7 @@ class AuthViewModelSpecTest {
             AuthUiState.SignedIn(userId = "user-123", onboardingCompleted = true),
             viewModel.uiState.value,
         )
-        coVerify(exactly = 1) { runtimeBootstrap.startForUser("user-123") }
+        verify(exactly = 1) { runtimeBootstrap.startForUserAsync("user-123") }
     }
 
     @Test
@@ -562,7 +563,6 @@ class AuthViewModelSpecTest {
         userPrefsStore = userPrefsStore,
         userProfileRepository = userProfileRepository,
         runtimeBootstrapProvider = runtimeBootstrapProvider,
-        runtimeBootstrapDispatcher = testDispatcher,
         logger = logger,
     )
 

@@ -10,9 +10,11 @@ import com.becalm.android.ui.onboarding.SourceConnectionProjector
 import com.becalm.android.ui.onboarding.SourceConnectionState
 import com.becalm.android.ui.onboarding.SourceConnectionsEntryPoint
 import com.becalm.android.ui.onboarding.StepStatus
+import com.becalm.android.ui.onboarding.sourceConnectionStateForStatus
 import com.becalm.android.ui.onboarding.sourceConnectionPresentationFor
 import com.becalm.android.ui.components.StatusTone
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -130,7 +132,7 @@ class OnboardingSourceConnectionProjectorSpecTest {
             transientStates = emptyMap(),
             respectStepStates = false,
             includedProviders = setOf(OnboardingSourceProvider.GMAIL),
-            existingConnectionProviders = setOf(OnboardingSourceProvider.GMAIL),
+            existingConnectionStates = mapOf(OnboardingSourceProvider.GMAIL to SourceConnectionState.Connected),
             stringFor = { resId -> "res:$resId" },
         )
 
@@ -139,6 +141,21 @@ class OnboardingSourceConnectionProjectorSpecTest {
             "res:${R.string.settings_source_connections_add_another_account}",
             items.single().primaryActionLabel,
         )
+    }
+
+    @Test
+    fun `settings projection keeps provider reauth required state retryable`() {
+        val items = SourceConnectionProjector.sourceConnectionItems(
+            stepStates = emptyMap(),
+            transientStates = emptyMap(),
+            respectStepStates = false,
+            includedProviders = setOf(OnboardingSourceProvider.GOOGLE_CALENDAR),
+            existingConnectionStates = mapOf(OnboardingSourceProvider.GOOGLE_CALENDAR to SourceConnectionState.Failed),
+            stringFor = { resId -> "res:$resId" },
+        )
+
+        assertEquals(SourceConnectionState.Failed, items.single().state)
+        assertNull(items.single().primaryActionLabel)
     }
 
     @Test
@@ -191,8 +208,16 @@ class OnboardingSourceConnectionProjectorSpecTest {
             SourceConnectionProjector.emailErrorMessageRes(EmailPipaProvider.OUTLOOK_MAIL, "scope_denied"),
         )
         assertEquals(
+            R.string.onb_oauth_error_browser_unavailable,
+            SourceConnectionProjector.emailErrorMessageRes(EmailPipaProvider.GMAIL, "browser_unavailable"),
+        )
+        assertEquals(
             R.string.onb_gcal_error_unavailable,
             SourceConnectionProjector.calendarErrorMessageRes(CalendarOAuthProvider.GOOGLE_CALENDAR, "oauth_not_configured"),
+        )
+        assertEquals(
+            R.string.onb_oauth_error_browser_unavailable,
+            SourceConnectionProjector.calendarErrorMessageRes(CalendarOAuthProvider.GOOGLE_CALENDAR, "browser_unavailable"),
         )
         assertEquals(
             R.string.onb_outlook_cal_error_unknown,
@@ -245,6 +270,17 @@ class OnboardingSourceConnectionProjectorSpecTest {
         assertEquals(R.string.onb_sources_status_syncing, sourceConnectionPresentationFor(SourceConnectionState.Syncing).labelRes)
         assertEquals(StatusTone.Progress, sourceConnectionPresentationFor(SourceConnectionState.Syncing).tone)
         assertEquals(false, sourceConnectionPresentationFor(SourceConnectionState.Syncing).terminal)
+    }
+
+    @Test
+    fun `source connection status mapper treats synced as healthy and reauth as failed`() {
+        assertEquals(SourceConnectionState.Connected, sourceConnectionStateForStatus("connected"))
+        assertEquals(SourceConnectionState.Connected, sourceConnectionStateForStatus("synced"))
+        assertEquals(SourceConnectionState.Syncing, sourceConnectionStateForStatus("syncing"))
+        assertEquals(SourceConnectionState.Connecting, sourceConnectionStateForStatus("connecting"))
+        assertEquals(SourceConnectionState.Failed, sourceConnectionStateForStatus("failed"))
+        assertEquals(SourceConnectionState.Failed, sourceConnectionStateForStatus("needs_reauth"))
+        assertEquals(SourceConnectionState.Idle, sourceConnectionStateForStatus("disconnected"))
     }
 
     @Test

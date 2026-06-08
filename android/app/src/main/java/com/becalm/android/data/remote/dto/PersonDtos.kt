@@ -66,23 +66,44 @@ public data class PersonListResponse(
 )
 
 /**
+ * Bounded person-detail recall row returned by GET /v1/persons/{person_id}/events.
+ *
+ * Backend rows are intentionally source-of-truth recall projections, not a full local
+ * Room dump. Optional fields are consumed when present and have local fallbacks so older
+ * backend deployments keep rendering safely.
+ */
+@JsonClass(generateAdapter = true)
+public data class PersonEventDto(
+    @field:Json(name = "id") val id: String,
+    @field:Json(name = "user_id") val userId: String? = null,
+    @field:Json(name = "person_id") val personId: String? = null,
+    @field:Json(name = "source_event_id") val sourceEventId: String? = null,
+    @field:Json(name = "commitment_id") val commitmentId: String? = null,
+    @field:Json(name = "interaction_key") val interactionKey: String? = null,
+    @field:Json(name = "interaction_type") val interactionType: String? = null,
+    @field:Json(name = "source_type") val sourceType: String,
+    @field:Json(name = "source_ref") val sourceRef: String? = null,
+    @field:Json(name = "provider_event_id") val providerEventId: String? = null,
+    @field:Json(name = "source_connection_id") val sourceConnectionId: String? = null,
+    @field:Json(name = "event_kind") val eventKind: String? = null,
+    @field:Json(name = "role") val role: String? = null,
+    @field:Json(name = "direction") val direction: String? = null,
+    @field:Json(name = "status") val status: String? = null,
+    @field:Json(name = "occurred_at") val occurredAt: Instant,
+    @field:Json(name = "title") val title: String? = null,
+    @field:Json(name = "snippet") val snippet: String? = null,
+    @field:Json(name = "confidence") val confidence: Double? = null,
+    @field:Json(name = "created_at") val createdAt: Instant? = null,
+    @field:Json(name = "updated_at") val updatedAt: Instant? = null,
+)
+
+/**
  * Paginated list response for GET /v1/persons/{person_id}/events.
- *
- * Wire format: { data: RawIngestionEvent[], cursor: string, has_more: boolean }
- *
- * Returns the timeline of raw ingestion events associated with the given person_id.
- * Returns 404 when no events exist for the given person_id.
  */
 @JsonClass(generateAdapter = true)
 public data class PersonEventsResponse(
-    @field:Json(name = "data") val data: List<RawIngestionEventDto>,
-
-    /**
-     * Opaque pagination cursor. Pass as `cursor` query param on next request.
-     */
+    @field:Json(name = "data") val data: List<PersonEventDto>,
     @field:Json(name = "cursor") val cursor: String,
-
-    /** True when additional pages exist beyond this response. */
     @field:Json(name = "has_more") val hasMore: Boolean,
 )
 
@@ -90,20 +111,11 @@ public data class PersonEventsResponse(
  * Paginated list response for GET /v1/persons/{person_id}/commitments.
  *
  * Wire format: { data: Commitment[], cursor: string, has_more: boolean }
- *
- * Returns commitments linked to the given person_id through commitment_participants.
- * Returns 404 when no commitments exist for the given person_id.
  */
 @JsonClass(generateAdapter = true)
 public data class PersonCommitmentsResponse(
     @field:Json(name = "data") val data: List<CommitmentDto>,
-
-    /**
-     * Opaque pagination cursor. Pass as `cursor` query param on next request.
-     */
     @field:Json(name = "cursor") val cursor: String,
-
-    /** True when additional pages exist beyond this response. */
     @field:Json(name = "has_more") val hasMore: Boolean,
 )
 

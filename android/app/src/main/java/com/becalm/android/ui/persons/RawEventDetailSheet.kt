@@ -178,6 +178,17 @@ internal fun RawEventDetailContent(
             }
         }
 
+        if (visibleExtractedCommitments.isNotEmpty()) {
+            item {
+                rawEventWhyText(visibleExtractedCommitments)?.let { whyText ->
+                    RawEventWhySection(
+                        whyText = whyText,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+
         if (state.participantCorrections.isNotEmpty()) {
             item {
                 RawEventParticipantCorrectionSection(
@@ -457,6 +468,52 @@ private fun RawEventTranscriptSection(state: RawEventDetailUiState) {
         )
     }
 }
+
+@Composable
+private fun RawEventWhySection(
+    whyText: String,
+    modifier: Modifier = Modifier,
+) {
+    EvidenceCard(
+        modifier = modifier.testTag("raw-event-why-action"),
+        contentPadding = PaddingValues(16.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = stringResource(R.string.commitment_action_evidence_why),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = whyText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@Composable
+private fun rawEventWhyText(commitments: List<RawEventCommitmentSummary>): String? {
+    if (commitments.isEmpty()) return null
+    if (commitments.size == 1) {
+        val item = commitments.first()
+        return stringResource(
+            R.string.raw_event_action_reason_single_fmt,
+            rawEventReasonKindLabel(item),
+            item.title,
+        )
+    }
+    return stringResource(R.string.raw_event_action_reason_multi_fmt, commitments.size)
+}
+
+@Composable
+private fun rawEventReasonKindLabel(item: RawEventCommitmentSummary): String =
+    when {
+        item.itemType == CommitmentItemType.SCHEDULE -> stringResource(R.string.commitment_item_type_schedule)
+        isTakeDirection(item.direction) -> stringResource(R.string.commitments_filter_take)
+        else -> stringResource(R.string.commitments_filter_give)
+    }
 
 @Composable
 private fun RawEventExtractionSection(

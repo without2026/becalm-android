@@ -539,6 +539,15 @@ public interface RawIngestionEventDao {
         """
         SELECT COUNT(*) FROM raw_ingestion_events
         WHERE user_id = :userId
+          AND source_type = :sourceType
+        """,
+    )
+    public suspend fun countForUserAndSourceType(userId: String, sourceType: String): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
           AND source_type IN ('gmail', 'outlook_mail', 'naver_imap', 'daum_imap')
         """,
     )

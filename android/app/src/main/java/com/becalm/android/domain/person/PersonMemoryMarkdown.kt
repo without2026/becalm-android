@@ -2,6 +2,9 @@ package com.becalm.android.domain.person
 
 import java.security.MessageDigest
 import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toLocalDateTime
 
 public data class PersonMemoryInput(
     val userId: String,
@@ -52,6 +55,9 @@ public data class PersonMemoryCommitment(
     val status: String?,
     val quote: String,
     val occurredAt: Instant,
+    val direction: String? = null,
+    val dueAt: Instant? = null,
+    val dueHint: String? = null,
 )
 
 public data class PersonMemoryVoiceEvidence(
@@ -84,9 +90,14 @@ public object PersonMemoryMarkdownBuilder {
             appendLine("# Person Memory")
             appendLine()
             appendIdentity(input)
-            appendProfile(input)
-            appendWorkContext(input)
-            appendRecentInteractions(input)
+            appendOpenLoops(input)
+            appendWaitingOn(input)
+            appendUpcomingTouchpoints(input)
+            appendStaleRelationshipSignal(input)
+            appendNextActionContext(input)
+            appendCommunicationPreferences(input)
+            appendDoNotInferBeyond(input)
+            appendHighSignalHistory(input)
             appendMatchingNotes(input)
             appendLocalVoiceEvidence(input)
             appendEvidenceReferences(input)
@@ -104,17 +115,11 @@ public object PersonMemoryMarkdownBuilder {
                 appendLine("- ${identity.identityType}: ${identity.value}${identity.sourceRef?.let { " [$it]" }.orEmpty()}")
             }
         }
-        appendLine()
-    }
-
-    private fun StringBuilder.appendProfile(input: PersonMemoryInput) {
-        appendLine("## Profile")
         val profileFacts = input.participants
             .filter { !it.organization.isNullOrBlank() || !it.title.isNullOrBlank() }
             .distinctBy { listOf(it.organization, it.title, it.sourceRef).joinToString("|") }
-        if (profileFacts.isEmpty()) {
-            appendLine("- No evidence-backed profile facts yet.")
-        } else {
+        if (profileFacts.isNotEmpty()) {
+            appendLine()
             profileFacts.forEach { participant ->
                 val org = participant.organization?.trim().orEmpty()
                 val title = participant.title?.trim().orEmpty()
@@ -129,17 +134,150 @@ public object PersonMemoryMarkdownBuilder {
         appendLine()
     }
 
-    private fun StringBuilder.appendWorkContext(input: PersonMemoryInput) {
-        appendLine("## Work Context")
-        val openCommitments = input.commitments
-            .filter { it.itemType != DECISION_ITEM_TYPE }
-            .filter { it.status !in TERMINAL_WORK_STATUSES }
-            .take(8)
+    private fun StringBuilder.appendOpenLoops(input: PersonMemoryInput) {
+        appendLine("## Open Loops")
+        val openCommitments = input.openCommitments().take(8)
         if (openCommitments.isEmpty()) {
-            appendLine("- No open work context recorded.")
+            appendLine("- No open loop currently selected for this person.")
         } else {
             openCommitments.forEach { commitment ->
                 appendCommitmentBullet(commitment)
+            }
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendWaitingOn(input: PersonMemoryInput) {
+        appendLine("## Waiting On")
+        val waiting = input.openCommitments()
+            .filter { it.direction.equals("take", ignoreCase = true) }
+            .take(6)
+        if (waiting.isEmpty()) {
+            appendLine("- No explicit waiting-on item is currently selected.")
+        } else {
+            waiting.forEach { commitment ->
+                appendLine(
+                    "- Waiting on them: ${commitment.title.safeInline(160)}" +
+                        commitment.dueLabel()?.let { " due $it" }.orEmpty() +
+                        ". [${commitment.sourceRef}, ${commitment.occurredAt.datePart()}]",
+                )
+            }
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendUpcomingTouchpoints(input: PersonMemoryInput) {
+        appendLine("## Upcoming Touchpoints")
+        val touchpoints = mutableListOf<String>()
+        input.openCommitments()
+            .filter { it.dueAt != null || !it.dueHint.isNullOrBlank() }
+            .take(8)
+            .forEach { commitment ->
+                touchpoints += "- ${commitment.dueLabel()}: ${commitment.title.safeInline(150)} [${commitment.sourceRef}, ${commitment.occurredAt.datePart()}]"
+            }
+        input.interactions
+            .filter { it.interactionKind.equals("calendar", ignoreCase = true) || it.interactionKind.equals("meeting", ignoreCase = true) }
+            .sortedByDescending { it.occurredAt }
+            .take(8 - touchpoints.size)
+            .forEach { interaction ->
+                val summary = interaction.snippet ?: interaction.title ?: interaction.interactionKind
+                touchpoints += "- ${interaction.occurredAt.datePart()}: ${summary.safeInline(150)} [${interaction.sourceRef}]"
+            }
+        if (touchpoints.isEmpty()) {
+            appendLine("- No upcoming touchpoint is currently selected.")
+        } else {
+            touchpoints.take(8).forEach(::appendLine)
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendStaleRelationshipSignal(input: PersonMemoryInput) {
+        appendLine("## Stale Relationship Signal")
+        val latest = input.interactions.maxByOrNull { it.occurredAt }?.occurredAt
+        if (latest == null) {
+            appendLine("- No recent interaction available; relationship freshness is unknown.")
+        } else {
+            val daysSince = latest.toLocalDateTime(TimeZone.UTC).date
+                .daysUntil(input.generatedAt.toLocalDateTime(TimeZone.UTC).date)
+                .coerceAtLeast(0)
+            appendLine("- Last meaningful interaction: $latest")
+            appendLine("- Days since last interaction: $daysSince")
+            appendLine("- Freshness: ${if (daysSince >= 21) "stale" else "recent"}")
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendNextActionContext(input: PersonMemoryInput) {
+        appendLine("## Next Action Context")
+        val candidate = input.openCommitments()
+            .sortedWith(compareBy<PersonMemoryCommitment> { it.dueSortGroup() }.thenBy { it.dueAt ?: Instant.DISTANT_FUTURE })
+            .firstOrNull()
+        if (candidate == null) {
+            appendLine("- No active next action candidate is currently selected.")
+        } else {
+            appendLine("- Highest priority candidate: ${candidate.directionLabelPrefix()}${candidate.title.safeInline(160)} [${candidate.sourceRef}, ${candidate.occurredAt.datePart()}]")
+            appendLine("- Why now: ${candidate.nextActionReason(input.generatedAt)}")
+            appendLine("- Suggested action: ${candidate.nextActionSuggestion()}")
+            candidate.dueLabel()?.let { appendLine("- Due signal: $it") }
+            appendLine("- Evidence anchor: ${candidate.sourceRef}")
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendCommunicationPreferences(input: PersonMemoryInput) {
+        appendLine("## Communication Preferences")
+        val counts = linkedMapOf<String, Int>()
+        input.interactions.take(20).forEach { interaction ->
+            val channel = interaction.channelLabel()
+            counts[channel] = (counts[channel] ?: 0) + 1
+        }
+        if (counts.isEmpty()) {
+            appendLine("- No communication channel preference can be inferred from recent interactions.")
+        } else {
+            val ordered = counts.entries.sortedByDescending { it.value }
+            appendLine("- Observed channel mix: ${ordered.take(4).joinToString { "${it.key} ${it.value}" }}")
+            appendLine("- Most recent observed channel: ${input.interactions.maxByOrNull { it.occurredAt }?.channelLabel() ?: ordered.first().key}")
+            appendLine("- Preference signal: treat this as an observed channel pattern, not a durable preference.")
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendDoNotInferBeyond(input: PersonMemoryInput) {
+        appendLine("## Do Not Infer Beyond")
+        val lines = mutableListOf<String>()
+        if (input.identities.none { it.verified && it.identityType in DETERMINISTIC_IDENTITY_TYPES }) {
+            lines += "- Do not assume a stable email/phone identity; no verified deterministic identity row is attached."
+        }
+        input.openCommitments()
+            .firstOrNull { it.dueAt == null && it.dueHint.isNullOrBlank() }
+            ?.let { commitment ->
+                lines += "- Do not invent timing for ${commitment.title.safeInline(120)}; no due signal is attached. [${commitment.sourceRef}, ${commitment.occurredAt.datePart()}]"
+            }
+        if (input.interactions.isEmpty()) {
+            lines += "- Do not infer recent relationship tone; no interaction summary is available."
+        }
+        if (lines.isEmpty()) {
+            appendLine("- No major uncertainty boundary is currently selected.")
+        } else {
+            lines.take(6).forEach(::appendLine)
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendHighSignalHistory(input: PersonMemoryInput) {
+        appendLine("## High Signal History")
+        val recent = input.interactions
+            .sortedByDescending { it.occurredAt }
+            .take(10)
+        if (recent.isEmpty()) {
+            appendLine("- No high-signal interaction summary is available.")
+        } else {
+            recent.forEach { interaction ->
+                val summary = interaction.snippet ?: interaction.title ?: interaction.interactionKind
+                appendLine(
+                    "- ${interaction.occurredAt.datePart()} ${interaction.sourceType}/${interaction.interactionKind}: " +
+                        "${summary.safeInline(180)} [${interaction.sourceRef}]",
+                )
             }
         }
         val decisions = input.commitments
@@ -157,29 +295,11 @@ public object PersonMemoryMarkdownBuilder {
 
     private fun StringBuilder.appendCommitmentBullet(commitment: PersonMemoryCommitment) {
         appendLine(
-            "- ${commitment.title.safeInline(160)} (${commitment.itemType}" +
+            "- ${commitment.directionLabelPrefix()}${commitment.title.safeInline(160)} (${commitment.itemType}" +
                 commitment.status?.let { ", $it" }.orEmpty() +
+                commitment.dueLabel()?.let { ", due $it" }.orEmpty() +
                 "). [${commitment.sourceRef}, ${commitment.occurredAt.datePart()}]",
         )
-    }
-
-    private fun StringBuilder.appendRecentInteractions(input: PersonMemoryInput) {
-        appendLine("## Recent Interactions")
-        val recent = input.interactions
-            .sortedByDescending { it.occurredAt }
-            .take(10)
-        if (recent.isEmpty()) {
-            appendLine("- No recent interactions recorded.")
-        } else {
-            recent.forEach { interaction ->
-                val summary = interaction.snippet ?: interaction.title ?: interaction.interactionKind
-                appendLine(
-                    "- ${interaction.occurredAt.datePart()} ${interaction.sourceType}/${interaction.interactionKind}: " +
-                        "${summary.safeInline(180)} [${interaction.sourceRef}]",
-                )
-            }
-        }
-        appendLine()
     }
 
     private fun StringBuilder.appendMatchingNotes(input: PersonMemoryInput) {
@@ -232,6 +352,62 @@ public object PersonMemoryMarkdownBuilder {
             refs.forEach { (sourceRef, label) ->
                 appendLine("- $sourceRef: $label")
             }
+        }
+    }
+
+    private fun PersonMemoryInput.openCommitments(): List<PersonMemoryCommitment> =
+        commitments
+            .filter { it.itemType != DECISION_ITEM_TYPE }
+            .filter { it.status?.lowercase() !in TERMINAL_WORK_STATUSES }
+
+    private fun PersonMemoryCommitment.dueLabel(): String? =
+        dueAt?.toString() ?: dueHint?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun PersonMemoryCommitment.directionLabelPrefix(): String =
+        when (direction?.lowercase()) {
+            "take" -> "They owe me: "
+            "give" -> "I owe them: "
+            else -> ""
+        }
+
+    private fun PersonMemoryCommitment.dueSortGroup(): Int =
+        when {
+            dueAt != null -> 0
+            !dueHint.isNullOrBlank() -> 1
+            else -> 2
+        }
+
+    private fun PersonMemoryCommitment.nextActionReason(generatedAt: Instant): String {
+        val due = dueAt
+        if (due != null) {
+            val delta = generatedAt.toLocalDateTime(TimeZone.UTC).date
+                .daysUntil(due.toLocalDateTime(TimeZone.UTC).date)
+            return when {
+                delta < 0 -> "due date passed on ${due.datePart()}"
+                delta == 0 -> "due today"
+                delta <= 7 -> "due in $delta days"
+                else -> "due ${due.datePart()}"
+            }
+        }
+        val hint = dueHint?.trim()?.takeIf { it.isNotEmpty() }
+        return if (hint != null) "due hint says $hint" else "active open loop with no due signal"
+    }
+
+    private fun PersonMemoryCommitment.nextActionSuggestion(): String =
+        when (direction?.lowercase()) {
+            "take" -> "Ask for an update or confirm whether they are still blocked."
+            "give" -> "Prepare the owed follow-up or confirm a realistic handoff time."
+            else -> "Clarify owner, timing, and next step before acting."
+        }
+
+    private fun PersonMemoryInteraction.channelLabel(): String {
+        val text = listOf(sourceType, interactionKind).joinToString(" ").lowercase()
+        return when {
+            "mail" in text || "email" in text || "gmail" in text -> "email"
+            "calendar" in text || "meeting" in text -> "calendar"
+            "call" in text || "phone" in text -> "call"
+            "sms" in text || "message" in text || "chat" in text -> "message"
+            else -> sourceType.lowercase().ifBlank { interactionKind.lowercase() }
         }
     }
 
@@ -295,7 +471,13 @@ public object PersonMemoryMarkdownValidator {
     }
 
     private fun hasFactualBulletWithoutSourceRef(markdown: String): Boolean {
-        val sections = listOf("## Profile", "## Work Context", "## Matching Notes")
+        val sections = listOf(
+            "## Open Loops",
+            "## Waiting On",
+            "## Upcoming Touchpoints",
+            "## High Signal History",
+            "## Matching Notes",
+        )
         return sections.any { section ->
             markdown.sectionLines(section)
                 .filter { it.startsWith("- ") }
@@ -327,9 +509,14 @@ public object PersonMemoryMarkdownValidator {
     private val REQUIRED_SECTIONS = listOf(
         "# Person Memory",
         "## Identity",
-        "## Profile",
-        "## Work Context",
-        "## Recent Interactions",
+        "## Open Loops",
+        "## Waiting On",
+        "## Upcoming Touchpoints",
+        "## Stale Relationship Signal",
+        "## Next Action Context",
+        "## Communication Preferences",
+        "## Do Not Infer Beyond",
+        "## High Signal History",
         "## Matching Notes",
         "## Local Voice Evidence",
         "## Evidence References",
@@ -345,8 +532,10 @@ public object PersonMemoryMarkdownValidator {
     )
     private val SOURCE_REF_REGEX = Regex("(raw|commitment|participant):[A-Za-z0-9._:-]+")
     private val GENERIC_ALLOWED_BULLETS = setOf(
-        "- No evidence-backed profile facts yet.",
-        "- No open work context recorded.",
+        "- No open loop currently selected for this person.",
+        "- No explicit waiting-on item is currently selected.",
+        "- No upcoming touchpoint is currently selected.",
+        "- No high-signal interaction summary is available.",
         "- No user-confirmed semantic matching notes.",
         "- No confirmed local voice evidence.",
     )

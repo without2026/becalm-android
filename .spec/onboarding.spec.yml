@@ -86,11 +86,11 @@ behaviors:
 
   - id: ONB-006
     type: ui_interaction
-    description: "온보딩 완료 후 재실행 시 TermsScreen을 건너뛰고 TodayTimelineScreen으로 바로 이동한다"
+    description: "온보딩 완료 후 재실행 시 TermsScreen을 건너뛰고 PersonsScreen(/persons)으로 바로 이동한다"
     screen: "SplashScreen"
     interaction: "앱 재실행"
     precondition: "DataStore onboarding_completed=true, terms_accepted=true, Supabase Auth 세션 유효"
-    expected: "TodayTimelineScreen으로 바로 이동됨 (TermsScreen, LoginScreen 건너뜀)"
+    expected: "PersonsScreen(/persons)으로 바로 이동됨 (TermsScreen, LoginScreen 건너뜀)"
     source: phase2-acceptance
     tests: []
 

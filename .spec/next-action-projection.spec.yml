@@ -1,0 +1,1080 @@
+module: next-action-projection
+platform: android-backend
+version: 2
+status: target
+owner: product-architecture
+
+summary: >
+  BeCalm's main app must stop exposing processed source history as the default
+  product surface. Sources may originate on Android local DB, MediaStore, local
+  archive, backend provider sync, or external APIs, but product reasoning is
+  backend-owned. Railway computes an optimized, person-centered action feed and
+  Android renders only cached person action items across Person, Schedule, and
+  Commitment.
+
+problem_definition:
+  user_failure: >
+    Business users do not open BeCalm to audit what happened across the last
+    three months. They open it to decide who needs attention, where they need to
+    be, and what work must close next. Showing processed source history directly
+    in three tabs spreads crucial context across too many rows and makes the
+    next action harder to see.
+  current_behavior:
+    - "Person detail defaults to source-event timeline and raw event rows."
+    - "Schedule/Today mixes due commitments and calendar events as a time feed."
+    - "Commitment management exposes action/schedule history through filter tabs."
+    - "Earlier NextActionProjection contracts made Android Room the product decision owner."
+  target_behavior:
+    - "Each of the three tabs opens on backend-computed person action items, not history."
+    - "Source history is available only as bounded evidence drill-down from an action card."
+    - "Android may originate source rows locally, but backend computes urgency, grouping, ranking, and action state."
+    - "Room stores an offline cache of backend-computed PersonActionItem rows and pending user mutations; it does not generate or rank actions."
+
+preserved_contracts:
+  - "Source ingress is hybrid: Android local source, backend provider source, external API source, and manual evidence can all be valid origins."
+  - "Canonical facts remain structured rows: persons, person_identities, source_event_participants, commitment_participants, person_interactions, commitments, calendar_events, raw_ingestion_events metadata."
+  - "Android local originals, full email bodies, transcripts, OCR text, audio bytes, and raw model output are never embedded in action rows or uploaded through action-feed contracts."
+  - "person_memory.md remains derived and regeneratable. It may inform backend context through bounded semantic/context rows or content hash freshness, but it is not a UI feed."
+  - "Evidence drill-down keeps short refs and snippets so a user can inspect why an action exists."
+
+robust_backend_system_definition:
+  definition: >
+    A robust BeCalm person-action backend is a replay-safe, observable, backend-owned
+    projection system where every accepted input can be traced to durable source
+    facts and watermarks, every user mutation can be retried without double effects,
+    no acknowledged action delta can disappear between sync windows, and stale or
+    incomplete context is explicit in the UI instead of hidden behind local fallback.
+  production_ready_rule: >
+    A backend action-feed change is production-ready only when it satisfies all
+    functional requirements, all non-functional requirements, and every RBS principle
+    below. Meeting the happy-path UI contract alone is insufficient.
+  principles:
+    - id: RBS-001
+      name: "Durable acceptance before visibility"
+      contract: "Any HTTP 200/201/204 write that can affect actions has durably committed the canonical row and enqueued or coalesced a recompute job before returning. HTTP 202 is queued-only and cannot advance Android action watermarks."
+    - id: RBS-002
+      name: "Replay-safe computation"
+      contract: "Source writes, recompute jobs, generated action upserts, user state patches, and feedback submissions are idempotent by user-scoped keys. Replaying the same operation produces the same state or a typed idempotency conflict."
+    - id: RBS-003
+      name: "No missing deltas"
+      contract: "Every changed_since response is produced from one backend snapshot and includes changed rows, deleted/superseded ids, server_watermark, input_watermarks, and recompute_state so Android can advance only after a complete transaction."
+    - id: RBS-004
+      name: "Bounded retry with recovery state"
+      contract: "Transient failures expose retryable metadata, retry-after hints when known, and bounded backoff. Backend workers use leases, retry counters, lock reclamation, and dead-letter state; Android keeps outbox/cache rows until durable ack or explicit non-retryable handling."
+    - id: RBS-005
+      name: "Explicit incompleteness"
+      contract: "If Railway cannot prove that accepted input is included in the current action watermark, the feed state is pending, stale, or degraded. Android must not invent or silently rank local replacement actions."
+    - id: RBS-006
+      name: "Latency without correctness shortcuts"
+      contract: "The app may paint cached backend rows quickly, but latency targets never permit dropping recompute jobs, skipping tombstones, blocking telemetry on the UI path, or using local source history as an action substitute."
+    - id: RBS-007
+      name: "Privacy-bound observability"
+      contract: "Required metrics prove queue health, watermark lag, delta completeness, retry volume, and stale-cache visibility without raw email bodies, transcripts, OCR text, audio bytes, local paths, signed URLs, or raw model output."
+  implementation_anchors:
+    durable_recompute_queue: "person_action_recompute_jobs"
+    feed_watermark: "person_action_feed_watermarks.server_watermark"
+    input_watermarks: "person_action_feed_watermarks.input_watermarks_json and PersonActionItem.input_watermarks"
+    tombstones: "person_action_items.deleted_at plus PersonActionFeedResponse.deleted_ids"
+    mutation_idempotency: "PersonActionStatePatch.client_mutation_id and PersonActionFeedback.client_mutation_id"
+    android_cache: "person_action_item_cache stores backend rows; person_action_sync_state advances server_watermark only after every page in a backend snapshot has been applied transactionally"
+    android_outbox: "person_action_mutation_queue stores retryable mutations until backend ack"
+    error_contract: "ErrorEnvelope.retryable, retry_after_seconds, request_id, and client_action"
+
+overturned_contracts:
+  - "No tab may default to a three-month source history feed."
+  - "Android Room next_action_projections is no longer the first-screen source of truth."
+  - "Railway /v1/next_actions is no longer optional mirror state."
+  - "Android must not locally regenerate action rows when backend action endpoints return 404 or 503."
+  - "Person detail no longer defaults to a unified source timeline. It defaults to this person's backend-computed next move."
+  - "Schedule is no longer a generic Today timeline. It is an agenda filter over person action items for attend/prepare/confirm work."
+  - "Commitments no longer expose schedule/decision/history as first-screen filter tabs. The first screen is an action inbox backed by person action items."
+  - "Decision rows are relationship context by default, not actionable rows, unless backend generates a concrete next action such as 'decide by date' or 'confirm decision with person'."
+  - "person_memory.md must not be parsed at UI runtime to decide action cards."
+
+product_surfaces:
+  person_tab:
+    route: /persons
+    job_to_be_done: "Who needs my attention next?"
+    primary_unit: "person with one top backend-computed action"
+    default_scope: "active person action items only, ranked by backend urgency and relationship importance"
+    history_behavior: "latest history is collapsed behind evidence or person detail"
+    examples:
+      - "김민홍 - 오늘 16:00 전에 제안서 확인 요청에 답장"
+      - "Acme CFO - 미팅 전에 지난 결정사항 검토"
+      - "Unresolved participant - source evidence needs person match review"
+
+  schedule_tab:
+    route: /today
+    product_label: "Schedule"
+    job_to_be_done: "Where do I need to be, and what should I prepare?"
+    primary_unit: "time-bound person action item"
+    default_scope: "today plus next 7 days, with overdue preparation still visible"
+    examples:
+      - "10:00 컨퍼런스 참석"
+      - "15:00 미팅 전 김민홍 요청사항 준비"
+      - "날짜가 모호한 일정 확인"
+
+  commitment_tab:
+    route: /commitments
+    job_to_be_done: "What work must I close next?"
+    primary_unit: "open obligation person action item"
+    default_scope: "action rows only, plus generated work actions from schedule prep or unresolved evidence"
+    examples:
+      - "내가 보내야 할 자료"
+      - "상대방에게 팔로업할 항목"
+      - "오추출 가능성이 높아 검토해야 할 항목"
+
+functional_requirements:
+  - id: NAP-FR-001
+    name: "Hybrid source ingress"
+    contract: "Android-local and backend-provider sources both become action inputs only after bounded structured rows are durably accepted by Railway."
+  - id: NAP-FR-002
+    name: "Backend action ownership"
+    contract: "Railway computes action grouping, urgency, importance, stale state, user-state merge, and evidence selection. Android cache code applies backend rows only."
+  - id: NAP-FR-003
+    name: "No missing action deltas"
+    contract: "Incremental action fetches use server_watermark plus per-input watermarks and include deleted/superseded ids so Android can remove cache rows that no longer exist."
+  - id: NAP-FR-004
+    name: "Idempotent mutations"
+    contract: "Every action mutation and feedback submission carries a client_mutation_id. Duplicate submissions return the same committed state or an idempotency_conflict error if the payload changed."
+  - id: NAP-FR-005
+    name: "Retryable recovery"
+    contract: "All transient backend failures expose retryable=true, retry_after_seconds when known, and a stable error code. Android retries with bounded exponential backoff and does not drop queued mutations."
+  - id: NAP-FR-006
+    name: "Evidence boundedness"
+    contract: "Action rows carry only bounded refs/snippets. Full originals remain local-only or transient and never become action-feed transport."
+
+non_functional_requirements:
+  latency:
+    first_cached_paint_p95_ms: 500
+    foreground_delta_fetch_p95_ms: 1500
+    local_origin_visible_after_upload_p95_seconds: 30
+    backend_provider_visible_after_sync_p95_seconds: 60
+    mutation_ack_p95_ms: 1200
+    stale_badge_threshold_seconds: 300
+    rule: "Latency targets are measured after auth/session availability and exclude provider OAuth consent time, user file picking time, and third-party provider outages."
+  durability:
+    source_fact_loss_tolerance: "zero acknowledged source facts lost"
+    action_delta_loss_tolerance: "zero acknowledged action rows missing from a successful changed_since window"
+    mutation_loss_tolerance: "zero user mutations lost after local enqueue"
+    rule: "HTTP 200/201/204 means durable commit; HTTP 202 means queued only and must not advance Android action cache watermarks."
+  idempotency:
+    source_event_key: "(user_id, client_event_id)"
+    action_item_key: "(user_id, stable action id, input_watermark)"
+    recompute_job_key: "(user_id, recompute_scope, input_watermark)"
+    mutation_key: "(user_id, client_mutation_id)"
+    rule: "Idempotency is scoped by user_id. Same id with different payload returns 409 idempotency_conflict."
+  retry_backoff:
+    initial_delay_seconds: 5
+    max_delay_minutes: 30
+    jitter: "required"
+    max_foreground_inline_retries: 1
+    rule: "Foreground pull-to-refresh may trigger one immediate retry. Further retries move to background outbox/job queues."
+  capacity:
+    target_users_year_1: 1000
+    planning_horizon_days: 365
+    daily_source_events_per_active_user_p95: 200
+    active_action_rows_per_user_p95: 250
+    recompute_backlog_drain_p95_minutes: 15
+    deploy_catchup_p95_minutes: 10
+    max_user_claim_share_per_5m: 0.20
+    rule: "Capacity is sized for 1000 year-1 users without web-request recomputation. A noisy user must not consume more than 20% of person-action recompute claims in a rolling 5m window unless all other eligible backlog is empty."
+  worker_isolation:
+    required_queue: person-action-recompute
+    runtime_owner: backend_railway_worker_service
+    forbidden_default: "Production web/API processes must not drain person_action_recompute_jobs by default."
+    failure_boundary: "Action recompute failures must not block raw ingestion, source sync, audio extraction, auth, or mutation ack paths."
+    rule: "Local-origin Android rows may start the source path, but the action decision/recompute worker runs in backend Railway after durable upload."
+  race_condition_guards:
+    claim: "Dedicated Supabase RPC uses FOR UPDATE SKIP LOCKED, locked_until lease, locked_by worker id, bounded batch size, and status transition pending|failed -> processing."
+    complete: "Completion is a single transaction that upserts action rows, writes deleted tombstones, and compare-and-swaps feed watermark only when input_watermark >= current feed input watermark."
+    reclaim: "Expired processing leases return to retryable eligibility without data loss; a late completed older lease cannot overwrite newer rows."
+    rule: "No recompute worker may select, mutate, and acknowledge jobs outside an atomic claim/complete contract."
+  retention:
+    tombstone_window_days: 90
+    changed_since_max_age_days: 90
+    completed_cache_prune_days: 90
+    active_cache_retention: "until superseded, deleted, or source-fact account deletion"
+    rule: "If Android changed_since is older than the server tombstone window or unknown, Railway returns 409 full_refresh instead of serving an incomplete delta."
+  observability:
+    required_counters:
+      - person_action_recompute_enqueued_total
+      - person_action_recompute_completed_total
+      - person_action_recompute_failed_total
+      - person_action_recompute_claimed_total
+      - person_action_recompute_reclaimed_total
+      - person_action_watermark_lag_seconds
+      - person_action_delta_missing_detected_total
+      - person_action_mutation_retry_total
+      - person_action_cache_stale_visible_total
+      - person_action_worker_backlog_depth
+      - person_action_noisy_user_throttled_total
+    rule: "Telemetry is async/batched/off-path and must not add blocking UI latency or raw content payloads."
+  consistency:
+    read_model: "eventual consistency with explicit stale/pending state"
+    forbidden: "silent fallback to locally generated actions"
+    rule: "If backend cannot prove a source input is included in the current watermark, UI shows stale/pending context instead of implying the feed is complete."
+
+source_ingress_contract:
+  principle: "Source origin is not the same as action decision ownership."
+  origins:
+    device_local:
+      examples: [voice, call_recording, meeting, message_screenshot, naver_imap, daum_imap, manual_text]
+      android_role:
+        - "Persist local raw event, local archive metadata, upload state, and extraction drafts when needed."
+        - "Upload bounded structured context through Railway batch/extraction contracts before backend action computation can include it."
+      backend_role:
+        - "Validate durable rows, persist source graph and commitments, update action input watermarks, and enqueue action recomputation."
+    backend_provider:
+      examples: [gmail, outlook_mail, google_calendar, outlook_calendar]
+      android_role:
+        - "Start OAuth/status/manual sync, mirror durable rows, and render the backend-computed action cache."
+      backend_role:
+        - "Fetch provider APIs, persist durable rows, update source status, and enqueue action recomputation."
+    manual_or_correction:
+      examples: [manual_commitment, person_match_review, user_correction, source_reconnect]
+      android_role:
+        - "Capture user intent and enqueue mutation."
+      backend_role:
+        - "Persist correction as canonical feedback, recompute affected person action items, and return changed cache rows."
+  computability_states:
+    - state: pending_context_upload
+      meaning: "Android has local source context that backend has not durably accepted; backend must not invent actions from it."
+      ui_rule: "Keep last backend-computed cache and show source sync/pending state."
+    - state: computable
+      meaning: "Required structured context is durably present in backend action inputs."
+      ui_rule: "Action feed may include this source after backend recomputation."
+    - state: blocked
+      meaning: "Consent, auth, extraction, or validation prevents backend action computation."
+      ui_rule: "Only backend-generated reconnect/review action may appear."
+
+action_input_trigger_contract:
+  invariant: "Any durable backend write that can change Person/Schedule/Commitment first-screen output must enqueue or coalesce person_action_recompute_jobs before returning HTTP 200/201/204."
+  input_watermark_clock: "Backend database commit timestamp or durable projection version, never Android wall clock."
+  trigger_map:
+    - write_boundary: "persist_source_graph_v1 / persist_source_graph fallback"
+      affected_inputs: [source_event, person_graph, commitment]
+      scope_kind: "source_event"
+      scope_id: "source_events.id"
+      input_watermark: "max(source_events.updated_at, commitments.updated_at, source_event_participants.updated_at, commitment_participants.updated_at, person_interactions.updated_at) for the persisted source slice"
+      enqueue_rule: "The same durable transaction or immediate post-commit service step upserts one job per changed source_event_id and coalesces person/user scopes when many source rows are written."
+      failure_rule: "If recompute enqueue fails after facts are committed, feed_watermark.recompute_state becomes stale/degraded and source_status or processing status exposes retry/operator recovery; the source fact must not be rolled back silently."
+    - write_boundary: "POST /v1/commitments, PATCH /v1/commitments/{id}, POST /v1/commitments:batch"
+      affected_inputs: [commitment, person_graph]
+      scope_kind: "commitment"
+      scope_id: "commitments.id"
+      input_watermark: "commitments.updated_at plus latest commitment_participants.updated_at for the changed commitment"
+      enqueue_rule: "Manual, edited, completed, deleted, superseded, disputed, and due/date changes all enqueue recompute before durable success."
+      failure_rule: "A 200/201 cannot be returned if the commitment write is durable but action recompute enqueue is impossible without a stale/degraded recovery marker."
+    - write_boundary: "calendar provider persistence and Android calendar mirror upload"
+      affected_inputs: [calendar_event]
+      scope_kind: "calendar_event"
+      scope_id: "calendar_events.id"
+      input_watermark: "calendar_events.updated_at or provider high_water_mark for the changed calendar slice"
+      enqueue_rule: "Created, updated, cancelled, deleted, linked, and relinked calendar rows enqueue recompute for schedule-surface actions."
+      failure_rule: "Calendar action feed state stays pending/stale until the accepted calendar watermark is included."
+    - write_boundary: "source_status upsert"
+      affected_inputs: [source_status]
+      scope_kind: "source_status"
+      scope_id: "source_status.source_type + ':' + source_connection_id?"
+      input_watermark: "source_status.updated_at"
+      enqueue_rule: "connected, syncing, synced, needs_reauth, failed, client_managed, and source-disabled transitions enqueue reconnect/review/stale-source action recompute when user-visible state can change."
+      failure_rule: "Source status UI remains diagnostic, but action feed cannot claim caught_up for affected source scopes."
+    - write_boundary: "PUT /v1/persons/{person_id}/memory"
+      affected_inputs: [person_memory]
+      scope_kind: "person"
+      scope_id: "person_id"
+      input_watermark: "person-memory object metadata generated_at/content_hash accepted_at"
+      enqueue_rule: "Only accepted bounded metadata/content_hash freshness can trigger action context recompute; raw memory.md parsing is forbidden at UI runtime."
+      failure_rule: "Memory upload failure never blocks source graph persistence, but affected person actions may remain stale until the context watermark is accepted or skipped."
+    - write_boundary: "person match review, source participant review, confirmed/rejected identity write"
+      affected_inputs: [person_graph, user_correction]
+      scope_kind: "person"
+      scope_id: "confirmed person_id or source participant id when unresolved"
+      input_watermark: "review/correction updated_at plus affected participant updated_at"
+      enqueue_rule: "Confirmed match, rejected match, manual person merge/split, and source-local speaker review enqueue recompute for affected person and source_event scopes."
+      failure_rule: "Unresolved/review actions remain visible until recompute catches up; speaker-label-only evidence cannot become canonical identity."
+    - write_boundary: "schedule_event_links resolver/apply resolution"
+      affected_inputs: [calendar_event, commitment, user_correction]
+      scope_kind: "commitment"
+      scope_id: "linked commitment_id"
+      input_watermark: "schedule_event_links.updated_at plus linked commitment/calendar updated_at"
+      enqueue_rule: "New, changed, conflict, needs_review, accepted, rejected, cancel, and reschedule links enqueue schedule-surface recompute."
+      failure_rule: "Ambiguous links produce review actions or stale schedule state, not false confirmed schedule rows."
+    - write_boundary: "user_corrections and feedback from /v1/person_action_items/{id}:feedback"
+      affected_inputs: [user_correction, person_graph, commitment]
+      scope_kind: "correction"
+      scope_id: "user_corrections.id or action_item_id"
+      input_watermark: "user_corrections.updated_at"
+      enqueue_rule: "Wrong person, wrong priority, not actionable, missing context, corrected person, and corrected due date feedback enqueue affected action recompute."
+      failure_rule: "Feedback mutation ack is not durable success unless the correction ledger and recompute trigger are both durable or recovery state is explicit."
+
+input_watermark_contract:
+  invariant: "A feed watermark proves inclusion of source facts; it is not a client clock or API response time."
+  server_watermark: "monotonic backend timestamp written by complete_person_action_recompute_job after rows/tombstones are published."
+  per_input_rules:
+    source_event: "max(updated_at, extraction/status repair version) for included source_events and affected participants"
+    commitment: "max(commitments.updated_at, commitment_participants.updated_at, commitment_progress_events.updated_at when present)"
+    calendar_event: "max(calendar_events.updated_at, schedule_event_links.updated_at for linked schedule evidence)"
+    person_graph: "max(persons.updated_at, person_identities.updated_at, source_event_participants.updated_at, commitment_participants.updated_at, person_interactions.updated_at)"
+    person_memory: "accepted person-memory metadata generated_at/content_hash timestamp, not file mtime from Android"
+    source_status: "source_status.updated_at or source_sync_jobs.completed_at/error updated_at for the connection/source scope"
+    user_correction: "user_corrections.updated_at and person_action_mutation_ledger.updated_at for accepted feedback"
+  compare_rule: "complete_person_action_recompute_job may advance watermarks only when every published row's input_watermarks are >= the current included input watermark for that scope."
+  stale_rule: "If a required input kind has a newer durable watermark than the feed includes, PersonActionFeedResponse.recompute_state cannot be caught_up for the affected scope."
+
+action_generation_algorithm_contract:
+  owner: backend_railway
+  deterministic_inputs: "Only backend canonical rows and bounded context/index metadata listed under inputs.backend_canonical and inputs.backend_context."
+  candidate_pipeline:
+    - step: "collect"
+      rule: "Load eligible commitments, calendar_events, source_status repair rows, person graph links, user corrections, and bounded person context for the requested scope."
+    - step: "filter"
+      rule: "Drop deleted/cancelled/completed/dismissed/snoozed-until-future rows unless they create a concrete undo/review/reconnect action explicitly requested by status filter."
+    - step: "classify"
+      rule: "Assign exactly one primary action_kind per candidate using deterministic precedence: source_reconnect > review_extraction > review_person > attend > prepare > confirm_schedule > reply > do_work > follow_up > wait."
+    - step: "surface"
+      rule: "surfaces[] is derived from action_kind and evidence: person for any person_id/review_person/reconnect affecting a person, schedule for attend/prepare/confirm_schedule/time-bound wait, commitment for do_work/reply/follow_up/wait/review_extraction tied to an obligation."
+    - step: "stable_id"
+      rule: "primary_evidence_key = first non-null in commitment_id, calendar_event_id, source_event_id, source_status scope key, user_correction id; stable id = sha256(user_id + action_version + action_kind + primary_evidence_key + person_id? + commitment_id? + calendar_event_id?)."
+    - step: "score"
+      rule: "urgency_score and importance_score are computed by versioned deterministic functions. Ties sort by due_at ASC NULLS LAST, urgency_score DESC, importance_score DESC, confidence DESC, updated_at DESC, id ASC."
+    - step: "collapse"
+      rule: "For each user/person/surface/primary_evidence_key, keep one active row and attach lower ranked related facts as evidence_refs up to the cap. Do not drop the underlying source facts."
+    - step: "overlay_user_state"
+      rule: "Apply backend person_action_item_user_states and mutation ledger results after candidate generation. Stable-id state wins unless source facts are materially edited, superseded, deleted, or action_version changes."
+  action_kind_rules:
+    source_reconnect: "source_status requires auth, permission, provider reconnect, source disabled repair, or local permission repair."
+    review_extraction: "confidence below threshold, schema conflict, ambiguous due/person, user disputed quote, or extraction error blocks a concrete action."
+    review_person: "unresolved participant blocks a concrete person action, but unresolved history without action stays evidence only."
+    attend: "confirmed calendar/schedule event applies to the user and falls in the schedule window."
+    prepare: "time-bound meeting/schedule has linked open prep evidence or prior decision context that must be reviewed before the event."
+    confirm_schedule: "schedule evidence is tentative, changed, ambiguous, conflicting, or needs user confirmation."
+    reply: "user owes communication response to a counterparty with direct interaction evidence."
+    do_work: "user owns concrete deliverable/task obligation."
+    follow_up: "counterparty owes work or response and due/stale threshold is reached."
+    wait: "waiting-on-counterparty is still active but not due for follow-up; appears after owned work and due schedule actions."
+  versioning:
+    action_version: "Increment when stable id recipe, action_kind precedence, scoring formula, or collapse semantics change materially."
+    backfill_rule: "Action version migration enqueues user-scoped recompute jobs and tombstones superseded older-version rows."
+
+action_feed_delta_contract:
+  invariant: "Pagination must not break changed_since completeness."
+  query_modes:
+    full_refresh:
+      request: "No changed_since. cursor optional only for the same server snapshot."
+      rule: "First page establishes snapshot_id, server_watermark, changed_since_min, and input_watermarks. If has_more=true, Android must request remaining pages with cursor+snapshot_id and persist server_watermark only after the final page transaction succeeds."
+    delta:
+      request: "changed_since=<previous server_watermark>. cursor must be absent on first delta page."
+      rule: "Backend evaluates changes against one snapshot upper bound. If result needs pagination, response includes snapshot_id and cursor; every later page must pass the same snapshot_id. Android must not advance server_watermark until all pages for that snapshot are applied."
+    status_filtered_history:
+      request: "status != active or include_stale=false can paginate independently, but these pages must not advance the main action feed watermark unless response declares watermark_scope='main_feed'."
+  response_requirements:
+    - "PersonActionFeedResponse.snapshot_id is required whenever has_more=true."
+    - "PersonActionFeedResponse.snapshot_expires_at is required with snapshot_id."
+    - "A cursor without matching snapshot_id returns 409 client_action=full_refresh."
+    - "Rows and deleted_ids are stable within a snapshot. New recompute results after snapshot creation appear in a later delta."
+    - "Backend must choose page ordering: updated_at ASC, id ASC for delta apply; urgency DESC order is UI sorting and may be applied only after cache transaction."
+  android_apply_rule: "Apply every page into a pending transaction batch marker; update server_watermark only after the final page's has_more=false response is committed. Crash before final commit refetches with the previous watermark."
+
+fresh_install_no_cache_contract:
+  invariant: "A new user with no cache must never see an unexplained empty product surface."
+  first_fetch_success_empty:
+    backend_contract: "200 with data=[], recompute_state=caught_up, and empty_state.state=no_action_caught_up|setup_required|sync_pending."
+    android_rule: "Render explicit caught-up/setup/sync-pending state, not a blank dashboard."
+  endpoint_unavailable:
+    backend_contract: "404/503/maintenance returns ErrorEnvelope.client_action=upgrade_app|retry_later|maintenance_wait|contact_support and retry_after_seconds when known."
+    android_rule: "If no person_action_item_cache exists, render product-safe setup/maintenance/retry/support state from ErrorEnvelope or last good client_config; do not route to legacy local action generation."
+  feature_disabled:
+    backend_contract: "client_config.action_feed_enabled=false includes disabled reason/incident and optionally source setup fallback."
+    android_rule: "Hide action feed mutations, preserve outbox, show disabled/maintenance state, and keep source setup/reconnect surfaces available."
+
+error_recovery_matrix:
+  invariant: "No error state may remain open without automatic retry, full refresh, user repair, operator requeue, or explicit discard."
+  states:
+    - state: offline_or_backend_unavailable
+      trigger: "network unavailable, 429, 503, or sustained Railway timeout"
+      backend_contract: "ErrorEnvelope.retryable=true with retry_after_seconds when known and client_action=retry_later."
+      android_recovery: "Render last person_action_item_cache with stale/offline badge, run at most one foreground retry, then WorkManager backoff. User can pull-to-refresh."
+      exit_condition: "Successful delta/full refresh applies rows and clears stale/offline state."
+      spec_refs: [ERR-001, ERR-006, ERR-007, ERR-010]
+    - state: stale_or_degraded_feed
+      trigger: "PersonActionFeedResponse.recompute_state=pending|stale|degraded or watermark lag exceeds SLO"
+      backend_contract: "200 response includes recovery_actions or reason_code/incident id; backend must not claim caught_up."
+      android_recovery: "Show recovery CTA from recovery_actions such as retry_now, full_refresh, open_source_settings, review_quarantine, or contact_support."
+      exit_condition: "recompute_state=caught_up with server_watermark applied transactionally."
+      spec_refs: [ERR-010, ERR-014, ERR-015]
+    - state: changed_since_unknown
+      trigger: "GET /v1/person_action_items?changed_since returns 409"
+      backend_contract: "ErrorEnvelope.client_action=full_refresh."
+      android_recovery: "Keep old cache stale, request full refresh, and advance server_watermark only after full snapshot transaction succeeds."
+      exit_condition: "Full refresh completes or retry_later/backoff keeps old cache visible with CTA."
+      spec_refs: [ERR-012, NAP-SYNC-003]
+    - state: pending_local_context
+      trigger: "Android-local source exists but Railway has not durably accepted bounded structured context"
+      backend_contract: "Exclude source from action reasoning until durable commit; expose pending/stale scope rather than generated action."
+      android_recovery: "Flush upload/extraction queue, show source pending state, and route quarantined rows to ERR-004/ERR-005 repair."
+      exit_condition: "Upload ack advances input_watermarks and recompute finishes, or user repairs/discards the blocked source row."
+      spec_refs: [ERR-004, ERR-005, NAP-SYNC-005]
+    - state: source_auth_permission_blocked
+      trigger: "OAuth revoke, IMAP auth failure, cursor invalidation, or Android permission revoke"
+      backend_contract: "Return source_status repair state and optionally source_reconnect PersonActionItem."
+      android_recovery: "Route to SourceDetail reconnect/manual sync/app permission settings; do not keep background jobs spinning without CTA."
+      exit_condition: "Source reconnect/manual sync/permission grant succeeds or source is explicitly disconnected."
+      spec_refs: [ERR-002, ERR-003, ERR-009, SMG-003, SMG-005]
+    - state: mutation_retryable_failure
+      trigger: "PATCH/feedback returns retryable ErrorEnvelope or network failure"
+      backend_contract: "ErrorEnvelope.client_action=retry_later and idempotency by client_mutation_id."
+      android_recovery: "Keep person_action_mutation_queue row, retain/mark optimistic state as pending, schedule backoff, and expose manual retry."
+      exit_condition: "200 ack removes queue row or non-retryable response moves to user repair/discard."
+      spec_refs: [ERR-011, NAP-010]
+    - state: mutation_conflict_or_rejected
+      trigger: "PATCH/feedback returns 404, 409 idempotency_conflict/stale expected_updated_at, 400, or 422"
+      backend_contract: "ErrorEnvelope.client_action=refresh_action|fix_input|discard_local_mutation and request_id."
+      android_recovery: "Refetch backend canonical action row, undo invalid optimistic state, open edit/reason UI when fixable, or require explicit discard."
+      exit_condition: "Queue row is acked, corrected and retried, reconciled by refetch, or explicitly discarded by user."
+      spec_refs: [ERR-011]
+    - state: endpoint_or_version_mismatch
+      trigger: "person action endpoint returns 404 because feature/server/client contract is unavailable"
+      backend_contract: "ErrorEnvelope.client_action=upgrade_app|retry_later|contact_support."
+      android_recovery: "Render last cache as stale, preserve mutation outbox, show update/retry/support CTA, or use explicit rollback flag without local action generation."
+      exit_condition: "Endpoint becomes available, app updates, or rollback is explicitly activated."
+      spec_refs: [ERR-013]
+    - state: recompute_dead_letter
+      trigger: "person_action_recompute_jobs.status=dead_letter or affected feed scope remains degraded"
+      backend_contract: "Dead-letter row persists with last_error_code/client_action, operator-visible incident, and requeue path."
+      android_recovery: "Show degraded stale cache plus recovery_actions. User can repair source input if applicable; otherwise support/ops requeue closes the incident."
+      exit_condition: "Operator requeue or source repair completes and next delta/full refresh catches up."
+      spec_refs: [ERR-014]
+
+    - state: long_degraded_capacity_backlog
+      trigger: "capacity_state=backlog|degraded for >24h, or person_action_watermark_lag_seconds remains above SLO after retries"
+      backend_contract: "200 response includes capacity_state, backlog_lag_seconds, recovery_actions, and an incident or reason_code; retryable errors include Retry-After."
+      android_recovery: "Keep action cache visible with compact degraded state, avoid repeated blocking banners, expose one repair/support CTA, and continue background retry/full refresh."
+      exit_condition: "capacity_state=normal and recompute_state=caught_up, or explicit support/operator incident closes with source disconnect/discard/requeue."
+      spec_refs: [ERR-015]
+
+worker_runtime_contract:
+  queue_name: person-action-recompute
+  owner: backend_railway_worker_service
+  purpose: "Run every action decision/recompute path in backend workers even when the source origin is Android local DB."
+  web_process_rule:
+    default: "disabled"
+    emergency_only: "A web process may drain this queue only behind an explicit emergency flag, with reduced batch size and alerting."
+    reason: "User-facing API latency and source write durability must not depend on expensive action recomputation."
+  required_settings:
+    person_action_recompute_worker_enabled: boolean
+    person_action_recompute_worker_interval_seconds: int
+    person_action_recompute_worker_batch_size: int
+    person_action_recompute_worker_max_batches_per_tick: int
+    person_action_recompute_worker_lease_seconds: int
+    person_action_recompute_worker_max_attempts: int
+    person_action_recompute_worker_max_user_claim_share_per_5m: float
+  claim_rpc:
+    name: claim_person_action_recompute_jobs
+    args:
+      p_limit: int
+      p_worker_id: string
+      p_shard_key?: int
+      p_user_id?: uuid
+    max_limit: 200
+    eligibility:
+      - "status IN ('pending','failed') and (next_attempt_at IS NULL OR next_attempt_at <= now())"
+      - "OR status='processing' and locked_until < now()"
+    ordering:
+      - "priority ASC"
+      - "next_attempt_at ASC NULLS FIRST"
+      - "input_watermark ASC"
+      - "attempt_count ASC"
+      - "created_at ASC"
+    atomicity:
+      - "SELECT eligible rows FOR UPDATE SKIP LOCKED."
+      - "Set status='processing', locked_by=p_worker_id, locked_until=now()+lease, claimed_at=now(), attempt_count=attempt_count+1 in the same statement."
+      - "Return the claimed rows only after lock metadata is persisted."
+  completion_transaction:
+    name: complete_person_action_recompute_job
+    atomic_steps:
+      - "Load the job by id, user_id, locked_by, and unexpired locked_until."
+      - "Compute deterministic PersonActionItem ids from canonical source facts, not Android cache."
+      - "Upsert changed active rows and stable user-state overlays."
+      - "Write deleted/superseded action ids as tombstones for the retention window."
+      - "Update person_action_feed_watermarks only if job input_watermark is not older than the current feed input watermark."
+      - "Mark job completed with completed_at; if compare-and-swap loses to a newer watermark, complete the job without mutating feed rows."
+    failure_steps:
+      - "Retryable failure sets status='failed', next_attempt_at with exponential backoff+jitter, last_error_retryable=true, and releases locked_until."
+      - "Non-retryable source/user repair sets status='dead_letter', last_error_client_action, incident_id, and feed recompute_state='degraded'."
+  requeue_transaction:
+    name: requeue_person_action_recompute_job
+    purpose: "Operator/service-role recovery path for dead_letter, failed, or stale processing jobs after deploy/config/source repair."
+    args:
+      p_job_id: uuid
+      p_actor: string
+      p_reason: string
+      p_reset_attempts?: boolean
+    atomic_steps:
+      - "Validate the job exists and belongs to exactly one user."
+      - "Set status='pending', locked_by=NULL, locked_until=NULL, claimed_at=NULL, next_attempt_at=now(), and updated_at=now()."
+      - "If p_reset_attempts=true, reset attempt_count to 0; otherwise preserve attempt_count for audit."
+      - "Append non-secret recovery audit metadata without raw source content."
+      - "Set affected person_action_feed_watermarks.recompute_state='pending' and keep stale/degraded cache visible until completion."
+    forbidden:
+      - "Deleting a dead_letter row as recovery."
+      - "Marking feed caught_up without running complete_person_action_recompute_job."
+      - "Requeueing cross-user rows from a user-supplied id without service-role validation."
+  fairness:
+    noisy_user_rule: "A single user can claim at most max_user_claim_share_per_5m of worker capacity while other users have eligible jobs."
+    coalescing_rule: "Newer trigger for the same user/scope may update an existing pending job input_watermark and increment coalesced_count instead of creating unbounded rows."
+    priority_rule: "Near-future due actions and source_reconnect/review repair jobs may use lower numeric priority, but priority cannot bypass lease/fairness guarantees."
+  live_runtime_gate:
+    required: true
+    evidence:
+      - "Worker service reports person-action-recompute in its configured queues."
+      - "Synthetic backlog with 1000 users drains p95 <= 15 minutes under healthy dependencies."
+      - "Concurrent workers claim the same backlog with zero duplicate processing ids and zero missing completed jobs."
+
+data_contract:
+  PersonActionItem:
+    owner: backend_railway_canonical_projection
+    canonicality: "canonical product projection, regeneratable from structured source graph and user state"
+    stable_id_rule: "sha256(user_id + action_kind + primary_evidence_key + person_id? + commitment_id? + calendar_event_id? + action_version)"
+    fields:
+      id: string
+      user_id: uuid
+      person_id?: uuid
+      person_display_name?: string
+      person_sort_key?: string
+      surfaces: "string[]" # person | schedule | commitment
+      action_kind: "do_work | attend | prepare | reply | follow_up | wait | confirm_schedule | review_person | review_extraction | source_reconnect"
+      status: "active | completed | dismissed | snoozed | superseded | stale"
+      title: string
+      primary_verb: string
+      short_reason: string
+      commitment_id?: uuid
+      calendar_event_id?: uuid
+      source_event_id?: uuid
+      source_type?: string
+      source_ref?: string
+      due_at?: datetime
+      due_hint?: string
+      due_is_approximate: boolean
+      stale_after?: datetime
+      urgency_score: float
+      importance_score: float
+      confidence: float
+      reason_codes: "string[]"
+      evidence_refs: "PersonActionEvidenceRef[]"
+      input_watermark: datetime
+      input_watermarks: "PersonActionInputWatermark[]"
+      computed_at: datetime
+      updated_at: datetime
+      snoozed_until?: datetime
+      completed_at?: datetime
+      dismissed_at?: datetime
+    constraints:
+      - "title <= 120 chars"
+      - "primary_verb <= 20 chars"
+      - "short_reason <= 160 chars"
+      - "surfaces length 1..3"
+      - "0.0 <= urgency_score <= 1.0"
+      - "0.0 <= importance_score <= 1.0"
+      - "0.0 <= confidence <= 1.0"
+      - "evidence_refs length 1..5"
+      - "status='active' rows are the only default tab rows"
+      - "completed/dismissed/snoozed state is backend user state and must survive recomputation while the stable id remains the same"
+      - "input_watermarks must identify the latest backend source/commitment/calendar/person/memory/correction inputs included in the row."
+
+  PersonActionEvidenceRef:
+    fields:
+      kind: "commitment | calendar_event | source_event | source_participant | commitment_participant | person_memory | source_status | user_correction"
+      id: string
+      source_ref?: string
+      occurred_at?: datetime
+      label: string
+      quote?: string
+    constraints:
+      - "quote <= 200 chars"
+      - "label <= 80 chars"
+      - "No full body, full transcript, OCR text, raw model output, filesystem path, signed URL, cloud object path, or local archive path."
+
+  PersonActionInputWatermark:
+    fields:
+      input_kind: "source_event | commitment | calendar_event | person_graph | person_memory | source_status | user_correction"
+      source_type?: string
+      high_watermark: datetime
+      row_count?: int
+      digest?: string
+    constraints:
+      - "digest is a bounded hash/fingerprint, not raw source content."
+      - "Every successful /v1/person_action_items delta response returns server_watermark and input_watermarks."
+
+  PersonActionRecomputeJob:
+    owner: backend_railway_durable_queue
+    purpose: "Durably coalesce and retry backend action recomputation without missing source/person slices."
+    fields:
+      job_id: uuid
+      user_id: uuid
+      scope_kind: "user | person | source_event | commitment | calendar_event | source_status | correction"
+      scope_id?: string
+      input_watermark: datetime
+      priority: int
+      shard_key: int
+      status: "pending | processing | completed | failed | dead_letter"
+      attempt_count: int
+      next_attempt_at?: datetime
+      locked_until?: datetime
+      locked_by?: string
+      claimed_at?: datetime
+      created_at: datetime
+      updated_at: datetime
+      completed_at?: datetime
+      coalesced_count: int
+      last_error_code?: string
+      last_error_retryable?: boolean
+      last_error_client_action?: string
+      incident_id?: string
+    rules:
+      - "UPSERT by user_id + scope_kind + scope_id + input_watermark so repeated triggers coalesce."
+      - "Workers claim jobs with a lease/locked_until and may safely retry after lock expiry."
+      - "A completed lower watermark must never overwrite newer action rows."
+      - "Dead-letter jobs must keep the action cache stale and raise an observable alert."
+      - "locked_by/claimed_at/locked_until are written only by the atomic claim RPC; workers cannot ad hoc update claim metadata."
+      - "priority and shard_key exist for queue fairness and capacity control; they cannot change canonical source facts or action correctness."
+      - "coalesced_count increments when repeated pending triggers are folded into the same scope/watermark job."
+
+  PersonActionItemCache:
+    owner: android_cache_only
+    purpose: "Offline/stale rendering of the latest backend-computed PersonActionItem rows."
+    fields:
+      id: string
+      user_id: uuid
+      payload_json: string
+      status: string
+      surfaces_json: string
+      person_id?: uuid
+      due_at?: datetime
+      urgency_score: float
+      input_watermark: datetime
+      server_watermark: datetime
+      computed_at: datetime
+      fetched_at: datetime
+      stale_after?: datetime
+      cache_status: "fresh | stale | offline | pending_context"
+    rules:
+      - "Android must not insert generated rows except by applying backend responses."
+      - "Cache deletion does not delete canonical source facts or backend action state."
+      - "Offline UI may render cached active rows with a stale/offline badge."
+      - "Cache apply is transactional: collect every page for one backend snapshot, upsert returned rows, delete returned tombstones/full-refresh misses, then advance person_action_sync_state.server_watermark."
+
+  PersonActionSyncState:
+    owner: android_cache_only
+    purpose: "Surface/status-scoped action feed delta progress. Prevents empty feeds, deletion-only feeds, and partially paged snapshots from losing the last proven server watermark."
+    fields:
+      user_id: uuid
+      surface_key: string
+      status: string
+      server_watermark: datetime
+      recompute_state: "pending | caught_up | stale | degraded"
+      capacity_state?: string
+      last_synced_at: datetime
+      updated_at: datetime
+    rules:
+      - "Primary key is user_id + surface_key + status; a Person-tab watermark must not be reused for Commitment or Schedule delta fetches."
+      - "Android writes this row only in the same Room transaction that applies the terminal has_more=false snapshot page."
+      - "Crash before sync-state commit must refetch from the previous server_watermark; no row-level cache watermark may be treated as the feed watermark."
+      - "A full refresh replaces rows in the requested surface scope before advancing this state."
+
+  PersonActionMutationQueue:
+    owner: android_outbox_only
+    purpose: "Persist user action mutations until Railway acknowledges canonical action state."
+    fields:
+      id: uuid
+      client_mutation_id: uuid
+      action_item_id: string
+      mutation: "complete | dismiss | snooze | undo | feedback"
+      payload_json: string
+      created_at: datetime
+      last_attempt_at?: datetime
+      retry_count: int
+      next_attempt_at?: datetime
+      last_error_code?: string
+      last_error_retryable?: boolean
+      sync_status: "pending | syncing | synced | failed"
+    rules:
+      - "Optimistic UI may update cache state, but backend ack is the canonical decision."
+      - "Failed mutations remain retryable unless backend returns non-retryable validation error."
+      - "A mutation may be removed only after a durable 200 response or explicit non-retryable user-visible failure handling."
+
+  PersonActionMutationLedger:
+    owner: backend_railway_idempotency_ledger
+    purpose: "Durably dedupe action mutations and feedback by client_mutation_id without relying on the latest action state row alone."
+    fields:
+      id: uuid
+      user_id: uuid
+      client_mutation_id: uuid
+      action_item_id: string
+      mutation_kind: "state_patch | feedback"
+      payload_hash: string
+      request_payload_json: string
+      result_action_json?: string
+      result_status: "committed | rejected | retryable_failed"
+      error_code?: string
+      error_client_action?: string
+      request_id?: string
+      created_at: datetime
+      updated_at: datetime
+    rules:
+      - "Unique key is user_id + client_mutation_id."
+      - "Same user_id + client_mutation_id + same payload_hash returns the stored committed/rejected result without applying side effects twice."
+      - "Same user_id + client_mutation_id + different payload_hash returns 409 idempotency_conflict and does not mutate action state."
+      - "Committed ledger write, person_action_item_user_states update, linked commitment update, and recompute trigger enqueue occur in one backend transaction or return a retryable recovery error."
+      - "Ledger payload stores bounded request/result JSON only; it must not include raw source bodies, transcripts, OCR, audio paths, signed URLs, or raw model output."
+
+inputs:
+  backend_canonical:
+    - persons
+    - person_identities
+    - source_event_participants
+    - commitment_participants
+    - person_interactions
+    - commitments
+    - calendar_events
+    - source_status
+    - user_profile timezone/locale
+    - person_action_item_user_states
+    - user_corrections and confirmed match/rejection state
+  backend_context:
+    - person_memory artifact metadata and content hash
+    - bounded semantic/context rows generated from structured graph inputs
+    - source sync/input watermarks
+  android_origin_only:
+    - local raw originals and archive paths
+    - upload queue and retry state
+    - source files not durably accepted by backend
+  forbidden_runtime_inputs:
+    - memory.md runtime parsing for UI rows
+    - full email body
+    - full transcript or OCR text
+    - raw model output
+    - source_artifacts original Markdown body
+    - ContactsContract data not already represented as local enrichment or confirmed identity
+
+generation_rules:
+  - id: NAP-001
+    description: "Action computation is asynchronous and backend-owned."
+    trigger: "durable source event, commitment, calendar, participant, person merge, user correction, source status, or person memory context watermark changes"
+    expected: "Railway action recomputation writes backend PersonActionItem rows and exposes changed rows through /v1/person_action_items."
+
+  - id: NAP-002
+    description: "A source event can inform multiple actions but must not flood UI."
+    expected: "At most one active action per person/surface/primary evidence key. If several actions compete, keep the highest urgency row and store other evidence refs under the same card."
+
+  - id: NAP-003
+    description: "Action items are product projections, not source facts."
+    expected: "Deleting Android cache rows must not delete commitments, calendar events, person graph rows, source events, or person memory. Backend recomputation restores active rows from durable inputs."
+
+  - id: NAP-004
+    description: "Backend user action state wins over recomputation."
+    expected: "If a stable action id has completed/dismissed/snoozed backend state, recomputation keeps that state unless the underlying canonical evidence is materially edited or superseded."
+
+  - id: NAP-005
+    description: "Evidence is bounded and drill-down only."
+    expected: "Cards show one short backend reason. Full context opens source evidence screens that already enforce local privacy rules."
+
+  - id: NAP-006
+    description: "Person memory is backend reasoning context, not direct UI data."
+    expected: "Backend may use bounded context rows or memory artifact freshness, but Android must not parse memory.md at runtime to construct a card."
+
+  - id: NAP-007
+    description: "Local-origin sources become action inputs only after backend durable acceptance."
+    expected: "Before upload/validation succeeds, Android shows cached action feed plus pending source state; it must not generate local replacement actions."
+
+  - id: NAP-008
+    description: "Recompute jobs are durable and idempotent."
+    trigger: "Any accepted source/commitment/calendar/person/source-status/correction write advances an action input watermark."
+    expected: "Railway upserts a PersonActionRecomputeJob keyed by user/scope/input_watermark. Duplicate triggers coalesce, workers claim by lease, and completed stale jobs cannot overwrite newer rows."
+
+  - id: NAP-009
+    description: "Incremental fetches cannot miss deletions or superseded rows."
+    trigger: "Android calls GET /v1/person_action_items?changed_since=<server_watermark>."
+    expected: "Response includes changed rows, deleted_ids/superseded ids, server_watermark, and input_watermarks in one consistent snapshot. Android applies all changes in one Room transaction before advancing its cache watermark."
+
+  - id: NAP-010
+    description: "Action mutations are idempotent and replay-safe."
+    trigger: "Android submits complete/dismiss/snooze/undo/feedback from person_action_mutation_queue."
+    expected: "Railway dedupes by client_mutation_id. Same payload returns the committed PersonActionItem; different payload with same id returns 409 idempotency_conflict and leaves the queued mutation failed with user-visible recovery."
+
+  - id: NAP-011
+    description: "Backend gaps are visible, not silent."
+    trigger: "Recompute job dead-letters, watermark lag exceeds SLO, or source input is pending_context_upload."
+    expected: "Android keeps last cache and shows stale/pending context. Observability emits lag/dead-letter/missing-delta metrics without raw content."
+
+  - id: NAP-012
+    description: "Every action-impacting write has an explicit recompute trigger."
+    trigger: "Any source graph, commitment, calendar, source status, person memory, review, correction, or schedule-link write returns durable success."
+    expected: "The write boundary uses action_input_trigger_contract to upsert or coalesce a recompute job with deterministic scope_kind, scope_id, and input_watermark before returning 200/201/204."
+
+  - id: NAP-013
+    description: "Changed_since pagination is snapshot-bound."
+    trigger: "GET /v1/person_action_items returns has_more=true for full refresh or delta."
+    expected: "Response includes snapshot_id and snapshot_expires_at. Android applies all pages for that snapshot before advancing server_watermark; cursor without matching snapshot_id returns 409 full_refresh."
+
+  - id: NAP-014
+    description: "Mutation idempotency is backed by a durable ledger."
+    trigger: "PATCH /v1/person_action_items/{id} or POST /v1/person_action_items/{id}:feedback receives client_mutation_id."
+    expected: "Railway writes PersonActionMutationLedger keyed by user_id/client_mutation_id/payload_hash and replays stored results for duplicate payloads without double side effects."
+
+  - id: NAP-015
+    description: "Dead-letter recovery has an operator requeue path."
+    trigger: "person_action_recompute_jobs.status=dead_letter or stale processing state remains after source/config/deploy repair."
+    expected: "Service-role requeue_person_action_recompute_job moves the job back to pending and feed remains stale/degraded until a later complete transaction catches up."
+
+  - id: NAP-016
+    description: "Action generation is deterministic and versioned."
+    trigger: "Recompute worker builds PersonActionItem rows from canonical backend inputs."
+    expected: "Worker follows action_generation_algorithm_contract for candidate filter, action_kind precedence, surfaces, stable_id, scoring tie-breaks, collapse, user-state overlay, and action_version migrations."
+
+  - id: NAP-017
+    description: "Fresh install without cache has a closed UX state."
+    trigger: "First action feed fetch has no local cache and returns empty, endpoint unavailable, feature disabled, or maintenance."
+    expected: "Backend returns explicit empty/error/client_config state and Android renders caught-up/setup/sync-pending/maintenance/retry/support UI without falling back to local action generation or blank first screens."
+
+ranking_rules:
+  owner: backend_railway
+  urgency:
+    - "due_at within next 24h outranks future due dates"
+    - "overdue active user-owned work outranks waiting-on-counterparty rows"
+    - "confirmed schedule attendance outranks optional or approximate schedule"
+    - "prep action before a meeting outranks generic history"
+    - "unresolved person/extraction review appears only when it blocks a concrete action"
+  demotion:
+    - "low confidence"
+    - "due_is_approximate=true"
+    - "source_status stale or disconnected without a concrete action"
+    - "person has no unresolved obligation"
+    - "completed, cancelled, deleted, or decision-only facts"
+  caps:
+    person_tab_default: 10
+    schedule_tab_default: 20
+    commitment_tab_default: 20
+    per_person_active_default: 1
+
+deep_design_steps:
+  - step: 1
+    name: "Keep source ingress hybrid"
+    contract: "Do not require every source to enter through backend first. Android local DB can be origin/outbox for device-owned sources."
+    required_contracts:
+      - ".spec/data-ingestion.spec.yml source owner rules"
+      - ".spec/contracts/api-contract.yml raw ingestion/extraction/source sync endpoints"
+      - "becalm-backend/docs/backend-contract.md source graph contract"
+
+  - step: 2
+    name: "Move product decisions to backend"
+    contract: "Railway owns PersonActionItem generation, urgency ranking, grouping, and user action state."
+    required_contracts:
+      - ".spec/contracts/api-contract.yml PersonActionItem endpoints"
+      - ".spec/contracts/data-model.yml PersonActionItemCache and backend projection notes"
+
+  - step: 3
+    name: "Replace local action projections"
+    contract: "Android Room stores person_action_item_cache and mutation outbox only. It does not generate next_action_projections."
+    removed_contracts:
+      - "Room next_action_projections as first-screen source of truth"
+      - "Room next_action_user_states as authoritative local state"
+      - "Railway /v1/next_actions as optional mirror"
+
+  - step: 4
+    name: "Replace legacy tab feeds"
+    contract: "Person, Schedule, and Commitment tabs render active backend person action items first. Timelines, filters, and raw events are evidence/history only."
+    removed_specs:
+      - ".spec/today-timeline.spec.yml"
+      - ".spec/commitment-management.spec.yml"
+      - ".spec/source-viewer.spec.yml"
+
+  - step: 5
+    name: "Preserve commitment lifecycle without preserving old feed UX"
+    contract: "Commitment-backed actions update through backend action endpoints; backend applies any required commitment action_state mutation atomically."
+    required_acceptance_ids:
+      - NAP-ACTION-001
+      - NAP-ACTION-002
+      - NAP-ACTION-003
+      - NAP-ACTION-004
+
+  - step: 6
+    name: "Keep evidence inspectable but secondary"
+    contract: "Every person action item has bounded evidence refs. Raw/source detail exists only behind EvidenceDrillDownSheet."
+    required_acceptance_ids:
+      - NAP-EVIDENCE-001
+      - NAP-EVIDENCE-002
+
+  - step: 7
+    name: "Validate by product outcome"
+    contract: "QA should verify the three first screens answer who, where, and what next without scanning three months of source history."
+    required_acceptance_ids:
+      - NAP-PERSON-001
+      - NAP-SCHEDULE-001
+      - NAP-COMMITMENT-001
+
+tab_acceptance_criteria:
+  - id: NAP-PERSON-001
+    surface: person
+    expected: "PersonsScreen renders people ranked by backend active person action items. A person with no active action can appear only in search or a secondary recent section."
+
+  - id: NAP-PERSON-002
+    surface: person
+    expected: "PersonDetailScreen opens with a backend-computed NextMove panel. Source timeline is collapsed behind evidence/history affordance."
+
+  - id: NAP-SCHEDULE-001
+    surface: schedule
+    expected: "Schedule tab renders backend person action items with schedule surface for today plus next 7 days. Past history older than today is hidden unless attached to an active prep/follow-up action."
+
+  - id: NAP-SCHEDULE-002
+    surface: schedule
+    expected: "Calendar events without required user action render as compact agenda rows only when backend includes them as attend/wait context; preparation or confirmation actions are visually primary."
+
+  - id: NAP-COMMITMENT-001
+    surface: commitment
+    expected: "Commitment tab renders backend active open obligations, grouped by now/mine/waiting/review. Completed, cancelled, deleted, and decision-only rows are hidden by default."
+
+  - id: NAP-COMMITMENT-002
+    surface: commitment
+    expected: "Action state transitions call backend person action endpoints; backend updates PersonActionItem state and any linked canonical commitment atomically."
+
+action_lifecycle_acceptance:
+  - id: NAP-ACTION-001
+    legacy_from: [CMT-005, CMT-006, CMT-007, CMT-012, CMT-013]
+    expected: "Commitment-backed PersonActionCard supports reminded, followed_up, completed, cancelled, and undo transitions through backend person action mutation endpoints."
+
+  - id: NAP-ACTION-002
+    legacy_from: [CMT-005, CMT-008]
+    expected: "Reminder scheduling is tied to backend-computed action due_at and linked canonical commitment due_at/action_state. Completed/cancelled rows suppress notifications at fire time."
+
+  - id: NAP-ACTION-003
+    legacy_from: [CMT-011]
+    expected: "Overdue sweep is backend commitment lifecycle. It updates commitments first and then recomputes affected PersonActionItem rows."
+
+  - id: NAP-ACTION-004
+    legacy_from: [CMT-009, CMT-013]
+    expected: "Completed/cancelled history is not a default first-screen section. Undo is a backend action-state mutation plus canonical commitment rollback within the configured window."
+
+evidence_acceptance:
+  - id: NAP-EVIDENCE-001
+    legacy_from: [CMT-003, SRC-004]
+    expected: "Tapping action evidence opens EvidenceDrillDownSheet or the existing raw/source detail sheet with bounded quote/source refs, not a primary source timeline."
+
+  - id: NAP-EVIDENCE-002
+    legacy_from: [SRC-001, SRC-002, SRC-008]
+    expected: "Person history is a collapsed evidence section built from person_interactions. The first viewport remains PersonNextMovePanel and compact context."
+
+sync_acceptance:
+  - id: NAP-SYNC-001
+    legacy_from: [TDY-006, TDY-009, CMT-010, SRC-006]
+    expected: "Pull-to-refresh keeps current cached backend action feed visible, runs foreground catch-up/upload flush/relation mirror refresh, fetches changed /v1/person_action_items, and marks cache stale if backend is unavailable."
+
+  - id: NAP-SYNC-002
+    legacy_from: [TDY-003, TDY-008]
+    expected: "Source status remains diagnostic and recovery-oriented. Backend can create source_reconnect person action items, but source status is not a tappable source-history feed."
+
+  - id: NAP-SYNC-003
+    expected: "Android persists server_watermark after applying changed rows and deleted_ids transactionally. A process kill between download and apply must refetch with the previous watermark."
+
+  - id: NAP-SYNC-004
+    expected: "If GET /v1/person_action_items returns retryable 5xx/429/503, Android keeps cache_status stale/offline, respects Retry-After, and schedules a bounded retry without clearing existing rows."
+
+  - id: NAP-SYNC-005
+    expected: "If backend returns input_watermarks older than Android pending local upload watermarks, UI marks affected source/person scope as pending_context rather than complete."
+
+relation_acceptance:
+  - id: NAP-REL-001
+    legacy_from: [SRC-001, SRC-003, SRC-006]
+    expected: "People list uses person_id and backend person action items. Search can include history-only people and contacts, but the primary list requires an active person-surface action."
+
+  - id: NAP-REL-002
+    legacy_from: [SRC-002, SRC-008]
+    expected: "Person detail uses person_id and backend person action cache first; person_interactions only power collapsed evidence/history."
+
+failure_retry_idempotency:
+  idempotency:
+    - "Backend recomputation uses stable unique work keys per user and affected person/source slice."
+    - "Recomputation is idempotent by stable person_action_item id and input_watermark."
+    - "Action mutations and feedback are idempotent by client_mutation_id."
+    - "Duplicate mutation payload returns the same committed PersonActionItem; divergent payload returns 409 idempotency_conflict."
+  retry:
+    - "Transient errors include retryable=true and optional retry_after_seconds."
+    - "Android foreground may do at most one inline retry, then defers to WorkManager/outbox backoff."
+    - "Backend recompute jobs retry with lease expiry, bounded exponential backoff, and dead-letter after policy max attempts."
+    - "Expired processing jobs are reclaimable by any healthy worker through claim_person_action_recompute_jobs; retry never depends on the original worker returning."
+  no_missing_data:
+    - "Successful delta fetch returns changed rows plus deleted_ids/superseded ids and a server_watermark from one consistent snapshot."
+    - "Android advances server_watermark only after a Room transaction applies rows, tombstones, and cache metadata."
+    - "If source graph is partially synced, backend may mark affected actions stale or blocked; Android must not generate missing actions locally."
+    - "Local-origin source rows with pending_context_upload are excluded from backend action reasoning until Railway durable commit succeeds."
+    - "Tombstones for deleted/superseded rows are retained for 90 days; older changed_since requests receive 409 full_refresh instead of partial deltas."
+  latency:
+    - "Cached first paint target p95 <= 500ms from tab open."
+    - "Foreground action delta fetch target p95 <= 1500ms when network is healthy."
+    - "Backend recompute visibility target p95 <= 30s after local-origin durable upload and <= 60s after backend-provider sync completion."
+    - "At 1000 year-1 users, healthy person-action worker backlog drain p95 <= 15 minutes and deploy catch-up p95 <= 10 minutes."
+  failure_isolation:
+    - "Failed backend action computation never blocks ingestion, source sync, person matching, or commitment editing, but UI must show stale cache rather than invent local actions."
+    - "If person action endpoints are absent or unavailable, Android renders the last cached backend response with stale/offline state and pending mutation queue; it does not local-regenerate actions."
+    - "Dead-letter recompute jobs produce operational alerts and keep affected cache scopes stale."
+    - "Sustained backlog/degraded feed state must move from inline retry to compact UX plus support/operator recovery; there is no endless spinner or repeating modal path."
+
+test_plan:
+  unit:
+    - "Backend action generator maps open action commitments to commitment-surface person action items."
+    - "Backend schedule generator creates attend/prepare/confirm rows and hides old calendar history."
+    - "Backend person ranking returns one top action per person and suppresses history-only people from primary section."
+    - "Backend completed/dismissed/snoozed state survives recomputation by stable id."
+    - "Evidence sanitizer rejects full body/transcript/OCR/raw model output markers and local paths."
+    - "Android cache repository applies backend responses without local action generation."
+    - "Delta applier upserts changed rows, deletes tombstones, and advances server_watermark only inside one transaction."
+    - "Mutation outbox dedupes by client_mutation_id and handles retryable/non-retryable envelopes."
+  integration:
+    - "Local-origin source upload writes durable source_event_participants/commitment_participants, backend recomputes person action items, Android fetches changed cache rows."
+    - "Backend-provider sync writes canonical rows, enqueues action recomputation, and /v1/person_action_items returns changed rows with input_watermark."
+    - "API 503 keeps cached rows stale and does not trigger local recompute."
+    - "Duplicate recompute triggers coalesce into one durable job per scope/input_watermark."
+    - "Worker crash after job claim recovers after locked_until and does not lose the recompute."
+    - "Concurrent person-action workers using claim_person_action_recompute_jobs process a shared backlog with zero duplicate job ids and zero missing jobs."
+    - "Late completion from an expired older lease cannot overwrite rows or watermarks from a newer completed recompute."
+    - "changed_since fetch after supersede/delete returns deleted_ids and no stale cache rows remain."
+    - "changed_since older than the 90-day tombstone window returns 409 full_refresh and Android keeps stale cache until full snapshot applies."
+    - "Duplicate PATCH/feedback with the same client_mutation_id returns stable committed state."
+  non_functional:
+    - "Synthetic latency test verifies cached first paint p95 <= 500ms and foreground delta fetch p95 <= 1500ms on healthy network."
+    - "Backlog drain test verifies person_action_recompute_jobs with 1000 users and 365-day seeded history drain p95 <= 15 minutes without unbounded retry storms."
+    - "Fairness test verifies one noisy user cannot claim more than 20% of rolling 5m worker capacity while other eligible users have backlog."
+    - "Watermark gap test verifies no source event accepted before server_watermark is missing from recomputed input_watermarks after recompute completion."
+    - "Retention test verifies 90-day tombstones, completed cache prune, and full-refresh fallback for stale changed_since clients."
+    - "Telemetry test verifies action-feed metrics are async/batched and contain no raw content or PII-like keys."
+  ui:
+    - "Three bottom tabs show Person, Schedule, Commitment with action-first content from person_action_item_cache."
+    - "Person detail first viewport shows backend next move before history."
+    - "Evidence drill-down opens existing raw/source screens without making history the default feed."
+    - "Long degraded/backlog state shows compact stale health with one recovery CTA, last successful refresh time, and no endless spinner or repeated blocking dialog."
+  smoke:
+    - "Cold account with one connected source reaches an actionable card after backend sync and action recompute."
+    - "No-source account shows backend-generated source reconnect as the only action."
+
+rollout:
+  phase_0_worker_runtime:
+    - "Add person-action-recompute as a dedicated backend worker queue, not a default web-process background task."
+    - "Add claim/complete/reclaim RPCs with FOR UPDATE SKIP LOCKED, lease expiry, fairness cap, and live worker health evidence."
+    - "Add retention jobs for 90-day tombstones and completed/dismissed/superseded action cache pruning."
+  phase_1_backend_action_brain:
+    - "Create backend PersonActionItem projection and user-state persistence."
+    - "Expose GET/PATCH/feedback endpoints under /v1/person_action_items."
+    - "Enqueue recomputation after source, commitment, calendar, person, correction, and source status mutations."
+  phase_2_android_cache:
+    - "Replace Room next_action_projections with person_action_item_cache and person_action_mutation_queue."
+    - "Replace tab view models with backend cache reads while keeping source evidence drill-down routes."
+    - "Show stale/offline/pending-context states instead of local action recompute."
+  phase_3_dead_contract_removal:
+    - "Remove local NextActionProjectionWorker and local ranking helpers."
+    - "Remove /v1/next_actions optional mirror contract."
+    - "Remove tests that assert local projection generation as product behavior."
+  rollback:
+    - "Feature flag can keep existing legacy tabs while backend action endpoints are dark-launched."
+    - "Disabling action feed renders last cached backend rows as stale or returns to legacy tabs only behind explicit rollback flag."
+    - "Dropping Android cache rows must not affect backend canonical source facts or action state."

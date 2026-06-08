@@ -2047,6 +2047,66 @@ private val MIGRATION_38_39 = object : Migration(38, 39) {
     }
 }
 
+private val MIGRATION_39_40 = object : Migration(39, 40) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(db, "person_action_sync_state", "capacity_backlog_lag_seconds", "INTEGER")
+        addColumnIfMissing(db, "person_action_sync_state", "capacity_last_caught_up_at", "INTEGER")
+        addColumnIfMissing(db, "person_action_sync_state", "capacity_incident_id", "TEXT")
+        addColumnIfMissing(db, "person_action_sync_state", "recovery_actions_json", "TEXT")
+        addColumnIfMissing(db, "person_action_sync_state", "empty_state_json", "TEXT")
+        addColumnIfMissing(db, "person_action_sync_state", "server_timing_json", "TEXT")
+        addColumnIfMissing(db, "person_action_sync_state", "server_timing_total_ms", "REAL")
+    }
+}
+
+private val MIGRATION_40_41 = object : Migration(40, 41) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `manual_memory_outbox` (
+                `user_id` TEXT NOT NULL,
+                `client_memory_id` TEXT NOT NULL,
+                `person_id` TEXT NOT NULL,
+                `commitment_id` TEXT NOT NULL,
+                `source_ref` TEXT NOT NULL,
+                `person_display_name` TEXT NOT NULL,
+                `origin_channel` TEXT NOT NULL,
+                `memory_kind` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
+                `occurred_at` INTEGER NOT NULL,
+                `due_at` INTEGER,
+                `due_hint` TEXT,
+                `payload_hash` TEXT NOT NULL,
+                `sync_status` TEXT NOT NULL DEFAULT 'pending',
+                `retry_count` INTEGER NOT NULL DEFAULT 0,
+                `last_error` TEXT,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`user_id`, `client_memory_id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_manual_memory_outbox_user_sync_updated` " +
+                "ON `manual_memory_outbox` (`user_id`, `sync_status`, `updated_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_manual_memory_outbox_user_commitment` " +
+                "ON `manual_memory_outbox` (`user_id`, `commitment_id`)",
+        )
+    }
+}
+
+private val MIGRATION_41_42 = object : Migration(41, 42) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(db, "person_action_item_cache", "provider_write_kind", "TEXT")
+        addColumnIfMissing(db, "person_action_item_cache", "provider_write_state", "TEXT")
+        addColumnIfMissing(db, "person_action_item_cache", "provider_write_provider", "TEXT")
+        addColumnIfMissing(db, "person_action_item_cache", "provider_write_source_connection_id", "TEXT")
+        addColumnIfMissing(db, "person_action_item_cache", "provider_write_schedule_event_link_id", "TEXT")
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -2099,4 +2159,7 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_36_37,
     MIGRATION_37_38,
     MIGRATION_38_39,
+    MIGRATION_39_40,
+    MIGRATION_40_41,
+    MIGRATION_41_42,
 )

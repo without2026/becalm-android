@@ -22,6 +22,9 @@ import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.BatchUploadResponse
+import com.becalm.android.data.remote.dto.ExtractionStorageRefDto
+import com.becalm.android.data.remote.dto.ExtractionUploadPrepareRequest
+import com.becalm.android.data.remote.dto.ExtractionUploadPrepareResponse
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingStatusRepository
@@ -42,7 +45,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -88,9 +93,10 @@ class MessageScreenshotUploadWorkerSpecTest {
 
     @Test
     // spec: MSG-003
-    fun `message screenshot worker uploads image modality through shared extraction runner`() = runTest {
+    fun `message screenshot worker uploads image through prepared storage job flow`() = runTest {
         val image = temp.newFile("normalized-kakao-thread.jpg").apply { writeBytes(byteArrayOf(1, 2, 3)) }
-        val imageSlot = io.mockk.slot<MultipartBody.Part>()
+        val prepareSlot = io.mockk.slot<ExtractionUploadPrepareRequest>()
+        val uploadSlot = io.mockk.slot<MultipartBody.Part>()
         val entity = RawIngestionEventEntity(
             id = RAW_ID,
             userId = USER_ID,
@@ -111,25 +117,35 @@ class MessageScreenshotUploadWorkerSpecTest {
         )
         coEvery { rawIngestionRepository.markSynced(listOf(RAW_ID)) } returns BecalmResult.Success(Unit)
         coEvery {
-            sourceExtractionApi.commitmentExtract(
-                audio = null,
-                image = capture(imageSlot),
-                inputModality = any(),
-                sourceType = any(),
-                clientEventId = any(),
-                rawEventId = any(),
-                durationSeconds = any(),
-                timestamp = any(),
-                counterpartyRef = any(),
-                eventTitle = any(),
-                folder = any(),
-                conversationRef = any(),
-                previousThreadContext = any(),
-                selfSpeakerId = any(),
-                speakerMappings = any(),
-                speakerPreviewId = any(),
-                processingConfirmed = any(),
+            sourceExtractionApi.prepareCommitmentExtractionUpload(capture(prepareSlot))
+        } returns Response.success(
+            ExtractionUploadPrepareResponse(
+                rawEventId = RAW_ID,
+                jobId = "job-shot-1",
+                bucket = "extraction-jobs",
+                path = "$USER_ID/job-shot-1/image.jpg",
+                contentType = "image/jpeg",
+                mediaKind = "image",
+                signedUploadUrl = "https://storage.example/upload/sign/extraction-jobs/path?token=signed-token",
+                uploadToken = "signed-token",
+                uploadContentType = "application/octet-stream",
+                storageRef = ExtractionStorageRefDto(
+                    bucket = "extraction-jobs",
+                    path = "$USER_ID/job-shot-1/image.jpg",
+                    contentType = "image/jpeg",
+                    rawEventId = RAW_ID,
+                    mediaKind = "image",
+                ),
             )
+        )
+        coEvery {
+            sourceExtractionApi.uploadExtractionMediaToSignedUrl(
+                signedUploadUrl = "https://storage.example/upload/sign/extraction-jobs/path?token=signed-token",
+                file = capture(uploadSlot),
+            )
+        } returns Response.success("{}".toResponseBody("application/json".toMediaType()))
+        coEvery {
+            sourceExtractionApi.createCommitmentExtractionJob(any())
         } returns Response.success(
             SourceExtractionResponse(
                 rawEventId = RAW_ID,
@@ -144,12 +160,19 @@ class MessageScreenshotUploadWorkerSpecTest {
         val result = buildWorker().doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
-        assertEquals("image/jpeg", imageSlot.captured.body.contentType().toString())
-        coVerify(exactly = 1) { sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any(), processingConfirmed = any()) }
+        assertEquals("image/jpeg", prepareSlot.captured.contentType)
+        assertEquals("file", uploadSlot.captured.headers?.get("Content-Disposition")?.substringAfter("name=\"")?.substringBefore("\""))
+        assertEquals("application/octet-stream", uploadSlot.captured.body.contentType().toString())
+        coVerify(exactly = 1) { sourceExtractionApi.prepareCommitmentExtractionUpload(any()) }
+        coVerify(exactly = 1) { sourceExtractionApi.uploadExtractionMediaToSignedUrl(any(), any()) }
+        coVerify(exactly = 1) { sourceExtractionApi.createCommitmentExtractionJob(any()) }
+        coVerify(exactly = 0) { sourceExtractionApi.commitmentExtract(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
         coVerifyOrder {
             rawIngestionRepository.uploadBatch(listOf(entity))
             rawIngestionRepository.markSynced(listOf(RAW_ID))
-            sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any(), processingConfirmed = any())
+            sourceExtractionApi.prepareCommitmentExtractionUpload(any())
+            sourceExtractionApi.uploadExtractionMediaToSignedUrl(any(), any())
+            sourceExtractionApi.createCommitmentExtractionJob(any())
         }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
@@ -179,6 +202,9 @@ class MessageScreenshotUploadWorkerSpecTest {
 
         assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
         coVerify(exactly = 1) { rawIngestionRepository.uploadBatch(listOf(entity)) }
+        coVerify(exactly = 0) { sourceExtractionApi.prepareCommitmentExtractionUpload(any()) }
+        coVerify(exactly = 0) { sourceExtractionApi.uploadExtractionMediaToSignedUrl(any(), any()) }
+        coVerify(exactly = 0) { sourceExtractionApi.createCommitmentExtractionJob(any()) }
         coVerify(exactly = 0) { sourceExtractionApi.commitmentExtract(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 

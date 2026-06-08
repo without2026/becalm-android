@@ -12,6 +12,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -41,6 +42,8 @@ import com.becalm.android.ui.commitments.EditReadOnly
 import com.becalm.android.ui.commitments.EditSheetContent
 import com.becalm.android.ui.commitments.EditUiState
 import com.becalm.android.ui.commitments.MeetingTranscriptPresentation
+import com.becalm.android.ui.actions.PersonActionEvidenceUi
+import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -118,6 +121,50 @@ class CommitmentSheetsUiTest {
             assertEquals(1, remindClicks)
             assertEquals(1, completeClicks)
             assertEquals(1, editClicks)
+        }
+    }
+
+    @Test
+    fun `commitment detail content opens related action evidence lookup`() {
+        var openedActionId: String? = null
+        var openedEvidenceKind: String? = null
+        var openedEvidenceId: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                DetailSheetContent(
+                    entity = commitmentEntity(id = "commitment-1"),
+                    quote = "금요일까지 보내겠습니다",
+                    actionState = CommitmentState.PENDING,
+                    source = CommitmentSourcePresentation(),
+                    history = CommitmentHistoryPresentation(),
+                    relatedAction = personAction(),
+                    actionButtons = CommitmentDetailActionState(),
+                    counterpartyDisplayName = "김철수",
+                    onReminderToggle = {},
+                    onFollowUp = {},
+                    onComplete = {},
+                    onCancel = {},
+                    onEdit = {},
+                    onOpenRelatedActionEvidence = { actionId, evidenceKind, evidenceId ->
+                        openedActionId = actionId
+                        openedEvidenceKind = evidenceKind
+                        openedEvidenceId = evidenceId
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("commitment-detail-action-evidence-card").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.commitment_action_evidence_why)).assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.commitment_action_evidence))
+            .onFirst()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("pa-commitment-1", openedActionId)
+            assertEquals("commitment", openedEvidenceKind)
+            assertEquals("commitment-1", openedEvidenceId)
         }
     }
 
@@ -449,13 +496,14 @@ class CommitmentSheetsUiTest {
     }
 
     private fun commitmentEntity(
+        id: String = "commitment-1",
         itemType: String = CommitmentItemType.ACTION,
         direction: String? = "give",
         scheduleStatus: String? = null,
         decisionStatus: String? = null,
         quote: String = "금요일까지 보내겠습니다",
     ): CommitmentEntity = CommitmentEntity(
-        id = "commitment-1",
+        id = id,
         userId = "user-1",
         itemType = itemType,
         direction = direction,
@@ -485,6 +533,34 @@ class CommitmentSheetsUiTest {
         quoteDisputedAt = null,
         deletedAt = null,
         supersedesCommitmentId = "old-1",
+    )
+
+    private fun personAction(): PersonActionItemUi = PersonActionItemUi(
+        id = "pa-commitment-1",
+        personId = "person-1",
+        personDisplayName = "김철수",
+        actionKind = "follow_up",
+        title = "제안서 보내기",
+        primaryVerb = "보내기",
+        shortReason = "통화에서 금요일까지 보내기로 약속했습니다.",
+        commitmentId = "commitment-1",
+        calendarEventId = null,
+        sourceEventId = "raw-1",
+        sourceType = SourceType.VOICE,
+        sourceRef = "raw:raw-1",
+        dueAt = null,
+        dueHint = null,
+        urgencyScore = 0.9,
+        confidence = 0.91,
+        reasonCodes = listOf("source:due"),
+        evidence = PersonActionEvidenceUi(
+            kind = "commitment",
+            id = "commitment-1",
+            sourceRef = "raw:raw-1",
+            occurredAt = null,
+            label = "약속",
+            quote = "금요일까지 보내겠습니다",
+        ),
     )
 
     private fun string(resId: Int, vararg args: Any): String =

@@ -705,6 +705,21 @@ public interface PersonIndexDao {
     )
     public fun observeUnresolvedSourceEventParticipantCount(userId: String): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM source_event_participants WHERE user_id = :userId")
+    public suspend fun countSourceEventParticipantsForUser(userId: String): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM source_event_participants
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+        """,
+    )
+    public suspend fun countSourceEventParticipantsForUserAndSourceType(
+        userId: String,
+        sourceType: String,
+    ): Int
+
     @Query(
         """
         SELECT COUNT(DISTINCT COALESCE(NULLIF(source_event_id, ''), NULLIF(source_ref, ''), id))

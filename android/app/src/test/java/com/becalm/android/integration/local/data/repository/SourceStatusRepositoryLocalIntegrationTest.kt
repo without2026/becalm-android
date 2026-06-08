@@ -1,5 +1,6 @@
 package com.becalm.android.integration.local.data.repository
 
+import androidx.datastore.preferences.core.edit
 import app.cash.turbine.test
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
@@ -11,6 +12,7 @@ import com.becalm.android.data.remote.dto.SourceStatusItemDto
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
+import com.becalm.android.data.repository.SourceStatusPrefsKeys
 import com.becalm.android.data.repository.SourceStatusRepositoryImpl
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import io.mockk.coEvery
@@ -105,6 +107,42 @@ class SourceStatusRepositoryLocalIntegrationTest {
             assertEquals(gmailSyncedAt, snapshot[SourceType.GMAIL]?.lastSyncedAt)
             assertEquals(SourceConnectionStatus.ERROR, snapshot[SourceType.OUTLOOK_MAIL]?.status)
             assertEquals("token expired", snapshot[SourceType.OUTLOOK_MAIL]?.errorMessage)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `recordSyncStart clears stale error while source is syncing`() = runTest {
+        val failedAt = Instant.parse("2026-04-23T02:30:00Z")
+        assertTrue(repository.recordSyncError(SourceType.GMAIL, "Vertex AI returned 403", failedAt) is BecalmResult.Success)
+        assertTrue(repository.recordSyncStart(SourceType.GMAIL) is BecalmResult.Success)
+
+        repository.observeFor(SourceType.GMAIL).test {
+            val status = awaitItem()
+
+            assertEquals(SourceConnectionStatus.SYNCING, status.status)
+            assertNull(status.errorMessage)
+            assertEquals(failedAt, status.lastSyncedAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `legacy in progress without started at does not stay syncing forever`() = runTest {
+        userPrefsStore.setCurrentUserId("user-1")
+        userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, connected = true)
+        userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, managed = true)
+        userPrefs.edit { prefs ->
+            prefs[SourceStatusPrefsKeys.inProgress(SourceType.GMAIL)] = true
+        }
+
+        repository.observeFor(SourceType.GMAIL).test {
+            val status = awaitItem()
+
+            assertEquals(SourceConnectionStatus.CONNECTED, status.status)
+            assertNull(status.errorMessage)
 
             cancelAndIgnoreRemainingEvents()
         }

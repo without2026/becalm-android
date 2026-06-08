@@ -18,12 +18,15 @@ import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepositoryImpl
+import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.SourceOriginalResolver
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.ui.commitments.CommitmentDetailViewModel
+import com.becalm.android.ui.commitments.CommitmentFilter
 import com.becalm.android.ui.commitments.CommitmentManagementViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.worker.WorkScheduler
@@ -75,6 +78,11 @@ class CommitmentLocalIntegrationTest {
     private val sourceEventParticipantRepository = mockk<SourceEventParticipantRepository>(relaxed = true)
     private val commitmentParticipantRepository = mockk<CommitmentParticipantRepository>(relaxed = true)
     private val sourceArtifactRepository = mockk<SourceArtifactRepository>(relaxed = true)
+    private val emailBodyRepository = mockk<EmailBodyRepository>(relaxed = true)
+    private val sourceOriginalResolver = SourceOriginalResolver(
+        emailBodyRepository = emailBodyRepository,
+        sourceArtifactRepository = sourceArtifactRepository,
+    )
     private val workScheduler = mockk<WorkScheduler>(relaxed = true)
     private val reminderScheduler = mockk<ReminderScheduler>(relaxed = true)
 
@@ -137,21 +145,23 @@ class CommitmentLocalIntegrationTest {
 
         viewModel.uiState.test {
             var state = awaitItem()
-            while (state.items.size < 3 || state.completedSection.count != 1 || state.cancelledSection.count != 1) {
+            while (state.activeItems.size < 1) {
                 state = awaitItem()
             }
 
             assertEquals(1, state.activeItems.size)
             assertEquals("활성 약속", state.activeItems.single().title)
-            assertEquals(1, state.completedSection.count)
-            assertEquals(listOf("완료 약속"), state.completedSection.items.map { it.title })
-            assertFalse(state.completedSection.expanded)
-            assertEquals(1, state.cancelledSection.count)
-            assertEquals(listOf("취소 약속"), state.cancelledSection.items.map { it.title })
+            assertEquals(0, state.completedSection.count)
+            assertEquals(0, state.cancelledSection.count)
 
-            viewModel.onToggleCompletedSection()
-            val expanded = awaitItem()
-            assertTrue(expanded.completedSection.expanded)
+            viewModel.onFilterChange(CommitmentFilter.CLOSED)
+            val afterLegacyClosed = viewModel.uiState.value
+
+            assertEquals(listOf("활성 약속"), afterLegacyClosed.activeItems.map { it.title })
+            assertEquals(0, afterLegacyClosed.completedSection.count)
+            assertEquals(emptyList<String>(), afterLegacyClosed.completedSection.items.map { it.title })
+            assertEquals(0, afterLegacyClosed.cancelledSection.count)
+            assertEquals(emptyList<String>(), afterLegacyClosed.cancelledSection.items.map { it.title })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -413,6 +423,7 @@ class CommitmentLocalIntegrationTest {
             rawIngestionEventDao = db.rawIngestionEventDao(),
             meetingSpeakerAliasDao = db.meetingSpeakerAliasDao(),
             sourceArtifactRepository = sourceArtifactRepository,
+            sourceOriginalResolver = sourceOriginalResolver,
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(BecalmRoute.CommitmentDetail.ARG_ID to "manual-detail")),
             logger = logger,

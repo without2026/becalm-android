@@ -14,6 +14,10 @@ import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
 import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.PersonActionRepositoryImpl
+import com.becalm.android.data.repository.PersonDetailRemoteRepository
+import com.becalm.android.data.repository.PersonDetailRemoteRepositoryImpl
+import com.becalm.android.data.repository.PersonListRemoteRepository
+import com.becalm.android.data.repository.PersonListRemoteRepositoryImpl
 import com.becalm.android.data.repository.PersonMemoryRemoteRepository
 import com.becalm.android.data.repository.PersonMemoryRemoteRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -111,6 +115,18 @@ public abstract class CoreRepositoryModule {
     public abstract fun bindPersonActionRepository(
         impl: PersonActionRepositoryImpl,
     ): PersonActionRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindPersonDetailRemoteRepository(
+        impl: PersonDetailRemoteRepositoryImpl,
+    ): PersonDetailRemoteRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindPersonListRemoteRepository(
+        impl: PersonListRemoteRepositoryImpl,
+    ): PersonListRemoteRepository
 
     @Binds
     @Singleton

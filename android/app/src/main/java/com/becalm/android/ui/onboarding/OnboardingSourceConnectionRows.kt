@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -281,35 +282,170 @@ internal fun LazyListScope.sourceSection(
 }
 
 @Composable
-internal fun SourceConnectedAccountRow(item: OnboardingSourceOwnershipUi) {
+internal fun ProgressiveSourceConnectionCard(
+    item: SourceConnectionItemUi,
+    onConnect: () -> Unit,
+    onSkip: () -> Unit,
+    skipLabel: String,
+) {
+    QuietPanel(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("progressive-source-card"),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = stringResource(R.string.onb_setup_source_preview_label),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier = Modifier.size(8.dp),
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    content = {},
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.onb_setup_source_preview_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = stringResource(R.string.onb_setup_source_preview_result),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = item.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    StatusPill(
+                        label = stringResource(R.string.onb_setup_source_recommended),
+                        tone = StatusTone.Muted,
+                        compact = true,
+                    )
+                }
+            }
+            if (item.consentCopy != null && item.state == SourceConnectionState.ConsentRequired) {
+                Text(
+                    text = item.consentCopy,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!item.state.hidesActions) {
+                SourceConnectionActions(
+                    primaryLabel = connectLabel(item),
+                    onPrimary = onConnect,
+                    onSkip = onSkip,
+                    primaryEnabled = !item.state.isBusy,
+                    primaryLoading = item.state.isBusy,
+                    skipEnabled = !item.state.isBusy,
+                    skipLabel = skipLabel,
+                )
+            } else {
+                SourceConnectionStatusPill(state = item.state)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SourceConnectedAccountRow(
+    item: OnboardingSourceOwnershipUi,
+    deleting: Boolean = false,
+    onDelete: (() -> Unit)? = null,
+) {
+    val state = sourceConnectionStateForStatus(item.status)
     QuietPanel(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("source-connected-account-${item.id}"),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = item.accountLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                SourceConnectionStatusPill(state = state)
+            }
+            if (state == SourceConnectionState.Failed) {
                 Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = item.accountLabel,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = stringResource(R.string.settings_source_reconnect_account_match_hint),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("source-connected-account-reconnect-hint-${item.id}"),
                 )
             }
-            SourceConnectionStatusPill(state = item.status.toSourceConnectionState())
+            if (onDelete != null) {
+                BecalmButton(
+                    text = stringResource(R.string.settings_identity_connection_delete),
+                    onClick = onDelete,
+                    variant = BecalmButtonVariant.Secondary,
+                    enabled = !deleting,
+                    loading = deleting,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("source-connected-account-delete-${item.id}"),
+                )
+            }
         }
     }
 }
@@ -409,15 +545,6 @@ private fun SourceConnectionStatusPill(state: SourceConnectionState) {
         tone = presentation.tone,
     )
 }
-
-private fun String.toSourceConnectionState(): SourceConnectionState =
-    when (this) {
-        "connected", "synced" -> SourceConnectionState.Connected
-        "connecting" -> SourceConnectionState.Connecting
-        "syncing" -> SourceConnectionState.Syncing
-        "failed", "needs_reauth" -> SourceConnectionState.Failed
-        else -> SourceConnectionState.Idle
-    }
 
 @Composable
 private fun connectLabel(item: SourceConnectionItemUi): String {

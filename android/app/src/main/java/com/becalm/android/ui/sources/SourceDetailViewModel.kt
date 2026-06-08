@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.MeetingImportRepository
 import com.becalm.android.data.repository.ProcessingPhase
@@ -14,6 +15,7 @@ import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.UiMessage
@@ -105,6 +107,7 @@ public sealed interface SourceDetailEffect {
     public data class OpenReconnect(
         val destination: SourceReconnectDestination,
         val sourceType: String? = null,
+        val sourceConnectionId: String? = null,
     ) : SourceDetailEffect
 }
 
@@ -134,6 +137,7 @@ public class SourceDetailViewModel @Inject constructor(
     private val processingStatusRepository: ProcessingStatusRepository,
     private val rawIngestionRepository: RawIngestionRepository,
     private val authRepository: AuthRepository,
+    private val sourceConnectionRepository: SourceConnectionRepository,
     private val sourceAdministrationPort: SourceAdministrationPort,
     private val sourceSyncPort: SourceSyncPort,
     private val meetingImportRepository: MeetingImportRepository,
@@ -161,6 +165,7 @@ public class SourceDetailViewModel @Inject constructor(
 
     init {
         seedUserIdFromCurrentSession()
+        refreshSourceStatusFromServerOnOpen()
     }
 
     /** Provide or override the authenticated userId so that event queries are scoped per-user. */
@@ -185,6 +190,16 @@ public class SourceDetailViewModel @Inject constructor(
         }
     }
 
+    private fun refreshSourceStatusFromServerOnOpen() {
+        if (!hasValidSourceType) return
+        viewModelScope.launch {
+            when (sourceStatusRepository.refreshFromServer()) {
+                is BecalmResult.Success -> logger.d(TAG, "source detail status refreshed sourceType=$sourceType")
+                is BecalmResult.Failure -> logger.w(TAG, "source detail status refresh failed sourceType=$sourceType")
+            }
+        }
+    }
+
     /** One-shot UI effects for reconnect navigation. */
     public val effects: SharedFlow<SourceDetailEffect> = _effects.asSharedFlow()
 
@@ -199,6 +214,7 @@ public class SourceDetailViewModel @Inject constructor(
             SourceDetailEffect.OpenReconnect(
                 destination = destination,
                 sourceType = sourceType,
+                sourceConnectionId = reconnectTargetConnectionId.value,
             ),
         )
     }
@@ -306,6 +322,17 @@ public class SourceDetailViewModel @Inject constructor(
         if (userId == null) return@flatMapLatest flowOf(emptyList())
         rawIngestionRepository.observeForSourceType(userId, sourceType, limit = RECENT_EVENTS_LIMIT)
     }
+    private val sourceConnectionsFlow = _userId.flatMapLatest { userId ->
+        if (userId == null) return@flatMapLatest flowOf(emptyList())
+        sourceConnectionRepository.observeAll(userId)
+    }
+    private val reconnectTargetConnectionId: StateFlow<String?> = sourceConnectionsFlow
+        .map { rows -> SourceReconnectTargetResolver.targetConnectionId(rows, sourceType) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = null,
+        )
 
     private val statusFlow = if (!hasValidSourceType) {
         flowOf(null)
@@ -443,3 +470,47 @@ private fun SourceSyncStatus.allowsManualSync(): Boolean =
     this == SourceSyncStatus.Connected ||
         this == SourceSyncStatus.Syncing ||
         this == SourceSyncStatus.Error
+
+internal object SourceReconnectTargetResolver {
+    fun targetConnectionId(
+        connections: List<SourceConnectionEntity>,
+        sourceType: String,
+    ): String? {
+        val candidates = connections
+            .filter { connection ->
+                connection.sourceType() == sourceType && connection.status != "disconnected"
+            }
+        val reconnectable = candidates.filter { connection ->
+            connection.status in reconnectableStatuses
+        }
+        if (reconnectable.isEmpty()) return null
+        if (candidates.mapNotNull { it.accountKey() }.distinct().size > 1) {
+            return null
+        }
+        return reconnectable
+            .sortedWith(
+                compareByDescending<SourceConnectionEntity> { it.status == "needs_reauth" }
+                    .thenByDescending { it.status == "failed" }
+                    .thenByDescending { it.lastSyncAt?.toEpochMilliseconds() ?: Long.MIN_VALUE },
+            )
+            .firstOrNull()
+            ?.id
+    }
+
+    private fun SourceConnectionEntity.sourceType(): String? =
+        when {
+            provider == "google" && capability == "mail" -> SourceType.GMAIL
+            provider == "outlook" && capability == "mail" -> SourceType.OUTLOOK_MAIL
+            provider == "google" && capability == "calendar" -> SourceType.GOOGLE_CALENDAR
+            provider == "outlook" && capability == "calendar" -> SourceType.OUTLOOK_CALENDAR
+            else -> null
+        }
+
+    private fun SourceConnectionEntity.accountKey(): String? =
+        accountIdentifier
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf(String::isNotBlank)
+
+    private val reconnectableStatuses = setOf("needs_reauth", "failed")
+}

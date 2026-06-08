@@ -107,7 +107,11 @@ public fun SourcesListScreen(
     }
     LaunchedEffect(sourceConnectionResult, sourceProvider, sourceFamily) {
         val result = sourceConnectionResult ?: return@LaunchedEffect
-        viewModel.refreshStatuses()
+        viewModel.onSourceConnectionResult(
+            result = result,
+            provider = sourceProvider,
+            family = sourceFamily,
+        )
         val message = if (result == "error") {
             sourceConnectionFailedMessage
         } else {

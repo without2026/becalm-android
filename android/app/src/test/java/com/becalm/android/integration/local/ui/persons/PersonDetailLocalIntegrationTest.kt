@@ -13,6 +13,8 @@ import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorOrigin
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CalendarEventRepositoryImpl
@@ -206,6 +208,9 @@ class PersonDetailLocalIntegrationTest {
             personEnrichmentRepository = enrichmentRepository,
             personIndexDao = db.personIndexDao(),
             rawIngestionEventDao = db.rawIngestionEventDao(),
+            manualMemoryOutboxDao = db.manualMemoryOutboxDao(),
+            workScheduler = mockk(relaxed = true),
+            reminderScheduler = mockk(relaxed = true),
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
             logger = logger,
@@ -376,6 +381,105 @@ class PersonDetailLocalIntegrationTest {
                 state.extractedCommitments.map { it.title },
             )
             assertEquals("alice@example.com,bob@example.com", state.attendeesRaw)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SRC-004 raw event detail resolves source-event anchor to local original and extracted context`() = runTest {
+        val localRawEventId = "raw-local-email-1"
+        val sourceEventId = "backend-source-email-1"
+        val occurredAt = Instant.parse("2026-04-23T06:00:00Z")
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = localRawEventId,
+                sourceType = SourceType.GMAIL,
+                timestamp = occurredAt,
+                title = "자료 확인 메일",
+                snippet = "메일 미리보기",
+            ).copy(sourceRef = "provider-message-1"),
+        )
+        emailBodyRepository.insert(
+            EmailBodyEntity(
+                id = "body-anchor-1",
+                rawEventId = localRawEventId,
+                providerMessageId = "provider-message-1",
+                folder = "INBOX",
+                subject = "자료 확인 메일",
+                fromAddress = "sender@example.com",
+                toAddresses = "[{\"email\":\"user@example.com\"}]",
+                bodyPlain = "긴 이메일 원문",
+                bodyHtml = "<p>긴 이메일 원문</p>",
+                attachmentsMeta = null,
+                rawHeaders = null,
+                parseFailed = false,
+                groupEmail = false,
+                receivedAt = occurredAt,
+            ),
+        )
+        db.commitmentDao().insertAll(
+            listOf(
+                commitment(
+                    id = "anchor-quote-1",
+                    title = "자료 보내기",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    sourceEventOccurredAt = occurredAt,
+                ).copy(
+                    sourceRef = localRawEventId,
+                    quote = "자료는 오늘 중으로 보내겠습니다",
+                ),
+            ),
+        )
+        db.sourceEventAnchorDao().upsertAll(
+            listOf(
+                SourceEventAnchorEntity(
+                    id = "anchor-email-1",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceOrigin = SourceEventAnchorOrigin.BACKEND,
+                    sourceEventId = sourceEventId,
+                    localRawEventId = localRawEventId,
+                    sourceConnectionId = "source-connection-1",
+                    sourceAccountKey = "gmail:user@example.com",
+                    providerEventId = "provider-message-1",
+                    conversationRef = "thread-1",
+                    sourceRef = "provider-message-1",
+                    title = "자료 확인 메일",
+                    snippet = "메일 미리보기",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                    updatedAt = occurredAt,
+                ),
+            ),
+        )
+
+        val viewModel = RawEventDetailViewModel(
+            rawIngestionRepository = rawIngestionRepository,
+            sourceOriginalResolver = sourceOriginalResolver,
+            sourceEventAnchorDao = db.sourceEventAnchorDao(),
+            projectionPort = RoomBackedRawEventDetailProjectionPort(
+                commitmentDao = db.commitmentDao(),
+                calendarEventDao = db.calendarEventDao(),
+                personIndexDao = db.personIndexDao(),
+                personEnrichmentRepository = enrichmentRepository,
+            ),
+            userPrefsStore = userPrefsStore,
+            savedStateHandle = SavedStateHandle(mapOf(ARG_EVENT_ID to sourceEventId)),
+            logger = logger,
+            ioDispatcher = UnconfinedTestDispatcher(),
+        )
+
+        viewModel.uiState.test {
+            var state = awaitItem()
+            while (state.loading || state.emailBody == null || state.commitmentQuotes.isEmpty() || state.extractedCommitments.isEmpty()) {
+                state = awaitItem()
+            }
+
+            assertEquals(sourceEventId, state.eventId)
+            assertEquals("긴 이메일 원문", state.emailBody?.bodyPlain)
+            assertEquals(listOf("자료는 오늘 중으로 보내겠습니다"), state.commitmentQuotes)
+            assertEquals(listOf("자료 보내기"), state.extractedCommitments.map { it.title })
             cancelAndIgnoreRemainingEvents()
         }
     }

@@ -482,6 +482,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             actionKind = actionKind,
             dueAt = dueAt,
             urgencyScore = urgencyScore,
+            dueHint = dueHint,
         )
 
     private fun UnmatchedPersonInteractionEntity.shouldHideFromManualMatching(

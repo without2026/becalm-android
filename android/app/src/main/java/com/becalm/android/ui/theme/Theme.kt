@@ -5,11 +5,11 @@
  *   - Material3 [ColorScheme] (dark or light, per [useDarkTheme])
  *   - [BecalmTypography] (Pretendard Variable font family)
  *   - [BecalmShapes] (rounded corner scale)
- *   - [LocalBecalmColors] (semantic glass / state / glow tokens)
+ *   - [LocalBecalmColors] (semantic surface / state / source-status tokens)
  *   - [LocalBecalmDimens] (spacing and component-slot dimensions)
  *
  * Default: [useDarkTheme] = `false`. The canonical Android experience is the
- * light-first frosted relationship theme from DESIGN.md. Dark remains an
+ * light ink-mist relationship theme from the HTML prototype. Dark remains an
  * alternate user-preference / accessibility path.
  *
  * Usage:
@@ -30,8 +30,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 /**
  * BeCalm theme wrapper.
  *
- * @param useDarkTheme `false` uses the canonical light frosted palette.
- *   `true` uses the warm dark alternate.
+ * @param useDarkTheme `false` uses the canonical light ink-mist palette.
+ *   `true` uses the cool dark alternate.
  * @param content Composable content rendered inside the theme.
  */
 @Composable

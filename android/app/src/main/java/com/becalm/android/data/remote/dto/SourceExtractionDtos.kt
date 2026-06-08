@@ -48,6 +48,56 @@ public data class SourceExtractionErrorEnvelope(
     }
 }
 
+@JsonClass(generateAdapter = true)
+public data class ExtractionUploadPrepareRequest(
+    @field:Json(name = "input_modality") val inputModality: String,
+    @field:Json(name = "source_type") val sourceType: String,
+    @field:Json(name = "raw_event_id") val rawEventId: String,
+    @field:Json(name = "content_type") val contentType: String,
+    @field:Json(name = "content_length") val contentLength: Long? = null,
+)
+
+@JsonClass(generateAdapter = true)
+public data class ExtractionStorageRefDto(
+    @field:Json(name = "bucket") val bucket: String,
+    @field:Json(name = "path") val path: String,
+    @field:Json(name = "content_type") val contentType: String,
+    @field:Json(name = "raw_event_id") val rawEventId: String,
+    @field:Json(name = "media_kind") val mediaKind: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+public data class ExtractionUploadPrepareResponse(
+    @field:Json(name = "raw_event_id") val rawEventId: String,
+    @field:Json(name = "job_id") val jobId: String,
+    @field:Json(name = "bucket") val bucket: String,
+    @field:Json(name = "path") val path: String,
+    @field:Json(name = "content_type") val contentType: String,
+    @field:Json(name = "media_kind") val mediaKind: String,
+    @field:Json(name = "signed_upload_url") val signedUploadUrl: String,
+    @field:Json(name = "upload_token") val uploadToken: String,
+    @field:Json(name = "upload_content_type") val uploadContentType: String,
+    @field:Json(name = "storage_ref") val storageRef: ExtractionStorageRefDto,
+)
+
+@JsonClass(generateAdapter = true)
+public data class CommitmentExtractionJobCreateRequest(
+    @field:Json(name = "input_modality") val inputModality: String,
+    @field:Json(name = "source_type") val sourceType: String,
+    @field:Json(name = "client_event_id") val clientEventId: String,
+    @field:Json(name = "raw_event_id") val rawEventId: String,
+    @field:Json(name = "timestamp") val timestamp: String,
+    @field:Json(name = "storage_ref") val storageRef: ExtractionStorageRefDto,
+    @field:Json(name = "duration_seconds") val durationSeconds: Int? = null,
+    @field:Json(name = "counterparty_ref") val counterpartyRef: String? = null,
+    @field:Json(name = "event_title") val eventTitle: String? = null,
+    @field:Json(name = "folder") val folder: String? = null,
+    @field:Json(name = "conversation_ref") val conversationRef: String? = null,
+    @field:Json(name = "previous_thread_context") val previousThreadContext: String? = null,
+    @field:Json(name = "self_speaker_id") val selfSpeakerId: String? = null,
+    @field:Json(name = "processing_confirmed") val processingConfirmed: Boolean = false,
+)
+
 /**
  * Response body for a successful POST /v1/extractions/commitments (HTTP 200).
  *

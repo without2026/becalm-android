@@ -440,6 +440,8 @@ public class VoiceUploadWorker @AssistedInject constructor(
         val streamingBody = object : RequestBody() {
             override fun contentType() = audioMediaType(uri).toMediaTypeOrNull()
 
+            override fun isOneShot(): Boolean = true
+
             override fun writeTo(sink: BufferedSink) {
                 val stream = appContext.contentResolver.openInputStream(uri)
                     ?: throw java.io.FileNotFoundException("Unable to open audio stream: $uri")

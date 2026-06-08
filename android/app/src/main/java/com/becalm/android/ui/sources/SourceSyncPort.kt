@@ -11,6 +11,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.remote.api.RailwayApi
+import com.becalm.android.data.remote.dto.ErrorEnvelopeDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
@@ -23,15 +24,18 @@ import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.SOURCE_CONNECTION_STATUS_NEEDS_REAUTH
 import com.becalm.android.data.repository.SourceSyncJobPollResult
 import com.becalm.android.data.repository.SourceSyncJobPoller
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.UserCorrectionRepository
+import com.becalm.android.data.repository.isSyncableBackendSourceConnectionStatus
 import com.becalm.android.data.repository.toSnapshot
 import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.WorkScheduler
+import com.squareup.moshi.Moshi
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -75,12 +79,14 @@ public class DefaultSourceSyncPort @Inject constructor(
     private val userCorrectionRepository: UserCorrectionRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
+    moshi: Moshi,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : SourceSyncPort {
 
     private val api: RailwayApi
         get() = apiProvider.get()
+    private val errorEnvelopeAdapter = moshi.adapter(ErrorEnvelopeDto::class.java)
 
     override suspend fun requestManualSync(sourceType: String): BecalmResult<Unit> = withContext(ioDispatcher) {
         trackSourceSync(
@@ -201,7 +207,15 @@ public class DefaultSourceSyncPort @Inject constructor(
         sourceStatusRepository.recordSyncStart(sourceType)
         processingStatusRepository.recordScanning(sourceType)
         val connections = when (val refresh = sourceConnectionRepository.refresh(userId)) {
-            is BecalmResult.Success -> refresh.value.connectedBackendConnectionsFor(sourceType)
+            is BecalmResult.Success -> {
+                val backendConnections = refresh.value.backendConnectionsFor(sourceType)
+                if (backendConnections.any { it.status == SOURCE_CONNECTION_STATUS_NEEDS_REAUTH }) {
+                    return BecalmResult.Failure(
+                        BecalmError.Validation("source_connection", SOURCE_CONNECTION_STATUS_NEEDS_REAUTH),
+                    )
+                }
+                backendConnections.syncableBackendConnections()
+            }
             is BecalmResult.Failure -> return BecalmResult.Failure(refresh.error)
         }
         if (connections.isEmpty()) {
@@ -211,7 +225,11 @@ public class DefaultSourceSyncPort @Inject constructor(
         for (connection in connections) {
             val response = api.syncSourceConnection(connection.id)
             if (!response.isSuccessful) {
-                return BecalmResult.Failure(response.toSyncError("source_connection"))
+                val error = response.toSyncError("source_connection")
+                if (error.isSourceReconnectRequired()) {
+                    refreshSourceRecoveryMirrors(userId, sourceType)
+                }
+                return BecalmResult.Failure(error)
             }
             val body = response.body()
                 ?: return BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null body")))
@@ -305,6 +323,15 @@ public class DefaultSourceSyncPort @Inject constructor(
         }
     }
 
+    private suspend fun refreshSourceRecoveryMirrors(userId: String, sourceType: String) {
+        if (sourceConnectionRepository.refresh(userId) is BecalmResult.Failure) {
+            logger.w(TAG, "source_connections refresh failed after backend reconnect response sourceType=$sourceType")
+        }
+        if (sourceStatusRepository.refreshFromServer() is BecalmResult.Failure) {
+            logger.w(TAG, "source_status refresh failed after backend reconnect response sourceType=$sourceType")
+        }
+    }
+
     private suspend fun onBackendSyncFailure(
         sourceType: String,
         error: BecalmError,
@@ -328,13 +355,24 @@ public class DefaultSourceSyncPort @Inject constructor(
         return BecalmResult.Failure(error)
     }
 
-    private fun <T> Response<T>.toSyncError(resource: String = "mail_source"): BecalmError = when (code()) {
-        401 -> BecalmError.Unauthorized
-        404 -> BecalmError.NotFound(resource)
-        422 -> BecalmError.Validation(null, message())
-        429 -> BecalmError.RateLimited(headers().get("Retry-After")?.toLongOrNull())
-        in 500..599 -> BecalmError.ServerError(code(), errorBody()?.string())
-        else -> BecalmError.Network(code(), message())
+    private fun <T> Response<T>.toSyncError(resource: String = "mail_source"): BecalmError {
+        val rawBody = runCatching { errorBody()?.string().orEmpty() }.getOrDefault("")
+        val envelope = rawBody.takeIf { it.isNotBlank() }?.let { body ->
+            runCatching { errorEnvelopeAdapter.fromJson(body) }.getOrNull()
+        }
+        return when (code()) {
+            401 -> BecalmError.Unauthorized
+            404 -> BecalmError.NotFound(resource)
+            409 -> if (envelope.isReconnectSourceEnvelope()) {
+                BecalmError.Validation("source_connection", SOURCE_CONNECTION_STATUS_NEEDS_REAUTH)
+            } else {
+                BecalmError.Network(409, envelope.safeSyncMessage(rawBody, message()))
+            }
+            422 -> BecalmError.Validation(null, envelope.safeSyncMessage(rawBody, message()))
+            429 -> BecalmError.RateLimited(headers().get("Retry-After")?.toLongOrNull() ?: envelope?.retryAfterSeconds)
+            in 500..599 -> BecalmError.ServerError(code(), rawBody.ifBlank { envelope?.error })
+            else -> BecalmError.Network(code(), envelope.safeSyncMessage(rawBody, message()))
+        }
     }
 
     private fun trackSourceSync(
@@ -426,13 +464,31 @@ public class DefaultSourceSyncPort @Inject constructor(
             BecalmError.Validation(null, message)
         }
 
+    private fun BecalmError.isSourceReconnectRequired(): Boolean =
+        this is BecalmError.Validation && message == SOURCE_CONNECTION_STATUS_NEEDS_REAUTH
+
+    private fun ErrorEnvelopeDto?.isReconnectSourceEnvelope(): Boolean =
+        this?.clientAction == "reconnect_source" ||
+            this?.error in SOURCE_RECONNECT_ERROR_CODES
+
+    private fun ErrorEnvelopeDto?.safeSyncMessage(rawBody: String, fallback: String): String =
+        when {
+            this?.clientAction == "reconnect_source" -> SOURCE_CONNECTION_STATUS_NEEDS_REAUTH
+            this?.error in SOURCE_RECONNECT_ERROR_CODES -> SOURCE_CONNECTION_STATUS_NEEDS_REAUTH
+            !this?.clientAction.isNullOrBlank() -> this?.clientAction.orEmpty()
+            !this?.error.isNullOrBlank() -> this?.error.orEmpty()
+            rawBody.isNotBlank() -> rawBody
+            else -> fallback
+        }
+
     private fun SourceSyncJobPollResult.Pending.processingMessageCode(): String? =
         reasonCode.sourceSyncProcessingMessageCode()
 
-    private fun List<SourceConnectionEntity>.connectedBackendConnectionsFor(sourceType: String): List<SourceConnectionEntity> =
-        filter { connection ->
-            connection.status != "disconnected" && connection.toBackendSourceType() == sourceType
-        }
+    private fun List<SourceConnectionEntity>.backendConnectionsFor(sourceType: String): List<SourceConnectionEntity> =
+        filter { connection -> connection.toBackendSourceType() == sourceType }
+
+    private fun List<SourceConnectionEntity>.syncableBackendConnections(): List<SourceConnectionEntity> =
+        filter { connection -> isSyncableBackendSourceConnectionStatus(connection.status) }
 
     private fun SourceConnectionEntity.toBackendSourceType(): String? =
         when {
@@ -448,14 +504,21 @@ public class DefaultSourceSyncPort @Inject constructor(
             "backpressure_delayed" -> ProcessingStatusMessages.SOURCE_SYNC_BACKPRESSURE_DELAYED
             "provider_has_more_pages" -> ProcessingStatusMessages.SOURCE_SYNC_IMPORTING_MORE_PAGES
             "llm_rate_limited_retrying" -> ProcessingStatusMessages.LLM_RATE_LIMITED_RETRYING
+            "llm_processing_retrying" -> ProcessingStatusMessages.LLM_PROCESSING_RETRYING
+            "llm_processing_failed" -> ProcessingStatusMessages.LLM_PROCESSING_FAILED
             else -> null
         }
 
-	    private companion object {
-	        private const val TAG = "SourceSyncPort"
-	        private const val PENDING_BACKEND_REFRESH_DELAY_SECONDS: Long = 45L
-	    }
-	}
+    private companion object {
+        private const val TAG = "SourceSyncPort"
+        private const val PENDING_BACKEND_REFRESH_DELAY_SECONDS: Long = 45L
+        private val SOURCE_RECONNECT_ERROR_CODES = setOf(
+            "source_connection_disconnected",
+            "source_connection_needs_reauth",
+            "provider_needs_reauth",
+        )
+    }
+}
 
 @Module
 @InstallIn(SingletonComponent::class)

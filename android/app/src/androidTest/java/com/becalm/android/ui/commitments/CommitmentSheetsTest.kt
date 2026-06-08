@@ -94,8 +94,11 @@ class CommitmentSheetsTest {
             .assertCountEquals(1)
         composeTestRule.onAllNodesWithText(string(R.string.commitment_detail_superseded_link))
             .assertCountEquals(1)
+        composeTestRule.onNodeWithTag("commitment-detail-content")
+            .performScrollToNode(hasTestTag("commitment-detail-actions-more"))
         composeTestRule.onNodeWithTag("commitment-detail-remind")
             .performSemanticsAction(SemanticsActions.OnClick)
+        composeTestRule.onNodeWithTag("commitment-detail-actions-more").performClick()
         composeTestRule.onNodeWithTag("commitment-detail-edit")
             .performSemanticsAction(SemanticsActions.OnClick)
 
@@ -143,6 +146,44 @@ class CommitmentSheetsTest {
         composeTestRule.onAllNodesWithText("PENDING").assertCountEquals(0)
         composeTestRule.onAllNodesWithText(string(R.string.commitment_action_remind)).assertCountEquals(0)
         composeTestRule.onAllNodesWithText(string(R.string.commitment_action_edit)).assertCountEquals(0)
+    }
+
+    @Test
+    fun commitment_detail_content_shows_source_evidence_without_related_action() {
+        var sourceEvidenceClicks = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                DetailSheetContent(
+                    entity = commitmentEntity(),
+                    quote = "Send the deck by Friday",
+                    actionState = CommitmentState.PENDING,
+                    source = CommitmentSourcePresentation(
+                        sourceType = SourceType.GMAIL,
+                        sourceLabel = CommitmentText(
+                            R.string.commitment_detail_llm_source_fmt,
+                            listOf("Gmail", "4/24 10:00"),
+                        ),
+                    ),
+                    history = CommitmentHistoryPresentation(),
+                    relatedAction = null,
+                    actionButtons = CommitmentDetailActionState(editEnabled = true),
+                    counterpartyDisplayName = "Alice Kim",
+                    onReminderToggle = {},
+                    onFollowUp = {},
+                    onComplete = {},
+                    onCancel = {},
+                    onEdit = {},
+                    onOpenSourceEvidence = { sourceEvidenceClicks += 1 },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("commitment-detail-source-evidence-card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("commitment-detail-source-evidence-open").performClick()
+        composeTestRule.runOnIdle {
+            assertEquals(1, sourceEvidenceClicks)
+        }
     }
 
     @Test
@@ -466,6 +507,7 @@ class CommitmentSheetsTest {
                                 CommitmentSheetAction.REMIND,
                                 CommitmentSheetAction.FOLLOW_UP,
                                 CommitmentSheetAction.COMPLETE,
+                                CommitmentSheetAction.CANCEL,
                             ),
                             editEnabled = true,
                         ),
@@ -481,11 +523,14 @@ class CommitmentSheetsTest {
             }
         }
 
+        composeTestRule.onNodeWithTag("commitment-detail-content")
+            .performScrollToNode(hasTestTag("commitment-detail-actions-more"))
         composeTestRule.onNodeWithTag("commitment-detail-remind")
             .performSemanticsAction(SemanticsActions.OnClick)
-        composeTestRule.onNodeWithText(string(R.string.commitment_action_follow_up)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.commitment_action_complete)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.commitment_action_cancel)).performClick()
+        composeTestRule.onNodeWithTag("commitment-detail-follow-up").performClick()
+        composeTestRule.onNodeWithTag("commitment-detail-primary-action").performClick()
+        composeTestRule.onNodeWithTag("commitment-detail-actions-more").performClick()
+        composeTestRule.onNodeWithTag("commitment-detail-cancel").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, remindCount)

@@ -630,6 +630,90 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate39To40_addsPersonActionReadinessMetadataAndPreservesSyncRows() {
+        helper.createDatabase(TEST_DB, 39).use { db ->
+            db.execSQL(
+                """
+                INSERT INTO person_action_sync_state (
+                    user_id, surface_key, status, server_watermark,
+                    recompute_state, capacity_state, last_synced_at, updated_at
+                ) VALUES (
+                    '$USER_ID', 'person', 'active', $TS,
+                    'caught_up', 'normal', ${TS + 1}, ${TS + 2}
+                )
+                """.trimIndent(),
+            )
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 40, true, migration(39, 40))
+
+        val columns = queryTableColumns(migrated, "person_action_sync_state")
+        assertEquals("INTEGER", columns.getValue("capacity_backlog_lag_seconds").type)
+        assertEquals("INTEGER", columns.getValue("capacity_last_caught_up_at").type)
+        assertEquals("TEXT", columns.getValue("capacity_incident_id").type)
+        assertEquals("TEXT", columns.getValue("recovery_actions_json").type)
+        assertEquals("TEXT", columns.getValue("empty_state_json").type)
+        assertEquals("TEXT", columns.getValue("server_timing_json").type)
+        assertEquals("REAL", columns.getValue("server_timing_total_ms").type)
+
+        migrated.query(
+            """
+            SELECT surface_key, recompute_state, capacity_state, capacity_backlog_lag_seconds,
+                   recovery_actions_json, server_timing_total_ms
+            FROM person_action_sync_state
+            WHERE user_id = '$USER_ID'
+            """.trimIndent(),
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("person", cursor.getString(0))
+            assertEquals("caught_up", cursor.getString(1))
+            assertEquals("normal", cursor.getString(2))
+            assertTrue(cursor.isNull(3))
+            assertTrue(cursor.isNull(4))
+            assertTrue(cursor.isNull(5))
+        }
+    }
+
+    @Test
+    fun migrate41To42_addsPersonActionProviderWriteMetadata() {
+        helper.createDatabase(TEST_DB, 41).use { db ->
+            db.execSQL(
+                """
+                INSERT INTO person_action_item_cache (
+                    id, user_id, person_id, person_display_name, person_sort_key,
+                    surfaces_csv, action_kind, status, title, primary_verb, short_reason,
+                    commitment_id, calendar_event_id, source_event_id, source_type, source_ref,
+                    due_at, due_hint, due_is_approximate, stale_after, urgency_score,
+                    importance_score, confidence, reason_codes_csv, input_watermark,
+                    server_watermark, computed_at, updated_at, snoozed_until, completed_at,
+                    dismissed_at, primary_evidence_kind, primary_evidence_id,
+                    primary_evidence_source_ref, primary_evidence_occurred_at,
+                    primary_evidence_label, primary_evidence_quote
+                ) VALUES (
+                    'pa-schedule-1', '$USER_ID', null, null, null,
+                    'schedule', 'add_to_calendar', 'active', 'Calendar candidate',
+                    '후보 확인', '메일에는 있는데 캘린더에는 없습니다.',
+                    'commitment-1', null, 'source-event-1', 'gmail', 'mail-1',
+                    null, null, 0, null, 91.0, 82.0, 0.88, 'calendar_missing',
+                    $TS, ${TS + 1}, ${TS + 2}, ${TS + 3}, null, null, null,
+                    'schedule_link', 'schedule-link-1', 'mail-1', null,
+                    '메일 일정 후보', null
+                )
+                """.trimIndent(),
+            )
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 42, true, migration(41, 42))
+
+        val columns = queryTableColumns(migrated, "person_action_item_cache")
+        assertEquals("TEXT", columns.getValue("provider_write_kind").type)
+        assertEquals("TEXT", columns.getValue("provider_write_state").type)
+        assertEquals("TEXT", columns.getValue("provider_write_provider").type)
+        assertEquals("TEXT", columns.getValue("provider_write_source_connection_id").type)
+        assertEquals("TEXT", columns.getValue("provider_write_schedule_event_link_id").type)
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────
 
     private fun insertV34RawIngestionEvent(

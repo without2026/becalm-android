@@ -3,9 +3,14 @@ package com.becalm.android.unit.ui.persons
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.FirstMemoryRepository
 import com.becalm.android.data.repository.PersonManualMatchRepository
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.data.repository.PersonActionRepository
+import com.becalm.android.data.repository.PersonListRemoteRepository
+import com.becalm.android.ui.persons.PersonActionFeedStatusKind
 import com.becalm.android.ui.persons.PersonActionSummary
 import com.becalm.android.ui.persons.PersonListProjection
 import com.becalm.android.ui.persons.PersonRow
@@ -51,11 +56,25 @@ class PersonsViewModelSpecTest {
     private val refreshCoordinator = FakePersonsRefreshCoordinator()
     private val manualMatchRepository: PersonManualMatchRepository = mockk(relaxed = true)
     private val firstMemoryRepository: FirstMemoryRepository = mockk(relaxed = true)
+    private val personActionRepository: PersonActionRepository = mockk(relaxed = true)
+    private val personListRemoteRepository = FakePersonListRemoteRepository()
+    private val actionSyncState = MutableStateFlow<PersonActionSyncStateEntity?>(null)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        personListRemoteRepository.reset()
+        actionSyncState.value = null
+        every { personActionRepository.observeSyncState(any(), any(), any()) } returns actionSyncState
+        coEvery { personActionRepository.refresh(any(), any()) } returns BecalmResult.Success(
+            PersonActionRefreshStats(
+                fetched = 0,
+                deleted = 0,
+                serverWatermark = null,
+                recomputeState = null,
+            ),
+        )
     }
 
     @After
@@ -134,6 +153,15 @@ class PersonsViewModelSpecTest {
                 lastInteractionSnippet = "지난 미팅 요약",
                 topAction = action,
             ),
+            person(
+                ref = "person-week",
+                displayName = "이준호",
+                topAction = action.copy(
+                    id = "act-week",
+                    title = "분기 미팅 날짜 제안하기",
+                    urgencyScore = 25.0,
+                ),
+            ),
             person(ref = "person-recent", displayName = "최근 연락처"),
         )
 
@@ -152,12 +180,55 @@ class PersonsViewModelSpecTest {
                 .map(PersonRow::personId),
         )
         assertEquals(
+            listOf("person-week"),
+            viewModel.uiState.value.personSections
+                .first { it.kind == PersonSectionKind.THIS_WEEK_ACTIONS }
+                .people
+                .map(PersonRow::personId),
+        )
+        assertEquals(
             listOf("person-recent"),
             viewModel.uiState.value.personSections
                 .first { it.kind == PersonSectionKind.RECENT_CONTACTS }
                 .people
                 .map(PersonRow::personId),
         )
+    }
+
+    @Test
+    fun `NAP-UI action feed degraded sync state becomes visible readiness state`() = runTest {
+        actionSyncState.value = syncState(
+            recomputeState = "degraded",
+            capacityState = "quota_degraded",
+            backlogLagSeconds = 600,
+        )
+        projectionPort.people.value = pageOf(
+            person(
+                ref = "person-minhong",
+                displayName = "김민홍",
+                topAction = PersonActionSummary(
+                    id = "act-urgent",
+                    title = "수정 계약서 회신",
+                    primaryVerb = "답장",
+                    shortReason = "오늘까지 보내기로 한 약속입니다.",
+                    actionKind = "reply",
+                    dueAt = null,
+                    urgencyScore = 92.0,
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        val status = viewModel.uiState.value.actionFeedStatus
+        assertEquals(PersonActionFeedStatusKind.QUOTA_DELAY, status?.kind)
+        assertEquals(600, status?.backlogLagSeconds)
+
+        actionSyncState.value = syncState(recomputeState = "caught_up", capacityState = "normal")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.actionFeedStatus)
     }
 
     @Test
@@ -184,19 +255,21 @@ class PersonsViewModelSpecTest {
     }
 
     @Test
-    fun `SRC-003 query debounce filters by name email and phone substrings and clears back to full list`() = runTest {
+    fun `SRC-003 query debounce filters by name email phone role and company substrings and clears back to full list`() = runTest {
         projectionPort.people.value = pageOf(
             person(ref = "+821012345678", displayName = "Kim Chulsoo"),
             person(ref = "lee@corp.com", displayName = "Minji Lee"),
+            person(ref = "tax-pro-1", displayName = "Park Hana", companyName = "Calm Tax", jobTitle = "세무사"),
+            person(ref = "legal-pro-1", displayName = "Jung Mirae", companyName = "법무법인 조용"),
         )
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
-        assertEquals(2, viewModel.uiState.value.people.size)
+        assertEquals(4, viewModel.uiState.value.people.size)
 
         viewModel.onQueryChange("lee")
         assertEquals("lee", viewModel.uiState.value.query)
-        assertEquals(2, viewModel.uiState.value.people.size)
+        assertEquals(4, viewModel.uiState.value.people.size)
         advanceTimeBy(300)
         advanceUntilIdle()
         assertEquals("lee", viewModel.uiState.value.query)
@@ -210,11 +283,23 @@ class PersonsViewModelSpecTest {
         assertEquals("1234", viewModel.uiState.value.query)
         assertEquals(listOf("+821012345678"), viewModel.uiState.value.people.map { it.personId })
 
+        viewModel.onQueryChange("세무사")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+        assertEquals("세무사", viewModel.uiState.value.query)
+        assertEquals(listOf("tax-pro-1"), viewModel.uiState.value.people.map { it.personId })
+
+        viewModel.onQueryChange("법무법인")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+        assertEquals("법무법인", viewModel.uiState.value.query)
+        assertEquals(listOf("legal-pro-1"), viewModel.uiState.value.people.map { it.personId })
+
         viewModel.onQueryChange("")
         advanceTimeBy(300)
         advanceUntilIdle()
         assertEquals("", viewModel.uiState.value.query)
-        assertEquals(2, viewModel.uiState.value.people.size)
+        assertEquals(4, viewModel.uiState.value.people.size)
     }
 
     @Test
@@ -469,12 +554,35 @@ class PersonsViewModelSpecTest {
         assertTrue(viewModel.uiState.value.error != null)
     }
 
+    @Test
+    fun `initial load refreshes remote person mirror for reinstall recovery`() = runTest {
+        buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf("user-1"), personListRemoteRepository.refreshUserIds)
+    }
+
+    @Test
+    fun `pull refresh includes remote person restore before local fanout`() = runTest {
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        personListRemoteRepository.reset()
+
+        viewModel.onPullRefresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf("user-1"), personListRemoteRepository.refreshUserIds)
+        assertEquals(1, refreshCoordinator.refreshCount)
+    }
+
     private fun buildViewModel(): PersonsViewModel = PersonsViewModel(
         userPrefsStore = userPrefsStore,
         projectionPort = projectionPort,
         refreshCoordinator = refreshCoordinator,
         manualMatchRepository = manualMatchRepository,
         firstMemoryRepository = firstMemoryRepository,
+        personListRemoteRepository = personListRemoteRepository,
+        personActionRepository = personActionRepository,
         ioDispatcher = testDispatcher,
     )
 
@@ -526,6 +634,22 @@ class PersonsViewModelSpecTest {
         timestamp = Instant.fromEpochMilliseconds(1_000),
     )
 
+    private fun syncState(
+        recomputeState: String?,
+        capacityState: String?,
+        backlogLagSeconds: Int? = null,
+    ): PersonActionSyncStateEntity = PersonActionSyncStateEntity(
+        userId = "user-1",
+        surfaceKey = "person",
+        status = "active",
+        serverWatermark = Instant.parse("2026-06-04T01:00:00Z"),
+        recomputeState = recomputeState,
+        capacityState = capacityState,
+        capacityBacklogLagSeconds = backlogLagSeconds,
+        lastSyncedAt = Instant.parse("2026-06-04T01:00:01Z"),
+        updatedAt = Instant.parse("2026-06-04T01:00:01Z"),
+    )
+
     private class FakePersonsScreenProjectionPort : PersonsScreenProjectionPort {
         val people = MutableStateFlow(
             PersonsListPageProjection(
@@ -573,6 +697,32 @@ class PersonsViewModelSpecTest {
             refreshCount += 1
             failure?.let { throw it }
             return snapshot
+        }
+    }
+
+    private class FakePersonListRemoteRepository : PersonListRemoteRepository {
+        val refreshUserIds = mutableListOf<String>()
+
+        fun reset() {
+            refreshUserIds.clear()
+        }
+
+        override suspend fun refreshPeople(
+            userId: String,
+            limit: Int,
+        ): BecalmResult<PersonListRemoteRepository.RefreshStats> {
+            refreshUserIds += userId
+            return BecalmResult.Success(
+                PersonListRemoteRepository.RefreshStats(
+                    fetched = 0,
+                    upserted = 0,
+                    eventRowsFetched = 0,
+                    eventRowsUpserted = 0,
+                    eventRefreshFailures = 0,
+                    hasMore = false,
+                    nextCursor = null,
+                ),
+            )
         }
     }
 }

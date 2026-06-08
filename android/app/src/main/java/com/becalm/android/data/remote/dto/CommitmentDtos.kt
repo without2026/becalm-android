@@ -12,7 +12,6 @@ import kotlinx.datetime.Instant
  * - GET /v1/commitments → [PaginatedCommitmentsResponse.data]
  * - GET /v1/commitments/{id} → { data: CommitmentDto }
  * - PATCH /v1/commitments/{id} → { data: CommitmentDto }
- * - GET /v1/persons/{person_id}/commitments → [PersonCommitmentsResponse.data]
  *
  * Mirrors the `commitments` Supabase table (data-model.yml). Upload/retry state is
  * maintained only in Room and is not part of the Railway commitment DTO.

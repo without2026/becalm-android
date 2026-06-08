@@ -11,7 +11,7 @@ SplashScreen → TermsScreen → LoginScreen → PipaThirdPartyConsentScreen
   → RecordingFolderScreen → ContactsPermissionScreen
   → GmailOAuthScreen → OutlookMailOAuthScreen → ImapSetupScreen
   → GoogleCalendarOAuthScreen → OutlookCalendarOAuthScreen
-  → BatteryOptimizationScreen → ColdSyncScreen → TodayTimelineScreen
+  → BatteryOptimizationScreen → ColdSyncScreen → PersonsScreen(/persons)
 ```
 
 Driver VM: `ui/onboarding/OnboardingViewModel.kt`

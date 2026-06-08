@@ -1,15 +1,22 @@
 package com.becalm.android.data.remote.api
 
+import com.becalm.android.data.remote.dto.CommitmentExtractionJobCreateRequest
+import com.becalm.android.data.remote.dto.ExtractionUploadPrepareRequest
+import com.becalm.android.data.remote.dto.ExtractionUploadPrepareResponse
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewResponse
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import retrofit2.Response
+import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Path
+import retrofit2.http.Url
 
 /**
  * Retrofit interface for Railway's source-neutral commitment extraction endpoint.
@@ -34,6 +41,23 @@ import retrofit2.http.Path
  * Spec refs: VOI-001, VOI-002, VOI-003, VOI-006, VOI-007.
  */
 public interface SourceExtractionApi {
+
+    @POST("v1/extractions/commitments/uploads:prepare")
+    public suspend fun prepareCommitmentExtractionUpload(
+        @Body request: ExtractionUploadPrepareRequest,
+    ): Response<ExtractionUploadPrepareResponse>
+
+    @Multipart
+    @PUT
+    public suspend fun uploadExtractionMediaToSignedUrl(
+        @Url signedUploadUrl: String,
+        @Part file: MultipartBody.Part,
+    ): Response<ResponseBody>
+
+    @POST("v1/extractions/commitments/jobs")
+    public suspend fun createCommitmentExtractionJob(
+        @Body request: CommitmentExtractionJobCreateRequest,
+    ): Response<SourceExtractionResponse>
 
     /**
      * Uploads normalized source content to Railway for server-side business-item extraction.

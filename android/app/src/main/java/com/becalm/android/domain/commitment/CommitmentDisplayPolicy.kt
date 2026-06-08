@@ -20,6 +20,22 @@ public object CommitmentDisplayPolicy {
                 suggestedLabel = counterpartyDisplayName,
             )
 
+    public fun shouldShowOnMainActionSurface(
+        itemType: String?,
+        status: String?,
+        title: String?,
+        sourceTitle: String?,
+        counterpartyDisplayName: String?,
+    ): Boolean {
+        if (shouldHideNonPersonLifecycleItem(itemType, title, sourceTitle, counterpartyDisplayName)) {
+            return false
+        }
+        if (itemType != CommitmentItemType.ACTION && itemType != CommitmentItemType.SCHEDULE) {
+            return false
+        }
+        return status?.lowercase() !in TERMINAL_WORK_STATUSES
+    }
+
     public fun isDecisionContextItem(itemType: String?): Boolean =
         itemType == CommitmentItemType.DECISION
 

@@ -10,9 +10,11 @@ import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.repository.FirstMemoryRepository
 import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.data.repository.PersonActionRepository
+import com.becalm.android.data.repository.PersonListRemoteRepository
 import com.becalm.android.domain.onboarding.FirstMemoryDraft
 import com.becalm.android.domain.onboarding.FirstMemoryInput
 import com.becalm.android.domain.onboarding.FirstMemoryKind
@@ -23,6 +25,7 @@ import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -33,14 +36,19 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 // ─── UI models ────────────────────────────────────────────────────────────────
+
+public typealias PersonActionFeedStatusKind = com.becalm.android.ui.actions.PersonActionFeedStatusKind
+public typealias PersonActionFeedStatusUi = com.becalm.android.ui.actions.PersonActionFeedStatusUi
 
 /**
  * A single row in the persons list, derived from the Room-backed persons projection owner.
@@ -84,6 +92,7 @@ public data class PersonActionSummary(
     val actionKind: String,
     val dueAt: Instant?,
     val urgencyScore: Double,
+    val dueHint: String? = null,
 )
 
 public data class PersonMatchChoiceRow(
@@ -102,6 +111,7 @@ public enum class PersonMatchChoiceKind {
 
 public enum class PersonSectionKind {
     PENDING_COMMITMENTS,
+    THIS_WEEK_ACTIONS,
     RECENT_CONTACTS,
 }
 
@@ -111,25 +121,37 @@ public data class PersonSection(
 )
 
 public fun buildPersonSections(people: List<PersonRow>): List<PersonSection> {
-    val pending = ArrayList<PersonRow>()
-    val recent = ArrayList<PersonRow>()
+    val today = ArrayList<PersonRow>()
+    val thisWeek = ArrayList<PersonRow>()
+    val reconnect = ArrayList<PersonRow>()
     people.forEach { person ->
-        if (person.topAction != null || person.pendingCommitmentCount > 0) {
-            pending += person
-        } else {
-            recent += person
+        val action = person.topAction
+        when {
+            action != null && action.isUrgentForTodaySection() -> today += person
+            action != null -> thisWeek += person
+            person.pendingCommitmentCount > 0 -> today += person
+            else -> reconnect += person
         }
     }
     return listOf(
         PersonSection(
             kind = PersonSectionKind.PENDING_COMMITMENTS,
-            people = pending,
+            people = today,
+        ),
+        PersonSection(
+            kind = PersonSectionKind.THIS_WEEK_ACTIONS,
+            people = thisWeek,
         ),
         PersonSection(
             kind = PersonSectionKind.RECENT_CONTACTS,
-            people = recent,
+            people = reconnect,
         ),
     )
+}
+
+private fun PersonActionSummary.isUrgentForTodaySection(): Boolean {
+    val score = urgencyScore
+    return score >= 60.0 || (score in 0.0..1.0 && score >= 0.6)
 }
 
 /**
@@ -154,6 +176,7 @@ public data class PersonsUiState(
     val nextCursor: String? = null,
     val refreshing: Boolean = false,
     val lastRefreshSnapshot: PersonsRefreshSnapshot? = null,
+    val actionFeedStatus: PersonActionFeedStatusUi? = null,
     val savingMatchEventIds: Set<String> = emptySet(),
     val resolvedMatchEventIds: Set<String> = emptySet(),
     val notSelfMatchEventIds: Set<String> = emptySet(),
@@ -196,6 +219,7 @@ public class PersonsViewModel @Inject constructor(
     private val refreshCoordinator: PersonsRefreshCoordinator,
     private val manualMatchRepository: PersonManualMatchRepository,
     private val firstMemoryRepository: FirstMemoryRepository,
+    private val personListRemoteRepository: PersonListRemoteRepository,
     private val personActionRepository: PersonActionRepository = NoopPersonActionRepository,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -216,6 +240,8 @@ public class PersonsViewModel @Inject constructor(
 
     init {
         observePeople()
+        observeActionFeedStatus()
+        refreshRemotePeopleCache()
         refreshActionCache()
     }
 
@@ -355,6 +381,7 @@ public class PersonsViewModel @Inject constructor(
         _uiState.update { it.copy(refreshing = true) }
         viewModelScope.launch(ioDispatcher) {
             try {
+                refreshRemotePeopleForCurrentUser()
                 val snapshot = refreshCoordinator.refresh()
                 refreshActionCacheForCurrentUser()
                 _uiState.update {
@@ -374,6 +401,18 @@ public class PersonsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun refreshRemotePeopleCache() {
+        viewModelScope.launch(ioDispatcher) {
+            refreshRemotePeopleForCurrentUser()
+        }
+    }
+
+    private suspend fun refreshRemotePeopleForCurrentUser() {
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId.isNullOrBlank()) return
+        personListRemoteRepository.refreshPeople(userId = userId)
     }
 
     private fun refreshActionCache() {
@@ -554,8 +593,31 @@ public class PersonsViewModel @Inject constructor(
                     error = current.error,
                     refreshing = current.refreshing,
                     lastRefreshSnapshot = current.lastRefreshSnapshot,
+                    actionFeedStatus = current.actionFeedStatus,
                 )
             }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeActionFeedStatus() {
+        viewModelScope.launch {
+            userPrefsStore.observeCurrentUserId()
+                .flatMapLatest { userId ->
+                    if (userId.isNullOrBlank()) {
+                        flowOf(null)
+                    } else {
+                        personActionRepository.observeSyncState(
+                            userId = userId,
+                            surface = PERSON_ACTION_PERSONS_SURFACE,
+                            status = "active",
+                        ).map(::personActionFeedStatusFor)
+                    }
+                }
+                .catch { emit(null) }
+                .collect { status ->
+                    _uiState.update { it.copy(actionFeedStatus = status) }
+                }
         }
     }
 
@@ -603,13 +665,39 @@ public class PersonsViewModel @Inject constructor(
 
     private companion object {
         const val PERSONS_PAGE_SIZE: Int = 120
+        const val PERSON_ACTION_PERSONS_SURFACE: String = "person"
     }
+}
+
+internal fun personActionFeedStatusFor(syncState: PersonActionSyncStateEntity?): PersonActionFeedStatusUi? {
+    return com.becalm.android.ui.actions.personActionFeedStatusFor(syncState)
 }
 
 private object NoopPersonActionRepository : PersonActionRepository {
     override fun observeActiveForSurface(
         userId: String,
         surface: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForPerson(
+        userId: String,
+        personId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForCommitment(
+        userId: String,
+        commitmentId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForCalendarEvent(
+        userId: String,
+        calendarEventId: String,
         limit: Int,
     ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
         flowOf(emptyList())
@@ -626,4 +714,47 @@ private object NoopPersonActionRepository : PersonActionRepository {
                 recomputeState = null,
             ),
         )
+
+    override suspend fun completeAction(
+        userId: String,
+        actionItemId: String,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun dismissAction(
+        userId: String,
+        actionItemId: String,
+        reason: String?,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun snoozeAction(
+        userId: String,
+        actionItemId: String,
+        snoozedUntil: kotlinx.datetime.Instant,
+        reason: String?,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun submitActionFeedback(
+        userId: String,
+        actionItemId: String,
+        feedbackType: String,
+        reason: String?,
+        correctedPersonId: String?,
+        correctedDueAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun syncPendingMutations(
+        userId: String,
+        limit: Int,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    private fun noopMutationStats(): com.becalm.android.data.repository.PersonActionMutationSyncStats =
+        com.becalm.android.data.repository.PersonActionMutationSyncStats(queued = 0, synced = 0, retryable = 0, failed = 0)
 }

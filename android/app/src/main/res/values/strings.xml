@@ -145,8 +145,8 @@
 
     <!-- Onboarding: compact setup -->
     <string name="onb_setup_title">시작 설정</string>
-    <string name="onb_setup_headline">비컴이 챙길 곳을 선택하세요</string>
-    <string name="onb_setup_body">필요한 순간에만 권한을 요청합니다. 지금 건너뛴 항목은 설정에서 나중에 다시 연결할 수 있습니다.</string>
+    <string name="onb_setup_headline">메일 속 약속도\n자동으로\n잡아드려요</string>
+    <string name="onb_setup_body">“금요일까지 보내드리겠습니다” — 메일을 연결하면 이런 약속도 놓치지 않습니다.</string>
     <string name="onb_setup_required_section">필수</string>
     <string name="onb_setup_required_terms">이용약관과 개인정보 처리 안내 동의가 완료되었습니다.</string>
     <string name="onb_setup_required_privacy">관계 기록을 만들 때 사용자가 고른 계정과 폴더만 읽습니다. 원문은 먼저 이 기기에 보관됩니다.</string>
@@ -174,6 +174,10 @@
     <string name="onb_setup_first_source_section">첫 출처</string>
     <string name="onb_setup_add_later_title">나머지는 나중에 추가할 수 있습니다</string>
     <string name="onb_setup_add_later_body">캘린더, Outlook, 녹음, 연락처, 알림은 시작한 뒤 설정에서 필요할 때 연결하세요.</string>
+    <string name="onb_setup_source_preview_label">이렇게 자동 추출돼요</string>
+    <string name="onb_setup_source_preview_title">Re: BeCalm 사업 소개서 공유</string>
+    <string name="onb_setup_source_preview_result">Give 약속 자동 등록 · D-3</string>
+    <string name="onb_setup_source_recommended">추천</string>
     <string name="onb_setup_recommended_section">추천</string>
     <string name="onb_setup_optional_section">선택</string>
     <string name="onb_setup_recordings_title">녹음 연결</string>
@@ -185,11 +189,12 @@
     <string name="onb_setup_notifications_body">오늘 처리해야 할 약속을 제때 알려드립니다.</string>
     <string name="onb_setup_start">BeCalm 시작하기</string>
 
-    <!-- Onboarding intro and Gmail activation preview -->
+    <!-- Onboarding intro and activation preview -->
     <string name="onb_intro_welcome_eyebrow">비컴 베타에 오신 걸 환영해요</string>
     <string name="onb_intro_welcome_title">약속을 절대\n놓치지 않는\nAI 비서예요</string>
     <string name="onb_intro_welcome_body">미팅·통화·메일에서 오간 약속을 자동으로 모아, 사람별로 정리해 드려요. 설정은 3분이면 충분해요.</string>
     <string name="onb_intro_welcome_note">각 단계마다 왜 필요한지 설명해 드릴게요. 이해가 되면 연결하시면 돼요.</string>
+    <string name="onb_intro_welcome_privacy_note">원본 대화는 기기 안에서 보관하고, 서버에는 동의한 처리에 필요한 정보만 전송합니다.</string>
     <string name="onb_intro_identity_title">나를 구분할\n기준을 확인합니다</string>
     <string name="onb_intro_identity_body">이름과 로그인 계정 정보를 기준으로 약속 속 나와 상대방을 구분합니다.</string>
     <string name="onb_intro_device_sources_title">먼저 주변\n인물 관계도를\n만들어요</string>
@@ -271,18 +276,33 @@
     <string name="onb_intro_email_kind_action">약속</string>
     <string name="onb_intro_email_kind_schedule">일정</string>
     <string name="onb_intro_email_kind_decision">결정</string>
-    <string name="onb_activation_preview_loading_title">메일 속 다음 행동을 정리하고 있습니다</string>
-    <string name="onb_activation_preview_loading_body">최근 메일에서 약속, 일정 후보, 바로 처리할 일을 고르고 있습니다.</string>
-    <string name="onb_activation_preview_ready_title">Gmail에서 첫 다음 행동을 찾았어요</string>
-    <string name="onb_activation_preview_ready_body">이 항목으로 시작하면 사람별·일정별로 바로 처리할 일을 볼 수 있습니다.</string>
+    <string name="onb_activation_preview_loading_title">연결한 기록 속 다음 행동을 정리하고 있습니다</string>
+    <string name="onb_activation_preview_loading_body">최근 메일과 일정에서 약속, 일정 후보, 바로 처리할 일을 고르고 있습니다.</string>
+    <string name="onb_activation_preview_ready_title">연결한 기록에서 다음 행동을 찾았어요</string>
+    <string name="onb_activation_preview_ready_title_fmt">놓칠 뻔한 게\n%1$d가지 있었어요</string>
+    <string name="onb_activation_preview_ready_body">최근 연결한 기록을 캘린더와 맞춰봤어요. 잘 잡아두신 일정은 그대로 두고, 빠진 것만 추렸어요.</string>
+    <string name="onb_activation_preview_scan_complete">점검 완료</string>
+    <string name="onb_activation_preview_high_confidence_section_fmt">%1$d건 · 거의 확실히 놓친 것</string>
+    <string name="onb_activation_preview_high_confidence_body">기본적으로 챙겨둘게요. 아니면 우측 X로 지우면 돼요.</string>
+    <string name="onb_activation_preview_confirm_needed_section_fmt">%1$d건 · 혹시 이것도 챙기실까요</string>
+    <string name="onb_activation_preview_high_confidence_label">거의 확실</string>
+    <string name="onb_activation_preview_confirm_needed_label">확인 필요</string>
+    <string name="onb_activation_preview_evidence_fmt">근거 · %1$s</string>
     <string name="onb_activation_preview_person_fallback">상대방</string>
+    <string name="onb_activation_preview_hide_action">숨기기</string>
+    <string name="onb_activation_preview_accept_action">네, 챙길게요</string>
+    <string name="onb_activation_preview_reject_action">아니요</string>
+    <string name="onb_activation_preview_accept_notice">일정 후보로 담았어요.</string>
+    <string name="onb_activation_preview_dismiss_notice">지웠어요. 다음엔 비슷한 항목을 덜 올릴게요.</string>
+    <string name="onb_activation_preview_action_failed">잠시 후 다시 시도해 주세요.</string>
     <string name="onb_activation_preview_manual_action">직접 하나 적기</string>
     <string name="onb_activation_preview_wait_action">조금 더 기다리기</string>
-    <string name="onb_activation_preview_processing_title">Gmail 정리가 조금 더 걸리고 있어요</string>
+    <string name="onb_activation_preview_start_action">이대로 BeCalm 시작하기</string>
+    <string name="onb_activation_preview_processing_title">기록 정리가 조금 더 걸리고 있어요</string>
     <string name="onb_activation_preview_processing_body">연결은 완료됐고 다음 행동을 찾는 중입니다. 기다리지 않아도 BeCalm을 시작할 수 있습니다.</string>
-    <string name="onb_activation_preview_empty_title">Gmail 연결은 완료됐습니다</string>
-    <string name="onb_activation_preview_empty_body">최근 메일에서 바로 보여줄 다음 행동은 아직 찾지 못했습니다. 시작한 뒤에도 Gmail 정리는 계속 이어집니다.</string>
-    <string name="onb_activation_preview_failed_title">Gmail 정리를 바로 끝내지 못했습니다</string>
+    <string name="onb_activation_preview_empty_title">연결은 완료됐습니다</string>
+    <string name="onb_activation_preview_empty_body">최근 기록에서 바로 보여줄 다음 행동은 아직 찾지 못했습니다. 시작한 뒤에도 정리는 계속 이어집니다.</string>
+    <string name="onb_activation_preview_failed_title">기록 정리를 바로 끝내지 못했습니다</string>
     <string name="onb_activation_preview_failed_retryable_body">연결은 유지되어 있습니다. 잠시 뒤 다시 확인하거나 BeCalm을 먼저 시작할 수 있습니다.</string>
     <string name="onb_activation_preview_failed_terminal_body">연결은 유지되어 있습니다. 첫 행동은 직접 만들거나, 시작한 뒤 설정에서 다시 확인할 수 있습니다.</string>
     <string name="settings_source_story_ready_title">이 출처를 연결할 수 있습니다</string>
@@ -410,6 +430,7 @@
     <string name="settings_source_connections_done">완료</string>
     <string name="settings_source_connections_not_now">나중에</string>
     <string name="settings_source_connections_add_another_account">다른 계정 추가</string>
+    <string name="settings_source_reconnect_account_match_hint">Google 또는 Microsoft 승인 화면에서는 재시도 필요로 표시된 이 계정과 같은 계정을 선택해 주세요. 다른 계정을 선택하면 연결이 완료되지 않습니다.</string>
 
     <!-- Onboarding: Gmail OAuth -->
     <string name="onb_gmail_title">Gmail</string>
@@ -452,6 +473,7 @@
     <string name="onb_gmail_error_network">구글 서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
     <string name="onb_gmail_error_permission_denied">BeCalm에는 Gmail 읽기 권한이 필요합니다. 권한을 허용해 주세요.</string>
     <string name="onb_gmail_error_unknown">Gmail 연결에 실패했습니다. 다시 시도하거나 건너뛴 뒤 설정에서 연결해 주세요.</string>
+    <string name="onb_oauth_error_browser_unavailable">보안 로그인을 열 수 있는 브라우저를 찾지 못했습니다. Chrome 또는 Samsung Internet을 설치한 뒤 다시 시도해 주세요.</string>
 
     <!-- Onboarding: Outlook OAuth errors (S6-G) -->
     <string name="onb_outlook_error_network">Microsoft 서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
@@ -506,7 +528,7 @@
     <string name="onb_cold_sync_source_done">완료</string>
     <string name="onb_cold_sync_source_syncing">확인 중</string>
 
-    <!-- Today Timeline -->
+    <!-- Schedule -->
     <string name="today_title">일정</string>
     <string name="today_empty_title">일정 없음</string>
     <string name="today_empty_message">예정된 일정이나 회의가 없습니다.</string>
@@ -527,6 +549,27 @@
     <string name="schedule_empty_confirmed_title">확정 일정이 없습니다.</string>
     <string name="schedule_empty_confirmed_message">확정된 약속과 캘린더 일정이 이곳에 표시됩니다.</string>
     <string name="schedule_action_missing_title">캘린더에 빠진 일정</string>
+    <string name="schedule_action_dismiss">아님</string>
+    <string name="schedule_action_add_to_calendar">캘린더에 추가</string>
+    <string name="schedule_calendar_write_status_title">캘린더 추가 상태</string>
+    <string name="schedule_calendar_write_status_queued">대기 중</string>
+    <string name="schedule_calendar_write_status_running">추가 중</string>
+    <string name="schedule_calendar_write_status_retry">다시 시도 예정</string>
+    <string name="schedule_calendar_write_status_succeeded">추가됨</string>
+    <string name="schedule_calendar_write_status_failed">실패</string>
+    <string name="schedule_calendar_write_status_needs_reauth">재연결 필요</string>
+    <string name="schedule_calendar_write_status_cancelled">취소됨</string>
+    <string name="schedule_calendar_write_status_check_failed">확인 필요</string>
+    <string name="schedule_calendar_write_status_queued_body">요청을 받았습니다. 캘린더에 반영되는 중입니다.</string>
+    <string name="schedule_calendar_write_status_running_body">캘린더에 일정을 추가하고 있습니다.</string>
+    <string name="schedule_calendar_write_status_retry_body">일시적인 문제로 다시 시도할 예정입니다.</string>
+    <string name="schedule_calendar_write_status_succeeded_body">캘린더에 일정이 추가되었습니다.</string>
+    <string name="schedule_calendar_write_status_failed_body">캘린더에 추가하지 못했습니다. 다시 확인해 주세요.</string>
+    <string name="schedule_calendar_write_status_needs_reauth_body">캘린더 연결이 만료되었습니다. 다시 연결하면 이어서 처리할 수 있습니다.</string>
+    <string name="schedule_calendar_write_status_cancelled_body">캘린더 추가 요청이 취소되었습니다.</string>
+    <string name="schedule_calendar_write_status_check_failed_body">상태를 확인하지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
+    <string name="schedule_calendar_write_status_retry_action">다시 확인</string>
+    <string name="schedule_calendar_write_status_reconnect_action">캘린더 재연결</string>
     <string name="commitment_action_feed_title">지금 처리할 일</string>
     <string name="schedule_row_delete_action">삭제</string>
     <string name="schedule_row_deleting_action">삭제 중</string>
@@ -567,6 +610,11 @@
     <string name="today_schedule_conflict_missing_title">제목 없음</string>
     <string name="today_schedule_conflict_resolved">일정 확인을 저장했습니다.</string>
     <string name="today_schedule_conflict_resolve_failed">일정 확인을 저장하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="schedule_action_complete_success">일정 후보를 처리했습니다.</string>
+    <string name="schedule_action_add_to_calendar_success">캘린더 추가를 요청했습니다.</string>
+    <string name="schedule_action_complete_failed">일정 후보를 처리하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="schedule_action_dismiss_success">일정 후보에서 제외했습니다.</string>
+    <string name="schedule_action_dismiss_failed">일정 후보를 제외하지 못했습니다. 다시 시도해 주세요.</string>
     <string name="today_syncing_fmt">새 기록 확인 중 %1$d/%2$d</string>
     <string name="today_synced_time_fmt">%1$s에 확인함</string>
     <string name="today_synced_date_time_fmt">%1$s %2$s에 확인함</string>
@@ -579,8 +627,26 @@
     <string name="today_source_attention_collapse">접기</string>
 
     <!-- Persons -->
-    <string name="persons_title">사람</string>
-    <string name="persons_search_placeholder">사람 검색…</string>
+    <string name="persons_title">인물</string>
+    <string name="persons_home_headline">지금 챙길 사람</string>
+    <string name="persons_home_body">사람마다 지금 할 다음 행동 하나만 먼저. 지난 기록은 이름을 누르면 펼쳐져요.</string>
+    <string name="persons_search_placeholder">이름·역할로 사람 검색</string>
+    <string name="persons_source_status_delayed_prefix_fmt">%1$s 정리가 잠시 지연</string>
+    <string name="persons_source_status_delayed_suffix">되고 있어요. 지금 보이는 건 마지막으로 정리된 기준이에요.</string>
+    <string name="main_tab_source_status_last_snapshot">지금 보이는 건 마지막으로 정리된 기준이에요.</string>
+    <string name="main_tab_source_status_last_snapshot_short">마지막 정리 기준</string>
+    <string name="persons_action_feed_status_pending">다음 행동을 정리하고 있어요.</string>
+    <string name="persons_action_feed_status_stale">마지막 정리 기준으로 보여줘요.</string>
+    <string name="persons_action_feed_status_degraded">다음 행동 정리가 지연돼요. 자동 재시도 중</string>
+    <string name="persons_action_feed_status_quota">사용량 제한으로 정리가 지연돼요. 자동 재시도 중</string>
+    <string name="persons_action_feed_status_pending_compact">다음 행동 정리 중</string>
+    <string name="persons_action_feed_status_stale_compact">다음 행동 마지막 기준</string>
+    <string name="persons_action_feed_status_degraded_compact">다음 행동 지연</string>
+    <string name="persons_action_feed_status_quota_compact">사용량 제한</string>
+    <string name="persons_action_feed_status_lag_minutes_fmt">%1$d분 지연</string>
+    <string name="persons_action_feed_status_action">상태 보기</string>
+    <string name="persons_search_clear">검색어 지우기</string>
+    <string name="persons_search_empty">검색 결과가 없어요</string>
     <string name="persons_empty_title">아직 사람이 없습니다</string>
     <string name="persons_empty_message">메일, 통화, 회의에서 사람이 확인되면 여기에 표시됩니다.</string>
     <string name="persons_unidentified">아직 이름을 모르는 연락처</string>
@@ -590,10 +656,17 @@
     <string name="person_matching_required_banner_title">누구와 나눈 일인지 확인해 주세요</string>
     <string name="person_matching_required_banner_body">새 기록 %1$d건이 아직 사람과 연결되지 않았습니다. 확인하면 사람, 일정, 약속 화면이 더 정확해집니다.</string>
     <string name="person_matching_required_banner_action">확인</string>
+    <string name="person_matching_required_status_prefix_fmt">새 기록 %1$d건 사람 확인 필요</string>
+    <string name="person_matching_required_status_suffix"> · 확인하면 다음 행동이 더 정확해져요.</string>
     <string name="persons_interactions_count">%d회 기록</string>
     <string name="persons_pending_commitments_fmt">남은 약속 %1$d건</string>
-    <string name="persons_section_pending_commitments">아직 남은 약속</string>
-    <string name="persons_section_recent_contacts">최근 연락</string>
+    <string name="persons_section_pending_commitments">오늘 안에</string>
+    <string name="persons_section_this_week">이번 주</string>
+    <string name="persons_section_recent_contacts">다시 이어갈 때</string>
+    <string name="persons_action_due_today">오늘까지</string>
+    <string name="persons_action_due_tomorrow">내일까지</string>
+    <string name="persons_action_due_soon_fmt">D-%1$d</string>
+    <string name="persons_action_overdue_fmt">D+%1$d</string>
     <string name="persons_offline_badge_fmt">오프라인, 마지막 확인 %1$s</string>
     <string name="persons_offline_badge_no_sync">오프라인</string>
     <string name="persons_error_sign_in_required">사람 연결을 저장하려면 다시 로그인해 주세요.</string>
@@ -605,7 +678,7 @@
     <string name="sources_last_error_generic">연결 실패</string>
 
     <!-- Person detail -->
-    <string name="person_detail_timeline_section_fmt">기록 (%1$d)</string>
+    <string name="person_detail_timeline_section_fmt">지난 기록 (%1$d)</string>
     <string name="person_detail_timeline_filter_empty">이 연결에서 가져온 기록이 없습니다.</string>
     <string name="person_detail_filter_all">전체</string>
     <string name="person_detail_filter_email">이메일</string>
@@ -619,10 +692,15 @@
     <string name="person_detail_stat_commitment">약속</string>
     <string name="person_detail_bucket_my_actions">내가 해야 할 일</string>
     <string name="person_detail_bucket_their_actions">상대가 해야 할 일</string>
-    <string name="person_detail_next_action_title">다음에 하면 좋은 일</string>
+    <string name="person_detail_next_action_title">지금 할 일</string>
     <string name="person_detail_next_action_call">전화</string>
     <string name="person_detail_next_action_email_reply">이메일 답신</string>
     <string name="person_detail_next_action_schedule">일정</string>
+    <string name="person_detail_secondary_actions_title_fmt">추가로 챙길 일 %1$d건</string>
+    <string name="person_detail_recall_title">다시 이어가기 전에</string>
+    <string name="person_detail_recall_body_fmt">%1$d일째 연락이 없어요. 마지막은 %2$s였어요. 먼저 맥락을 확인하고 이어가기 좋은 타이밍이에요.</string>
+    <string name="person_detail_recall_open_last">마지막 대화 보기</string>
+    <string name="person_detail_recall_last_record">마지막 기록</string>
     <string name="person_detail_first_memory_recommendation_title">다음부터 자동으로 정리할 수 있어요</string>
     <string name="person_detail_first_memory_email_gmail">Gmail 연결</string>
     <string name="person_detail_first_memory_email_naver">Naver Email 연결</string>
@@ -631,6 +709,13 @@
     <string name="person_detail_first_memory_meeting_audio">미팅 녹음 추가</string>
     <string name="person_detail_first_memory_meeting_calendar">캘린더 연결</string>
     <string name="person_detail_first_memory_messenger">메신저 캡처 추가</string>
+    <string name="person_detail_manual_memory_sync_pending_title">정리가 이어지고 있어요</string>
+    <string name="person_detail_manual_memory_sync_pending_body">이 기기에는 저장됐고 연결이 안정되면 사람별 할 일에 다시 반영합니다.</string>
+    <string name="person_detail_manual_memory_sync_failed_title">정리를 다시 시도해 주세요</string>
+    <string name="person_detail_manual_memory_sync_failed_body">이 기기에는 저장됐지만 연결된 계정까지 반영하지 못했습니다.</string>
+    <string name="person_detail_manual_memory_sync_retry">다시 시도</string>
+    <string name="person_detail_manual_memory_sync_retrying">다시 시도 중</string>
+    <string name="person_detail_manual_memory_sync_retry_failed">다시 시도하지 못했습니다. 잠시 뒤 다시 해 주세요.</string>
     <string name="person_detail_error_missing_id">사람 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
     <string name="person_detail_error_load_failed">사람 기록을 불러오지 못했습니다.</string>
     <string name="person_detail_linked_calendar">연결된 일정 있음</string>
@@ -647,7 +732,9 @@
     <string name="raw_event_sync_awaiting_consent_title">동의 대기 중</string>
     <string name="raw_event_sync_awaiting_consent_body">개인정보 제공 동의를 켜면 이 기록 정리가 다시 시작됩니다.</string>
     <string name="raw_event_extracted_commitments_title">이 기록에서 찾은 일</string>
-    <string name="raw_event_transcript_title">전사본</string>
+    <string name="raw_event_action_reason_single_fmt">%1$s "%2$s" 항목이 이 기록에서 확인돼 다음 행동으로 올라왔습니다.</string>
+    <string name="raw_event_action_reason_multi_fmt">이 기록에서 %1$d개의 Give/Take/일정 항목이 확인돼 다음 행동 후보로 올라왔습니다.</string>
+    <string name="raw_event_transcript_title">원문 전체</string>
     <string name="raw_event_person_correction_saved">사람 연결을 수정했습니다.</string>
     <string name="raw_event_person_correction_failed">사람 연결 수정을 저장하지 못했습니다.</string>
 
@@ -683,7 +770,7 @@
     <string name="raw_event_source_badge_manual">직접 기록</string>
     <string name="raw_event_source_badge_unknown">기타</string>
 
-    <!-- Today 타임라인 (S5-A / S5-B) -->
+    <!-- Schedule timeline (S5-A / S5-B) -->
     <string name="today_counterparty_unknown">상대 확인 필요</string>
     <string name="today_timed_section">시간순 일정</string>
     <string name="today_untimed_section">시간 미정</string>
@@ -748,6 +835,13 @@
     <string name="commitments_error_load_failed">약속을 불러오지 못했습니다.</string>
     <string name="commitments_error_refresh_failed">약속을 새로고침하지 못했습니다.</string>
     <string name="commitments_error_action_failed">약속 상태를 변경하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="commitments_error_evidence_failed">근거를 불러오지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="person_action_complete_success">할 일을 완료했습니다.</string>
+    <string name="person_action_complete_failed">할 일을 완료하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="person_action_dismiss_success">할 일에서 제외했습니다.</string>
+    <string name="person_action_dismiss_failed">할 일을 제외하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="person_action_reminder_scheduled">알림을 예약했습니다.</string>
+    <string name="person_action_reminder_failed">알림을 예약하지 못했습니다. 다시 시도해 주세요.</string>
     <string name="commitments_error_undo_failed">복구하지 못했습니다. 다시 시도해 주세요.</string>
     <string name="commitments_person_group_count_fmt">약속 %1$d건</string>
     <string name="commitments_schedule_group_title">일정</string>
@@ -807,7 +901,7 @@
     <string name="sources_title">데이터 출처</string>
     <string name="sources_empty_title">연결된 데이터 출처 없음</string>
     <string name="sources_empty_message">데이터 출처를 연결하면 약속을 자동으로 찾아 정리합니다.</string>
-    <string name="sources_connection_completed_message">계정이 연결됐습니다.</string>
+    <string name="sources_connection_completed_message">계정이 연결됐습니다. 새 기록 확인을 시작했습니다.</string>
     <string name="sources_connection_failed_message">계정 연결 상태를 확인하지 못했습니다. 다시 시도해 주세요.</string>
     <string name="source_connection_completed_message">계정이 연결됐습니다.</string>
     <string name="share_import_activity_label">BeCalm에 추가</string>
@@ -836,7 +930,7 @@
 
     <!-- Bottom navigation -->
     <string name="nav_today">일정</string>
-    <string name="nav_persons">사람</string>
+    <string name="nav_persons">인물</string>
     <string name="nav_commitments">약속</string>
 
     <!-- Source detail -->
@@ -977,6 +1071,8 @@
     <string name="processing_status_source_sync_importing_more_pages">가져온 기록을 먼저 보여주고, 남은 기록은 이어서 확인합니다</string>
     <string name="processing_status_llm_daily_budget_exceeded">오늘 사용할 수 있는 정리 작업을 모두 사용했습니다</string>
     <string name="processing_status_llm_rate_limited_retrying">서버 사용량 제한으로 대기 중입니다. 잠시 후 자동으로 다시 정리합니다.</string>
+    <string name="processing_status_llm_processing_retrying">서버 정리가 잠시 지연되어 자동으로 다시 시도합니다</string>
+    <string name="processing_status_llm_processing_failed">서버 정리 인프라 문제로 처리가 멈췄습니다. 복구 후 다시 시도해주세요.</string>
 
     <!-- Privacy management screen -->
     <string name="privacy_management_title">개인정보 관리</string>
@@ -1100,6 +1196,40 @@
     <string name="commitment_action_reminder_off">🔕 알림 꺼짐</string>
     <string name="commitment_action_follow_up">후속 연락</string>
     <string name="commitment_action_complete">완료</string>
+    <string name="commitment_action_evidence">근거</string>
+    <string name="commitment_action_evidence_title">근거</string>
+    <string name="commitment_action_evidence_why">왜 이 행동인가요</string>
+    <string name="commitment_action_evidence_metadata">요약과 단서</string>
+    <string name="commitment_action_evidence_original">원문 전체</string>
+    <string name="commitment_action_evidence_original_unavailable">원문을 불러올 수 없습니다.</string>
+    <string name="commitment_action_evidence_original_missing_local">이 기기에 저장된 원문이 없어 전체 원문은 볼 수 없습니다. 위 요약과 근거만 표시합니다.</string>
+    <string name="commitment_action_evidence_original_truncated">긴 원문이라 일부만 표시됩니다.</string>
+    <string name="commitment_action_evidence_close">닫기</string>
+    <string name="person_action_evidence_view">근거 보기</string>
+    <string name="person_action_draft_action">초안</string>
+    <string name="person_action_draft_primary_reply">답장 초안 쓰기</string>
+    <string name="person_action_draft_primary_follow_up">팔로업 초안 쓰기</string>
+    <string name="person_action_draft_primary_reconnect">연락 초안 쓰기</string>
+    <string name="person_action_draft_sheet_label">답장 초안</string>
+    <string name="person_action_draft_sheet_label_reply">답장 · AI 초안</string>
+    <string name="person_action_draft_sheet_label_follow_up">팔로업 · AI 초안</string>
+    <string name="person_action_draft_header_recipient_fmt">받는 사람 · %1$s</string>
+    <string name="person_action_draft_sheet_title">초안 만들기</string>
+    <string name="person_action_draft_loading">근거와 사람 맥락을 바탕으로 사용자가 검토할 초안을 만들고 있습니다.</string>
+    <string name="person_action_draft_review_notice">✦ 근거와 사람 맥락을 반영해 비컴이 초안을 썼어요</string>
+    <string name="person_action_draft_review_notice_context_fmt">✦ %1$s 맥락과 말투를 반영해 비컴이 초안을 썼어요</string>
+    <string name="person_action_draft_recipient_label">받는 사람</string>
+    <string name="person_action_draft_subject_label">제목</string>
+    <string name="person_action_draft_subject_placeholder">제목 없음</string>
+    <string name="person_action_draft_body_label">본문 (수정 가능)</string>
+    <string name="person_action_draft_body_placeholder">초안 본문</string>
+    <string name="person_action_draft_open_mail">메일 앱</string>
+    <string name="person_action_draft_open_mail_chooser">메일 앱에서 열기</string>
+    <string name="person_action_draft_copy">복사</string>
+    <string name="person_action_draft_retry">다시 시도</string>
+    <string name="person_action_draft_failed">초안을 만들지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="person_action_draft_unsupported">이 행동은 아직 초안을 만들 수 없습니다.</string>
+    <string name="person_action_draft_auth_failed">로그인이 만료되어 초안을 만들 수 없습니다. 다시 로그인해 주세요.</string>
     <string name="commitment_action_cancel">취소</string>
     <string name="commitment_action_edit">편집</string>
     <string name="commitment_action_more">더보기</string>

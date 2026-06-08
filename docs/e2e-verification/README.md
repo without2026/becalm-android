@@ -2,6 +2,11 @@
 
 이 폴더는 `becalm-android/.spec/*.spec.yml` 의 behavior 각각이 **실제 소스 파일의 어떤 함수/클래스를 타고 E2E 로 흘러가는지** 를 CTO 가 grep 한 번으로 검증할 수 있도록 정리한 문서 세트다.
 
+2026-06-03 target architecture 기준으로 legacy `today-timeline`,
+`commitment-management`, `source-viewer` specs는 삭제되었고,
+`next-action-projection`이 세 main tab의 first-screen product contract를
+소유한다.
+
 각 문서는 다음 구조를 따른다:
 1. **전체 흐름**: UI → VM → Repo → Remote/DAO/Worker ASCII 다이어그램 (파일:심볼 매핑 포함)
 2. **Behavior 별 trace**: 각 behavior ID 마다 단계별 `파일 경로 → 심볼명` 표
@@ -17,19 +22,26 @@
 | --- | --- | --- | --- | --- |
 | 01 | auth | `.spec/auth.spec.yml` | [01-auth.md](./01-auth.md) | 7 (AUTH-001~007) |
 | 02 | onboarding | `.spec/onboarding.spec.yml` | [02-onboarding.md](./02-onboarding.md) | 10 (ONB-001~008 + ONB-PIPA + ONB-CONTACTS) |
-| 03 | today-timeline | `.spec/today-timeline.spec.yml` | [03-today-timeline.md](./03-today-timeline.md) | 10 (TDY-001~010) |
+| 03 | next-action-projection | `.spec/next-action-projection.spec.yml` | [03-next-action-projection.md](./03-next-action-projection.md) | NAP-* |
 | 04 | voice-pipeline | `.spec/voice-pipeline.spec.yml` | [04-voice-pipeline.md](./04-voice-pipeline.md) | 7 (VOI-001~007) |
 | 05 | data-ingestion | `.spec/data-ingestion.spec.yml` | [05-data-ingestion.md](./05-data-ingestion.md) | 15 (ING-001~015) |
 | 06 | backend-sync | `.spec/backend-sync.spec.yml` | [06-backend-sync.md](./06-backend-sync.md) | 6 (SYNC-001~006) |
-| 07 | commitment-management | `.spec/commitment-management.spec.yml` | [07-commitment-management.md](./07-commitment-management.md) | 10 (CMT-001~010) |
+| 07 | commitment-edit | `.spec/commitment-edit.spec.yml` | see [03-next-action-projection.md](./03-next-action-projection.md) for action lifecycle, plus API/data contracts | 8 (EDIT-001~008) |
 | 08 | person-enrichment | `.spec/person-enrichment.spec.yml` | [08-person-enrichment.md](./08-person-enrichment.md) | 8 (ENR-001~008) |
 | 09 | source-management | `.spec/source-management.spec.yml` | [09-source-management.md](./09-source-management.md) | 5 (SMG-001~005) |
-| 10 | source-viewer | `.spec/source-viewer.spec.yml` | [10-source-viewer.md](./10-source-viewer.md) | 8 (SRC-001~008) |
+| 10 | person-memory | `.spec/person-memory.spec.yml` | covered by contracts and next-action context checks | PMEM-* |
+| 11 | beta-week-readiness | `.spec/beta-week-readiness.spec.yml` | [10-beta-week-readiness.md](./10-beta-week-readiness.md) | 12 (BETA-001~012) |
+| 12 | historical-regression-guards | `.spec/historical-regression-guards.spec.yml` | [11-historical-regression-guards.md](./11-historical-regression-guards.md) | 14 (BREG-001~014) |
 
 Contracts (shape of truth):
 - `.spec/contracts/api-contract.yml` — Retrofit 엔드포인트 shape (Supabase Auth + Railway)
 - `.spec/contracts/data-model.yml` — Room/서버 엔티티
 - `.spec/contracts/ui-map.yml` — Compose route/screen 매핑
+
+Deleted legacy specs:
+- `.spec/today-timeline.spec.yml` — replaced by `.spec/next-action-projection.spec.yml` Schedule surface.
+- `.spec/commitment-management.spec.yml` — action lifecycle absorbed into `NAP-ACTION-*`; commitment semantic edits remain in `.spec/commitment-edit.spec.yml`.
+- `.spec/source-viewer.spec.yml` — relation/evidence behavior absorbed into `NAP-REL-*` and `NAP-EVIDENCE-*`.
 
 ---
 
@@ -64,11 +76,11 @@ grep -nE '@(GET|POST|PATCH|DELETE|PUT)' becalm-android/android/app/src/main/java
 
 | # | 항목 | 파일/근거 | 설명 |
 | --- | --- | --- | --- |
-| G1 | SMS / CallLog observer 의 spec 부재 | `worker/ContentObserverBootstrap.kt:98/128` `registerSmsObserver` / `registerCallLogObserver` | 현재 9개 spec 어디에도 매핑 없음. PIPA invariant ("SMS/통화 기록 접근 없음") 와 충돌 가능 |
+| G1 | SMS / CallLog observer 의 spec 부재 | `worker/ContentObserverBootstrap.kt:98/128` `registerSmsObserver` / `registerCallLogObserver` | 현재 active spec 어디에도 매핑 없음. PIPA invariant ("SMS/통화 기록 접근 없음") 와 충돌 가능 |
 | G2 | Firebase Crashlytics 연동 존재 여부 불확실 | ONB-007 / VOI-006 의 `onboarding_step_failed` / `voice_upload_quarantined` 이벤트 | `grep -rn "Firebase Crashlytics" becalm-android/android/app/src/main/java` 결과 확인 필요. 없으면 spec 과 구현 gap |
-| G3 | spec `tests: []` 전부 비어 있음 | 모든 9개 spec 파일 | 각 behavior ID 를 실제 테스트 함수에 annotation (e.g., `// spec: AUTH-001`) 으로 연결하고 spec 파일의 tests 배열을 채울 것 |
+| G3 | spec `tests: []` 다수 비어 있음 | active spec files | 각 behavior ID 를 실제 테스트 함수에 annotation (e.g., `// spec: NAP-PERSON-001`) 으로 연결하고 spec 파일의 tests 배열을 채울 것 |
 | G4 | `SourceDetailViewModel.kt:110/141` "API gap: filter by sourceType in-memory" | 서버측 filter endpoint 부재 | perf 리스크 티켓 등록 |
-| G5 | `transcript` 필드가 `RawIngestionEventEntity` 에 존재하는지 불확실 | SRC-004 spec 은 voice 상세에서 transcript 표시 | 엔티티 확인 필요. voice-pipeline invariant ("transcript 영속 금지") 와 충돌하면 spec 수정 |
+| G5 | `transcript` 필드가 `RawIngestionEventEntity` 에 존재하는지 불확실 | legacy source viewer flow removed; NAP-EVIDENCE-001 allows bounded evidence only | 엔티티 확인 필요. voice-pipeline invariant ("transcript 영속 금지") 와 충돌하면 구현 삭제 |
 
 ---
 

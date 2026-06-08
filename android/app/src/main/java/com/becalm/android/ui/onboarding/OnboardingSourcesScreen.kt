@@ -39,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -87,6 +88,7 @@ public fun OnboardingSourcesScreen(
 public fun SettingsSourceConnectionsScreen(
     navController: NavHostController,
     targetProviderSlug: String? = null,
+    targetSourceConnectionId: String? = null,
     viewModel: OnboardingViewModel? = null,
     emailEventsOverride: Flow<EmailConnectEvent>? = null,
     calendarEventsOverride: Flow<CalendarConnectEvent>? = null,
@@ -106,6 +108,7 @@ public fun SettingsSourceConnectionsScreen(
         emailEventsOverride = emailEventsOverride,
         calendarEventsOverride = calendarEventsOverride,
         stateOverride = stateOverride,
+        targetSourceConnectionId = targetSourceConnectionId,
         onConnectSource = onConnectSource,
         onPersistEmailConsent = onPersistEmailConsent,
         onRefreshSource = onRefreshSource,
@@ -138,6 +141,7 @@ internal fun SourceConnectionsScreen(
     onSelfAliasChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
     sourceOwnerships: List<OnboardingSourceOwnershipUi>? = null,
+    targetSourceConnectionId: String? = null,
     onConnectSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     onSkipSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     includedProviders: Set<OnboardingSourceProvider>? = null,
@@ -179,7 +183,11 @@ internal fun SourceConnectionsScreen(
     val transientStates = transientStatesState.value
 
     val connectSource = onConnectSource ?: { provider, hostActivity ->
-        requireNotNull(resolvedViewModel).onConnectSourceProvider(provider, hostActivity)
+        requireNotNull(resolvedViewModel).onConnectSourceProvider(
+            provider,
+            hostActivity,
+            sourceConnectionId = targetSourceConnectionId,
+        )
     }
     val skipSource: (OnboardingSourceProvider) -> Unit = onSkipSource
         ?: { provider -> requireNotNull(resolvedViewModel).onSkipSourceProvider(provider) }
@@ -242,11 +250,13 @@ internal fun SourceConnectionsScreen(
         }
     }
 
-    SourceConnectionLifecycleRefreshEffect(
-        lifecycleOwner = lifecycleOwner,
-        transientStates = transientStates,
-        onRefreshSource = refreshSource,
-    )
+    if (entryPoint != SourceConnectionsEntryPoint.Settings) {
+        SourceConnectionLifecycleRefreshEffect(
+            lifecycleOwner = lifecycleOwner,
+            transientStates = transientStates,
+            onRefreshSource = refreshSource,
+        )
+    }
     SourceConnectionEmailEventEffect(
         events = emailEventsOverride ?: requireNotNull(resolvedViewModel).emailConnectEvents,
         entryPoint = entryPoint,
@@ -286,11 +296,17 @@ internal fun SourceConnectionsScreen(
     } else {
         emptyList()
     }).filterForProviders(if (includedProviders == null) null else effectiveIncludedProviders)
-    val existingConnectionProviders = if (entryPoint == SourceConnectionsEntryPoint.Settings) {
-        effectiveSourceOwnerships.mapNotNull(OnboardingSourceOwnershipUi::toSourceProvider).toSet()
+    val existingConnectionStates = if (entryPoint == SourceConnectionsEntryPoint.Settings) {
+        effectiveSourceOwnerships.toProviderStates()
     } else {
-        emptySet()
+        emptyMap()
     }
+    val deleteConnectedAccount: ((OnboardingSourceOwnershipUi) -> Unit)? =
+        if (entryPoint == SourceConnectionsEntryPoint.Settings && resolvedViewModel != null) {
+            { account -> resolvedViewModel.onDeleteSourceConnection(account.id) }
+        } else {
+            null
+        }
 
     val items = SourceConnectionProjector.sourceConnectionItems(
         stepStates = state.stepStates,
@@ -298,7 +314,7 @@ internal fun SourceConnectionsScreen(
         respectStepStates = SourceConnectionProjector.respectStepStatesFor(entryPoint),
         respectConnectedStepStates = entryPoint != SourceConnectionsEntryPoint.Settings || includedProviders == null,
         includedProviders = effectiveIncludedProviders,
-        existingConnectionProviders = existingConnectionProviders,
+        existingConnectionStates = existingConnectionStates,
         stringFor = resources::getString,
     )
     val hasIncomplete = entryPoint == SourceConnectionsEntryPoint.Onboarding &&
@@ -360,6 +376,8 @@ internal fun SourceConnectionsScreen(
             FocusedSettingsSourceConnectionContent(
                 item = focusedSettingsItem,
                 connectedAccounts = effectiveSourceOwnerships,
+                connectedAccountActionIds = state.sourceOwnershipActionInProgressIds,
+                onDeleteConnectedAccount = deleteConnectedAccount,
                 onConnect = { connectProvider(focusedSettingsItem.provider) },
                 continueLabel = stringResource(SourceConnectionCopy.continueLabelRes(entryPoint, hasIncomplete)),
                 onContinue = onContinue,
@@ -387,6 +405,8 @@ internal fun SourceConnectionsScreen(
                 onSelfAliasChange = onSelfAliasChange,
                 onSaveSelfIdentity = onSaveSelfIdentity,
                 connectedAccounts = effectiveSourceOwnerships,
+                connectedAccountActionIds = state.sourceOwnershipActionInProgressIds,
+                onDeleteConnectedAccount = deleteConnectedAccount,
                 onConnectSetupItem = onConnectSetupItem ?: {},
                 onSkipSetupItem = onSkipSetupItem ?: {},
                 continueEnabled = !state.isCompleting,
@@ -404,6 +424,8 @@ internal fun SourceConnectionsScreen(
 private fun FocusedSettingsSourceConnectionContent(
     item: SourceConnectionItemUi,
     connectedAccounts: List<OnboardingSourceOwnershipUi>,
+    connectedAccountActionIds: Set<String>,
+    onDeleteConnectedAccount: ((OnboardingSourceOwnershipUi) -> Unit)?,
     onConnect: () -> Unit,
     continueLabel: String,
     onContinue: () -> Unit,
@@ -436,7 +458,13 @@ private fun FocusedSettingsSourceConnectionContent(
                 )
             }
             items(connectedAccounts, key = { account -> account.id }) { account ->
-                SourceConnectedAccountRow(item = account)
+                SourceConnectedAccountRow(
+                    item = account,
+                    deleting = account.id in connectedAccountActionIds,
+                    onDelete = onDeleteConnectedAccount?.let { onDelete ->
+                        { onDelete(account) }
+                    },
+                )
             }
         }
         item(key = "settings-source-story-done") {
@@ -470,6 +498,8 @@ private fun FocusedSourceActionPanel(
     onConnect: () -> Unit,
 ) {
     val busy = item.state.isBusy
+    val primaryEnabled = !busy &&
+        (item.state != SourceConnectionState.Connected || item.primaryActionLabel != null)
     QuietPanel(modifier = Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -489,10 +519,18 @@ private fun FocusedSourceActionPanel(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (item.state == SourceConnectionState.Failed) {
+                Text(
+                    text = stringResource(R.string.settings_source_reconnect_account_match_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("source-connection-reconnect-account-hint"),
+                )
+            }
             BecalmButton(
                 text = focusedConnectLabel(item),
                 onClick = onConnect,
-                enabled = item.state != SourceConnectionState.Connected && !busy,
+                enabled = primaryEnabled,
                 loading = busy,
                 variant = if (item.state == SourceConnectionState.Connected) {
                     BecalmButtonVariant.Secondary
@@ -583,5 +621,30 @@ private fun OnboardingSourceOwnershipUi.toSourceProvider(): OnboardingSourceProv
         provider == "google" && capability == "calendar" -> OnboardingSourceProvider.GOOGLE_CALENDAR
         provider == "outlook" && capability == "mail" -> OnboardingSourceProvider.OUTLOOK_MAIL
         provider == "outlook" && capability == "calendar" -> OnboardingSourceProvider.OUTLOOK_CALENDAR
+        provider == SourceType.GMAIL -> OnboardingSourceProvider.GMAIL
+        provider == SourceType.GOOGLE_CALENDAR -> OnboardingSourceProvider.GOOGLE_CALENDAR
+        provider == SourceType.OUTLOOK_MAIL -> OnboardingSourceProvider.OUTLOOK_MAIL
+        provider == SourceType.OUTLOOK_CALENDAR -> OnboardingSourceProvider.OUTLOOK_CALENDAR
         else -> null
+    }
+
+private fun List<OnboardingSourceOwnershipUi>.toProviderStates(): Map<OnboardingSourceProvider, SourceConnectionState> =
+    groupBy { ownership -> ownership.toSourceProvider() }
+        .mapNotNull { (provider, ownerships) ->
+            provider ?: return@mapNotNull null
+            provider to ownerships
+                .map { ownership -> sourceConnectionStateForStatus(ownership.status) }
+                .mergedConnectionState()
+        }
+        .toMap()
+
+private fun List<SourceConnectionState>.mergedConnectionState(): SourceConnectionState =
+    when {
+        SourceConnectionState.Syncing in this -> SourceConnectionState.Syncing
+        SourceConnectionState.Connecting in this -> SourceConnectionState.Connecting
+        SourceConnectionState.PendingExternalAuth in this -> SourceConnectionState.PendingExternalAuth
+        SourceConnectionState.Connected in this -> SourceConnectionState.Connected
+        SourceConnectionState.Failed in this -> SourceConnectionState.Failed
+        SourceConnectionState.Skipped in this -> SourceConnectionState.Skipped
+        else -> SourceConnectionState.Idle
     }

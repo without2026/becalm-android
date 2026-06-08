@@ -10,14 +10,17 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.MeetingSpeakerAliasEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceArtifactEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ArchivedOriginal
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.data.repository.SourceOriginalResolver
 import com.becalm.android.ui.commitments.CommitmentDetailViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
 import io.mockk.coEvery
@@ -52,6 +55,11 @@ class CommitmentDetailViewModelSpecTest {
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val meetingSpeakerAliasDao: MeetingSpeakerAliasDao = mockk(relaxed = true)
     private val sourceArtifactRepository: SourceArtifactRepository = mockk(relaxed = true)
+    private val emailBodyRepository: EmailBodyRepository = mockk(relaxed = true)
+    private val sourceOriginalResolver = SourceOriginalResolver(
+        emailBodyRepository = emailBodyRepository,
+        sourceArtifactRepository = sourceArtifactRepository,
+    )
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
@@ -278,6 +286,41 @@ class CommitmentDetailViewModelSpecTest {
     }
 
     @Test
+    fun `detail source evidence opens local original without active action row`() = runTest {
+        every { commitmentRepository.observeByIdForUser("user-1", "source-evidence") } returns flowOf(
+            entity(
+                id = "source-evidence",
+                quote = "자료는 오늘 중으로 보내겠습니다",
+                sourceType = SourceType.GMAIL,
+                sourceRef = "raw-email-1",
+                sourceEventTitle = "자료 확인 메일",
+            ),
+        )
+        coEvery { rawIngestionEventDao.findById("raw-email-1", "user-1") } returns RawIngestionEventEntity(
+            id = "raw-email-1",
+            userId = "user-1",
+            clientEventId = "client-raw-email-1",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "provider-message-1",
+            eventTitle = "자료 확인 메일",
+            eventSnippet = "메일 미리보기",
+            timestamp = Instant.parse("2026-05-19T01:00:00Z"),
+        )
+        coEvery { emailBodyRepository.getByRawEventId("raw-email-1") } returns emailBody("raw-email-1")
+
+        val viewModel = buildViewModel("source-evidence")
+        advanceUntilIdle()
+        viewModel.onOpenSourceEvidence()
+        advanceUntilIdle()
+
+        val detail = viewModel.uiState.value.sourceEvidenceDetail
+        assertEquals("자료는 오늘 중으로 보내겠습니다", detail?.whyText)
+        assertEquals("긴 이메일 원문", detail?.originalText)
+        assertEquals("자료 확인 메일", detail?.originalTitle)
+        assertFalse(viewModel.uiState.value.loadingSourceEvidence)
+    }
+
+    @Test
     fun `meeting schedule detail lets user rename transcript speakers`() = runTest {
         every { commitmentRepository.observeByIdForUser("user-1", "meeting-alias") } returns flowOf(
             entity(
@@ -328,6 +371,7 @@ class CommitmentDetailViewModelSpecTest {
         rawIngestionEventDao = rawIngestionEventDao,
         meetingSpeakerAliasDao = meetingSpeakerAliasDao,
         sourceArtifactRepository = sourceArtifactRepository,
+        sourceOriginalResolver = sourceOriginalResolver,
         userPrefsStore = userPrefsStore,
         savedStateHandle = SavedStateHandle(mapOf(BecalmRoute.CommitmentDetail.ARG_ID to id)),
         logger = logger,
@@ -399,5 +443,22 @@ class CommitmentDetailViewModelSpecTest {
         occurredAt = Instant.parse("2026-05-19T01:00:00Z"),
         createdAt = Instant.parse("2026-05-19T01:00:00Z"),
         updatedAt = Instant.parse("2026-05-19T01:00:00Z"),
+    )
+
+    private fun emailBody(rawEventId: String): EmailBodyEntity = EmailBodyEntity(
+        id = "body-$rawEventId",
+        rawEventId = rawEventId,
+        providerMessageId = "provider-$rawEventId",
+        folder = "INBOX",
+        subject = "자료 확인 메일",
+        fromAddress = "sender@example.com",
+        toAddresses = """[{"email":"user@example.com"}]""",
+        bodyPlain = "긴 이메일 원문",
+        bodyHtml = "<p>긴 이메일 원문</p>",
+        attachmentsMeta = null,
+        rawHeaders = null,
+        parseFailed = false,
+        groupEmail = false,
+        receivedAt = Instant.parse("2026-05-19T01:00:00Z"),
     )
 }

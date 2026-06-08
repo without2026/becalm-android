@@ -109,6 +109,15 @@ public interface UserPrefsStore {
     /** Persists a per-commitment reminder opt-out. Default reminder state is enabled. */
     public suspend fun setCommitmentReminderDisabled(commitmentId: String, disabled: Boolean)
 
+    /**
+     * Emits the small, display-safe calendar provider-write job snapshots restored by
+     * Today after process death.
+     */
+    public fun observeCalendarWriteJobSnapshots(): Flow<List<CalendarWriteJobPrefsSnapshot>>
+
+    /** Persists display-safe calendar provider-write job snapshots for process restart recovery. */
+    public suspend fun setCalendarWriteJobSnapshots(jobs: List<CalendarWriteJobPrefsSnapshot>)
+
     /** Emits the epoch-millisecond timestamp when Stage 1 first completed, or null. */
     public fun observeColdSyncStage1CompletedAt(): Flow<Long?>
 
@@ -460,6 +469,26 @@ public data class PipaActionLogEntry(
     val details: Map<String, String> = emptyMap(),
 )
 
+/**
+ * Display-safe calendar provider-write job snapshot.
+ *
+ * This intentionally excludes raw evidence and backend error messages; backend job state
+ * remains canonical, while DataStore only lets Today recover the visible retry/reconnect
+ * affordance after Android process death.
+ */
+public data class CalendarWriteJobPrefsSnapshot(
+    val jobId: String,
+    val actionItemId: String,
+    val title: String,
+    val provider: String?,
+    val scheduleEventLinkId: String?,
+    val status: String,
+    val retryAfterSeconds: Int?,
+    val attempts: Int,
+    val errorCode: String?,
+    val clientAction: String?,
+)
+
 // ─── Implementation ──────────────────────────────────────────────────────────
 
 /**
@@ -496,6 +525,7 @@ public data class PipaActionLogEntry(
  * | Processing paused                | `processing_paused`              | false   |
  * | Processing pause started at      | `pause_started_at`               | null    |
  * | PIPA action log (JSON array)     | `pipa_action_log`                | []      |
+ * | Calendar write snapshots         | `calendar_write_job_snapshots_v1`| []      |
  * | Per-provider PIPA consent        | `pipa_email_<provider>_consent`  | false   |
  * | Per-provider PIPA consent at     | `pipa_email_<provider>_consent_at` | null  |
  * | Per-provider source connected    | `<provider>_connected`           | false   |
@@ -642,6 +672,27 @@ public class UserPrefsStoreImpl @Inject constructor(
                 prefs.remove(key)
             } else {
                 prefs[key] = encodeStringSet(next)
+            }
+        }
+    }
+
+    override fun observeCalendarWriteJobSnapshots(): Flow<List<CalendarWriteJobPrefsSnapshot>> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map emptyList()
+            decodeCalendarWriteJobSnapshots(prefs[userScoped(userId).calendarWriteJobSnapshotsKey])
+        }
+
+    override suspend fun setCalendarWriteJobSnapshots(jobs: List<CalendarWriteJobPrefsSnapshot>) {
+        val sanitized = jobs
+            .mapNotNull { it.sanitizedCalendarWriteJobSnapshot() }
+            .take(CALENDAR_WRITE_JOB_SNAPSHOT_LIMIT)
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val key = userScoped(userId).calendarWriteJobSnapshotsKey
+            if (sanitized.isEmpty()) {
+                prefs.remove(key)
+            } else {
+                prefs[key] = encodeCalendarWriteJobSnapshots(sanitized)
             }
         }
     }
@@ -959,6 +1010,8 @@ public class UserPrefsStoreImpl @Inject constructor(
             stringPreferencesKey(namespaced(scopedUserId, "blocked_person_refs_v1"))
         val disabledCommitmentReminderIdsKey: Preferences.Key<String> =
             stringPreferencesKey(namespaced(scopedUserId, "disabled_commitment_reminder_ids_v1"))
+        val calendarWriteJobSnapshotsKey: Preferences.Key<String> =
+            stringPreferencesKey(namespaced(scopedUserId, "calendar_write_job_snapshots_v1"))
         val coldSyncStage1CompletedAtKey: Preferences.Key<Long> =
             longKey("cold_sync_stage1_completed_at")
         val coldSyncStage1DeferredKey: Preferences.Key<Boolean> =
@@ -1065,6 +1118,75 @@ public class UserPrefsStoreImpl @Inject constructor(
             values.sorted().forEach(::put)
         }.toString()
 
+    private fun encodeCalendarWriteJobSnapshots(jobs: List<CalendarWriteJobPrefsSnapshot>): String =
+        JSONArray().apply {
+            jobs.forEach { job ->
+                put(
+                    JSONObject().apply {
+                        put("job_id", job.jobId)
+                        put("action_item_id", job.actionItemId)
+                        put("title", job.title)
+                        job.provider?.let { put("provider", it) }
+                        job.scheduleEventLinkId?.let { put("schedule_event_link_id", it) }
+                        put("status", job.status)
+                        job.retryAfterSeconds?.let { put("retry_after_seconds", it) }
+                        put("attempts", job.attempts)
+                        job.errorCode?.let { put("error_code", it) }
+                        job.clientAction?.let { put("client_action", it) }
+                    },
+                )
+            }
+        }.toString()
+
+    private fun decodeCalendarWriteJobSnapshots(raw: String?): List<CalendarWriteJobPrefsSnapshot> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    val snapshot = CalendarWriteJobPrefsSnapshot(
+                        jobId = item.optString("job_id"),
+                        actionItemId = item.optString("action_item_id"),
+                        title = item.optString("title"),
+                        provider = item.optNullableString("provider"),
+                        scheduleEventLinkId = item.optNullableString("schedule_event_link_id"),
+                        status = item.optString("status"),
+                        retryAfterSeconds = item.optNullableInt("retry_after_seconds"),
+                        attempts = item.optNullableInt("attempts") ?: 0,
+                        errorCode = item.optNullableString("error_code"),
+                        clientAction = item.optNullableString("client_action"),
+                    ).sanitizedCalendarWriteJobSnapshot()
+                    if (snapshot != null) add(snapshot)
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun CalendarWriteJobPrefsSnapshot.sanitizedCalendarWriteJobSnapshot(): CalendarWriteJobPrefsSnapshot? {
+        val safeJobId = jobId.trim().takeIf { it.isNotBlank() } ?: return null
+        val safeActionItemId = actionItemId.trim().takeIf { it.isNotBlank() } ?: return null
+        val safeStatus = status.trim().takeIf { it.isNotBlank() } ?: return null
+        return copy(
+            jobId = safeJobId,
+            actionItemId = safeActionItemId,
+            title = title.trim().takeIf { it.isNotBlank() } ?: safeActionItemId,
+            provider = provider?.trim()?.takeIf { it.isNotBlank() },
+            scheduleEventLinkId = scheduleEventLinkId?.trim()?.takeIf { it.isNotBlank() },
+            status = safeStatus,
+            retryAfterSeconds = retryAfterSeconds?.coerceAtLeast(0),
+            attempts = attempts.coerceAtLeast(0),
+            errorCode = errorCode?.trim()?.takeIf { it.isNotBlank() },
+            clientAction = clientAction?.trim()?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun JSONObject.optNullableString(key: String): String? =
+        if (!has(key) || isNull(key)) null else optString(key).trim().takeIf { it.isNotBlank() }
+
+    private fun JSONObject.optNullableInt(key: String): Int? =
+        if (!has(key) || isNull(key)) null else optInt(key)
+
     private fun decodePipaActionLog(raw: String?): List<PipaActionLogEntry> {
         if (raw.isNullOrBlank()) return emptyList()
         return runCatching {
@@ -1105,5 +1227,6 @@ public class UserPrefsStoreImpl @Inject constructor(
             SourceType.CALL_RECORDING,
             SourceType.MEETING,
         )
+        const val CALENDAR_WRITE_JOB_SNAPSHOT_LIMIT: Int = 3
     }
 }

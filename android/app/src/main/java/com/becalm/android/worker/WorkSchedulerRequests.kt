@@ -198,6 +198,7 @@ internal object WorkSchedulerRequests {
         UniqueWorkKeys.BACKEND_MAIL,
         UniqueWorkKeys.PERSON_INDEX,
         UniqueWorkKeys.SOURCE_PARTICIPANT_MIRROR,
+        UniqueWorkKeys.MANUAL_MEMORY_OUTBOX,
         UniqueWorkKeys.sourceRelationRefresh(SourceType.GMAIL),
         UniqueWorkKeys.sourceRelationRefresh(SourceType.OUTLOOK_MAIL),
         UniqueWorkKeys.sourceRelationRefresh(SourceType.GOOGLE_CALENDAR),
@@ -294,6 +295,28 @@ internal object WorkSchedulerRequests {
             policy = ExistingWorkPolicy.REPLACE,
             request = sourceParticipantMirrorRequest(initialDelaySeconds.coerceAtLeast(0L)),
             logMessage = "enqueueSourceParticipantMirrorRetry key=${UniqueWorkKeys.SOURCE_PARTICIPANT_MIRROR} delaySec=$initialDelaySeconds",
+        )
+
+    fun manualMemoryOutboxRequest(initialDelaySeconds: Long): OneTimeWorkRequest {
+        val builder = OneTimeWorkRequest.Builder(ManualMemoryOutboxWorker::class.java)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
+        if (initialDelaySeconds > 0L) {
+            builder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
+        }
+        return builder.build()
+    }
+
+    fun manualMemoryOutboxPlan(initialDelaySeconds: Long): UniqueOneTimeWorkPlan =
+        UniqueOneTimeWorkPlan(
+            uniqueKey = UniqueWorkKeys.MANUAL_MEMORY_OUTBOX,
+            policy = ExistingWorkPolicy.REPLACE,
+            request = manualMemoryOutboxRequest(initialDelaySeconds.coerceAtLeast(0L)),
+            logMessage = "enqueueManualMemoryOutboxRetry key=${UniqueWorkKeys.MANUAL_MEMORY_OUTBOX} delaySec=$initialDelaySeconds",
         )
 
     fun sourceRelationRefreshRequest(

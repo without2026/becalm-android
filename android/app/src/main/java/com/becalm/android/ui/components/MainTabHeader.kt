@@ -2,18 +2,22 @@ package com.becalm.android.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
@@ -22,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -38,10 +44,16 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.becalm.android.ui.theme.becalmFocusRing
 import com.becalm.android.R
 import com.becalm.android.ui.main.MainTabHeaderState
+import com.becalm.android.ui.main.SourceStatusAttention
 import com.becalm.android.ui.main.buildChips
 import com.becalm.android.ui.main.buildSourceStatusAttention
 import com.becalm.android.ui.theme.becalmColors
@@ -51,23 +63,283 @@ import com.becalm.android.ui.theme.glassPanel
 public fun MainTabHeaderActions(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     // Sync state is communicated by [OverallSyncIndicator] (text banner under
     // the app bar) and by [SourceStatusStrip] dots. The action slot stays
     // quiet so the app bar never shows ambient process motion. See DESIGN.md
     // Process-Hidden Rule.
     val source = remember { MutableInteractionSource() }
+    val buttonSize = if (compact) 36.dp else 48.dp
+    val iconSize = if (compact) 18.dp else 24.dp
     IconButton(
         onClick = onOpenSettings,
-        modifier = modifier.becalmFocusRing(MaterialTheme.shapes.small, source),
+        modifier = modifier
+            .size(buttonSize)
+            .becalmFocusRing(MaterialTheme.shapes.small, source),
         interactionSource = source,
     ) {
         Icon(
             imageVector = Icons.Filled.Settings,
             contentDescription = stringResource(R.string.label_settings),
+            modifier = Modifier.size(iconSize),
+            tint = if (compact) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
         )
     }
 }
+
+@Composable
+public fun MainTabCompactSourceAttentionLine(
+    state: MainTabHeaderState,
+    onOpenSources: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    onOpenSource: ((String) -> Unit)? = null,
+    supportingStatusText: String? = null,
+    onOpenSupportingStatus: (() -> Unit)? = null,
+    testTagPrefix: String = "main-tab-source",
+) {
+    val attention = buildSourceStatusAttention(state.sourceStatus)
+    if (!attention.hasWarning) return
+    val primaryFailedSource = state.primaryFailedSourceForCompactLine()
+    if (primaryFailedSource != null) {
+        val reconnect: ((String) -> Unit)? = when {
+            onOpenSource != null -> onOpenSource
+            onOpenSources != null -> ({ _: String -> onOpenSources() })
+            else -> null
+        }
+        MainTabCompactSourceStatusLine(
+            sourceType = primaryFailedSource,
+            onReconnect = reconnect,
+            modifier = modifier,
+            supportingStatusText = supportingStatusText,
+            onOpenSupportingStatus = onOpenSupportingStatus,
+            testTagPrefix = testTagPrefix,
+        )
+    } else {
+        MainTabCompactSourceSummaryLine(
+            attention = attention,
+            onOpenSources = onOpenSources,
+            modifier = modifier,
+            supportingStatusText = supportingStatusText,
+            onOpenSupportingStatus = onOpenSupportingStatus,
+            testTagPrefix = testTagPrefix,
+        )
+    }
+}
+
+@Composable
+public fun MainTabCompactSourceStatusLine(
+    sourceType: String,
+    onReconnect: ((String) -> Unit)?,
+    modifier: Modifier = Modifier,
+    supportingStatusText: String? = null,
+    onOpenSupportingStatus: (() -> Unit)? = null,
+    testTagPrefix: String = "main-tab-source",
+) {
+    val sourceName = stringResource(sourcePresentationFor(sourceType).labelRes)
+    val hasSupportingStatus = supportingStatusText?.isNotBlank() == true
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 7.dp)
+            .testTag("$testTagPrefix-statusline-$sourceType"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.error),
+        )
+        Text(
+            text = buildAnnotatedString {
+                val supportingText = supportingStatusText?.takeIf { it.isNotBlank() }
+                if (supportingText != null) {
+                    withStyle(
+                        SpanStyle(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    ) {
+                        append(stringResource(R.string.persons_source_status_delayed_prefix_fmt, sourceName))
+                    }
+                    append(" · ")
+                    append(supportingText)
+                    append(" · ")
+                    append(stringResource(R.string.main_tab_source_status_last_snapshot_short))
+                } else {
+                    withStyle(
+                        SpanStyle(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    ) {
+                        append(stringResource(R.string.persons_source_status_delayed_prefix_fmt, sourceName))
+                    }
+                    append(stringResource(R.string.persons_source_status_delayed_suffix))
+                }
+            },
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            lineHeight = MaterialTheme.typography.labelMedium.lineHeight,
+        )
+        if (hasSupportingStatus && onOpenSupportingStatus != null) {
+            TextButton(
+                onClick = onOpenSupportingStatus,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier
+                    .heightIn(min = 32.dp)
+                    .testTag("$testTagPrefix-supporting-status-action"),
+            ) {
+                Text(
+                    text = stringResource(R.string.persons_action_feed_status_action),
+                    color = MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+            }
+        }
+        if (onReconnect != null) {
+            TextButton(
+                onClick = { onReconnect(sourceType) },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier
+                    .heightIn(min = 32.dp)
+                    .testTag("$testTagPrefix-reconnect-$sourceType"),
+            ) {
+                Text(
+                    text = stringResource(R.string.action_reconnect),
+                    color = MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainTabCompactSourceSummaryLine(
+    attention: SourceStatusAttention,
+    onOpenSources: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    supportingStatusText: String?,
+    onOpenSupportingStatus: (() -> Unit)?,
+    testTagPrefix: String,
+) {
+    val hasSupportingStatus = supportingStatusText?.isNotBlank() == true
+    val message = when {
+        attention.disconnectedCount > 0 && attention.failedCount > 0 ->
+            stringResource(
+                R.string.today_source_attention_mixed_fmt,
+                attention.disconnectedCount,
+                attention.failedCount,
+            )
+        attention.failedCount > 0 ->
+            stringResource(R.string.today_source_attention_failed_fmt, attention.failedCount)
+        else ->
+            stringResource(R.string.today_source_attention_disconnected_fmt)
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 7.dp)
+            .testTag("$testTagPrefix-summary"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(
+                    if (attention.failedCount > 0) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.secondary
+                    },
+                ),
+        )
+        Text(
+            text = buildAnnotatedString {
+                val supportingText = supportingStatusText?.takeIf { it.isNotBlank() }
+                withStyle(
+                    SpanStyle(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                ) {
+                    append(message)
+                }
+                append(" · ")
+                if (supportingText != null) {
+                    append(supportingText)
+                    append(" · ")
+                    append(stringResource(R.string.main_tab_source_status_last_snapshot_short))
+                } else {
+                    append(stringResource(R.string.main_tab_source_status_last_snapshot))
+                }
+            },
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            lineHeight = MaterialTheme.typography.labelMedium.lineHeight,
+        )
+        if (hasSupportingStatus && onOpenSupportingStatus != null) {
+            TextButton(
+                onClick = onOpenSupportingStatus,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier
+                    .heightIn(min = 32.dp)
+                    .testTag("$testTagPrefix-supporting-status-action"),
+            ) {
+                Text(
+                    text = stringResource(R.string.persons_action_feed_status_action),
+                    color = MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+            }
+        }
+        if (onOpenSources != null) {
+            TextButton(
+                onClick = onOpenSources,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier
+                    .heightIn(min = 32.dp)
+                    .testTag("$testTagPrefix-summary-action"),
+            ) {
+                Text(
+                    text = stringResource(R.string.today_source_attention_action),
+                    color = MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+            }
+        }
+    }
+}
+
+public fun MainTabHeaderState.primaryFailedSourceForCompactLine(): String? {
+    val attention = buildSourceStatusAttention(sourceStatus)
+    return attention.failedSources.singleOrNull()
+        ?.takeIf { attention.disconnectedSources.isEmpty() }
+}
+
+public fun MainTabHeaderState.hasSourceWarningForCompactLine(): Boolean =
+    buildSourceStatusAttention(sourceStatus).hasWarning
 
 @Composable
 public fun MainTabStatusHeader(
@@ -75,13 +347,18 @@ public fun MainTabStatusHeader(
     onOpenSettings: (() -> Unit)? = null,
     onOpenSources: (() -> Unit)? = onOpenSettings,
     onOpenSource: ((String) -> Unit)? = null,
+    showOverallIndicator: Boolean = true,
+    showSourceAttentionBanner: Boolean = true,
+    showSourceStatusStrip: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val sourceChips = buildChips(state.sourceStatus)
     val sourceAttention = buildSourceStatusAttention(state.sourceStatus)
 
-    OverallSyncIndicator(state = state.overall)
-    if (sourceAttention.hasWarning) {
+    if (showOverallIndicator) {
+        OverallSyncIndicator(state = state.overall)
+    }
+    if (showSourceAttentionBanner && sourceAttention.hasWarning) {
         MainTabSourceAttentionBanner(
             disconnectedCount = sourceAttention.disconnectedCount,
             failedCount = sourceAttention.failedCount,
@@ -92,7 +369,7 @@ public fun MainTabStatusHeader(
             modifier = modifier,
         )
     }
-    if (sourceChips.isNotEmpty()) {
+    if (showSourceStatusStrip && sourceChips.isNotEmpty()) {
         SourceStatusStrip(
             sources = sourceChips,
             onSourceClick = onOpenSource,

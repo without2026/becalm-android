@@ -27,6 +27,42 @@ public interface PersonActionDao {
 
     @Query(
         """
+        SELECT * FROM person_action_item_cache
+        WHERE user_id = :userId
+          AND status = 'active'
+          AND person_id = :personId
+        ORDER BY urgency_score DESC, updated_at DESC
+        LIMIT :limit
+        """,
+    )
+    public fun observeActiveForPerson(userId: String, personId: String, limit: Int = 100): Flow<List<PersonActionItemCacheEntity>>
+
+    @Query(
+        """
+        SELECT * FROM person_action_item_cache
+        WHERE user_id = :userId
+          AND status = 'active'
+          AND commitment_id = :commitmentId
+        ORDER BY urgency_score DESC, updated_at DESC
+        LIMIT :limit
+        """,
+    )
+    public fun observeActiveForCommitment(userId: String, commitmentId: String, limit: Int = 100): Flow<List<PersonActionItemCacheEntity>>
+
+    @Query(
+        """
+        SELECT * FROM person_action_item_cache
+        WHERE user_id = :userId
+          AND status = 'active'
+          AND calendar_event_id = :calendarEventId
+        ORDER BY urgency_score DESC, updated_at DESC
+        LIMIT :limit
+        """,
+    )
+    public fun observeActiveForCalendarEvent(userId: String, calendarEventId: String, limit: Int = 100): Flow<List<PersonActionItemCacheEntity>>
+
+    @Query(
+        """
         SELECT server_watermark FROM person_action_sync_state
         WHERE user_id = :userId
           AND surface_key = :surfaceKey
@@ -35,6 +71,17 @@ public interface PersonActionDao {
         """,
     )
     public suspend fun latestServerWatermark(userId: String, surfaceKey: String, status: String): Instant?
+
+    @Query(
+        """
+        SELECT * FROM person_action_sync_state
+        WHERE user_id = :userId
+          AND surface_key = :surfaceKey
+          AND status = :status
+        LIMIT 1
+        """,
+    )
+    public fun observeSyncState(userId: String, surfaceKey: String, status: String): Flow<PersonActionSyncStateEntity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertActionItems(rows: List<PersonActionItemCacheEntity>)
@@ -74,8 +121,10 @@ public interface PersonActionDao {
         """
         SELECT * FROM person_action_mutation_queue
         WHERE user_id = :userId
-          AND sync_status = 'pending'
-          AND (next_attempt_at IS NULL OR next_attempt_at <= :now)
+          AND (
+            sync_status = 'pending'
+            OR (sync_status = 'failed' AND next_attempt_at IS NOT NULL AND next_attempt_at <= :now)
+          )
         ORDER BY updated_at ASC
         LIMIT :limit
         """,
@@ -84,10 +133,23 @@ public interface PersonActionDao {
 
     @Query(
         """
+        SELECT COUNT(*) FROM person_action_mutation_queue
+        WHERE user_id = :userId
+          AND (
+            sync_status = 'pending'
+            OR (sync_status = 'failed' AND next_attempt_at IS NOT NULL)
+          )
+        """,
+    )
+    public fun observePendingMutationCount(userId: String): Flow<Int>
+
+    @Query(
+        """
         UPDATE person_action_mutation_queue
         SET sync_status = 'synced',
             last_error_code = NULL,
             last_error_client_action = NULL,
+            next_attempt_at = NULL,
             updated_at = :updatedAt
         WHERE user_id = :userId AND client_mutation_id = :clientMutationId
         """,

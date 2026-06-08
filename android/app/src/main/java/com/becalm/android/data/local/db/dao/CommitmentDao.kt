@@ -1080,7 +1080,7 @@ public interface CommitmentDao {
 
     /**
      * Returns all live commitment quotes whose originating source event matches [sourceEventId],
-     * falling back to [sourceRef] for legacy rows that predate durable source-event anchors.
+     * falling back to [sourceRefs] for legacy rows that predate durable source-event anchors.
      *
      * Used by the raw-event detail projection owner to render the evidence quotes extracted
      * from a specific source event.
@@ -1093,8 +1093,7 @@ public interface CommitmentDao {
               (:sourceEventId IS NOT NULL AND source_event_id = :sourceEventId)
               OR (
                   source_event_id IS NULL
-                  AND :sourceRef IS NOT NULL
-                  AND source_ref = :sourceRef
+                  AND source_ref IN (:sourceRefs)
               )
           )
           AND deleted_at IS NULL
@@ -1104,7 +1103,7 @@ public interface CommitmentDao {
     public suspend fun findQuotesBySourceEventForUser(
         userId: String,
         sourceEventId: String?,
-        sourceRef: String?,
+        sourceRefs: List<String>,
     ): List<String>
 
     @Query(

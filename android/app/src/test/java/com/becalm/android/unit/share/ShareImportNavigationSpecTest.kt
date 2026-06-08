@@ -13,14 +13,14 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ShareImportNavigationSpecTest {
     @Test
-    fun `share import success intent opens today with completed notice`() {
+    fun `share import success intent opens action first home with completed notice`() {
         val intent = ShareImportNavigation.mainAppIntent(
             context = ApplicationProvider.getApplicationContext(),
-            route = BecalmRoute.Today.path,
+            route = BecalmRoute.Persons.path,
             importCompleted = true,
         )
 
-        assertEquals(BecalmRoute.Today.path, intent.getStringExtra(MainActivity.EXTRA_START_ROUTE))
+        assertEquals(BecalmRoute.Persons.path, intent.getStringExtra(MainActivity.EXTRA_START_ROUTE))
         assertTrue(ShareImportNavigation.hasCompletedImport(intent))
     }
 }

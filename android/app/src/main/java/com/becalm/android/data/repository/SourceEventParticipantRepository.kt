@@ -76,6 +76,11 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
         val cursorKey = MirrorCursorKeys.sourceEventParticipants(userId, sourceType)
         val useStoredCursor = since == null
         var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
+        if (cursor != null && localMirrorRowCount(userId, sourceType) == 0) {
+            cursorStore.clearCursor(cursorKey)
+            cursor = null
+            logger.d(TAG, "refreshSince discarded stale source participant cursor for empty local mirror sourceType=$sourceType")
+        }
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -173,6 +178,13 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
             ),
         )
     }
+
+    private suspend fun localMirrorRowCount(userId: String, sourceType: String?): Int =
+        if (sourceType == null) {
+            personIndexDao.countSourceEventParticipantsForUser(userId)
+        } else {
+            personIndexDao.countSourceEventParticipantsForUserAndSourceType(userId, sourceType)
+        }
 
     private fun SourceEventParticipantDto.toEntity(userId: String): SourceEventParticipantEntity =
         SourceEventParticipantEntity(

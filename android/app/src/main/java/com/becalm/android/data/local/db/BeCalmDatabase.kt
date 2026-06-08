@@ -9,6 +9,7 @@ import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
+import com.becalm.android.data.local.db.dao.ManualMemoryOutboxDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
 import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
@@ -28,6 +29,7 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.CommitmentProgressEventEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
+import com.becalm.android.data.local.db.entity.ManualMemoryOutboxEntity
 import com.becalm.android.data.local.db.entity.MeetingSpeakerAliasEntity
 import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
@@ -115,6 +117,11 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  *   after every page in a backend snapshot has been applied transactionally.
  * - v39: preserves the primary action evidence pointer locally so action cards can
  *   open the original source/detail without re-fetching the whole feed item.
+ * - v40: preserves backend action-feed recovery, capacity, and server-timing
+ *   metadata in `person_action_sync_state` so Android can surface retriable
+ *   source/action recovery and latency diagnostics from the local projection.
+ * - v42: preserves backend `provider_write` metadata for add-to-calendar action
+ *   rows so Android can send explicit calendar-write mutations only when ready.
  *
  * ## Type converters
  * [Converters] is applied at the database level so that every DAO and entity
@@ -179,8 +186,9 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         PersonActionItemCacheEntity::class,
         PersonActionMutationQueueEntity::class,
         PersonActionSyncStateEntity::class,
+        ManualMemoryOutboxEntity::class,
     ],
-    version = 39,
+    version = 42,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -190,8 +198,8 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
         // annotation site (ksp#2439), so both sites must be bumped together on every schema
         // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
-        require(DATABASE_VERSION == 39) {
-            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 39) literal"
+        require(DATABASE_VERSION == 42) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 42) literal"
         }
     }
 
@@ -259,6 +267,9 @@ public abstract class BeCalmDatabase : RoomDatabase() {
     /** Returns backend-computed person action cache and mutation queue rows. */
     public abstract fun personActionDao(): PersonActionDao
 
+    /** Returns durable first/manual-memory backend retry commands. */
+    public abstract fun manualMemoryOutboxDao(): ManualMemoryOutboxDao
+
     public companion object {
 
         /**
@@ -299,7 +310,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 39
+        public const val DATABASE_VERSION: Int = 42
 
         /**
          * Returns the per-user SQLite filename for the given [userIdHash].

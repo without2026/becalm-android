@@ -17,10 +17,13 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertSame
 import org.junit.Assert.fail
@@ -105,6 +108,18 @@ class AuthenticatedRuntimeBootstrapSpecTest {
     }
 
     @Test
+    fun `AUTH-009 async runtime bootstrap hydrates source mirrors outside UI owner lifetime`() = runTest {
+        every { databaseProvider.ensureOpenFor(any()) } just Runs
+        val bootstrap = buildBootstrap(applicationScope = this)
+
+        bootstrap.startForUserAsync("user-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { sourceConnectionLocalStateHydrator.hydrate("user-1") }
+        verify(exactly = 1) { appRuntimeSyncCoordinator.startAfterStartup() }
+    }
+
+    @Test
     fun `AUTH-009 startup cancellation is propagated without error logging`() = runTest {
         val cancellation = CancellationException("runtime owner stopped")
         coEvery { imapCredentialStoreMigrator.migrateIfNeeded() } throws cancellation
@@ -120,7 +135,9 @@ class AuthenticatedRuntimeBootstrapSpecTest {
         verify(exactly = 0) { appRuntimeSyncCoordinator.startAfterStartup() }
     }
 
-    private fun buildBootstrap(): AuthenticatedRuntimeBootstrap = AuthenticatedRuntimeBootstrap(
+    private fun buildBootstrap(
+        applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+    ): AuthenticatedRuntimeBootstrap = AuthenticatedRuntimeBootstrap(
         userPrefsStore = userPrefsStore,
         imapCredentialStoreMigrator = imapCredentialStoreMigrator,
         syncCursorStore = syncCursorStore,
@@ -129,6 +146,7 @@ class AuthenticatedRuntimeBootstrapSpecTest {
         sourceConnectionLocalStateHydratorProvider = sourceConnectionLocalStateHydratorProvider,
         commitmentReminderReconciler = commitmentReminderReconciler,
         logger = logger,
+        applicationScope = applicationScope,
         ioDispatcher = Dispatchers.Unconfined,
         mainDispatcher = Dispatchers.Unconfined,
     )

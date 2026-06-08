@@ -5,18 +5,31 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
+import com.becalm.android.data.local.db.dao.NoopSourceEventAnchorDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SourceEventAnchorDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.MeetingSpeakerAliasEntity
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.data.repository.SourceOriginalContext
+import com.becalm.android.data.repository.SourceOriginalResolver
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.actions.PersonActionEvidenceDetailUi
+import com.becalm.android.ui.actions.PersonActionItemUi
+import com.becalm.android.ui.actions.toPersonActionEvidenceDetailUi
+import com.becalm.android.ui.actions.toPersonActionItemUi
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -106,6 +119,11 @@ public data class DetailUiState(
     val actionButtons: CommitmentDetailActionState = CommitmentDetailActionState(),
     val history: CommitmentHistoryPresentation = CommitmentHistoryPresentation(),
     val meetingTranscript: MeetingTranscriptPresentation? = null,
+    val relatedAction: PersonActionItemUi? = null,
+    val evidenceDetail: PersonActionEvidenceDetailUi? = null,
+    val sourceEvidenceDetail: PersonActionEvidenceDetailUi? = null,
+    val loadingEvidenceActionId: String? = null,
+    val loadingSourceEvidence: Boolean = false,
     val loading: Boolean = true,
     val error: UiMessage? = null,
 )
@@ -138,8 +156,11 @@ public class CommitmentDetailViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val rawIngestionEventDao: RawIngestionEventDao,
+    private val sourceEventAnchorDao: SourceEventAnchorDao = NoopSourceEventAnchorDao,
     private val meetingSpeakerAliasDao: MeetingSpeakerAliasDao,
     private val sourceArtifactRepository: SourceArtifactRepository,
+    private val sourceOriginalResolver: SourceOriginalResolver,
+    private val personActionRepository: PersonActionRepository = NoopCommitmentDetailPersonActionRepository,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
@@ -225,7 +246,8 @@ public class CommitmentDetailViewModel @Inject constructor(
                             commitmentRepository.observeByIdForUser(userId, id),
                             personEnrichmentRepository.observeEnrichmentMap(),
                             userPrefsStore.observeDisabledCommitmentReminderIds(),
-                        ) { entity, enrichment, disabledReminderIds ->
+                            personActionRepository.observeActiveForCommitment(userId, id, limit = 10),
+                        ) { entity, enrichment, disabledReminderIds, actionRows ->
                             if (entity == null) {
                                 CommitmentDetailProjector.buildMissingState()
                             } else {
@@ -234,6 +256,14 @@ public class CommitmentDetailViewModel @Inject constructor(
                                     enrichment = enrichment,
                                     meetingTranscript = loadMeetingTranscript(userId, entity),
                                     disabledReminderIds = disabledReminderIds,
+                                ).copy(
+                                    relatedAction = actionRows
+                                        .sortedWith(
+                                            compareByDescending<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity> { it.urgencyScore }
+                                                .thenByDescending { it.updatedAt },
+                                        )
+                                        .firstOrNull()
+                                        ?.toPersonActionItemUi(),
                                 )
                             }
                         }
@@ -248,9 +278,101 @@ public class CommitmentDetailViewModel @Inject constructor(
                     }
                 }
                 .collect { state ->
-                    _uiState.value = state
+                    _uiState.update { current ->
+                        state.copy(
+                            evidenceDetail = current.evidenceDetail,
+                            sourceEvidenceDetail = current.sourceEvidenceDetail,
+                            loadingEvidenceActionId = current.loadingEvidenceActionId,
+                            loadingSourceEvidence = current.loadingSourceEvidence,
+                        )
+                    }
                 }
         }
+    }
+
+    public fun onOpenRelatedActionEvidence(
+        actionItemId: String,
+        evidenceKind: String?,
+        evidenceId: String?,
+    ) {
+        if (actionItemId.isBlank() || evidenceKind.isNullOrBlank() || evidenceId.isNullOrBlank()) {
+            _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_evidence_failed)) }
+            return
+        }
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_evidence_failed)) }
+                return@launch
+            }
+            _uiState.update { it.copy(loadingEvidenceActionId = actionItemId, error = null) }
+            when (
+                val result = personActionRepository.fetchEvidenceOriginal(
+                    userId = userId,
+                    actionItemId = actionItemId,
+                    evidenceKind = evidenceKind,
+                    evidenceId = evidenceId,
+                )
+            ) {
+                is BecalmResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            loadingEvidenceActionId = null,
+                            evidenceDetail = result.value.toPersonActionEvidenceDetailUi(),
+                            error = null,
+                        )
+                    }
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "commitment detail evidence failed id=${hashId(actionItemId)}: ${result.error}")
+                    _uiState.update {
+                        it.copy(
+                            loadingEvidenceActionId = null,
+                            error = UiMessage.resource(R.string.commitments_error_evidence_failed),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    public fun onOpenSourceEvidence() {
+        val entity = _uiState.value.entity ?: return
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_evidence_failed)) }
+                return@launch
+            }
+            _uiState.update { it.copy(loadingSourceEvidence = true, error = null) }
+            val detail = runCatching { buildSourceEvidenceDetail(userId, entity) }
+                .onFailure { e -> logger.w(TAG, "source evidence failed id=${hashId(entity.id)}", e) }
+                .getOrNull()
+            if (detail == null) {
+                _uiState.update {
+                    it.copy(
+                        loadingSourceEvidence = false,
+                        error = UiMessage.resource(R.string.commitments_error_evidence_failed),
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        loadingSourceEvidence = false,
+                        sourceEvidenceDetail = detail,
+                        error = null,
+                    )
+                }
+            }
+        }
+    }
+
+    public fun onDismissRelatedActionEvidence() {
+        _uiState.update { it.copy(evidenceDetail = null) }
+    }
+
+    public fun onDismissSourceEvidence() {
+        _uiState.update { it.copy(sourceEvidenceDetail = null) }
     }
 
     private suspend fun loadMeetingTranscript(
@@ -291,6 +413,144 @@ public class CommitmentDetailViewModel @Inject constructor(
             .sorted()
             .toList()
 
+    private suspend fun buildSourceEvidenceDetail(
+        userId: String,
+        entity: CommitmentEntity,
+    ): PersonActionEvidenceDetailUi? {
+        if (entity.sourceType == SourceType.MANUAL) return null
+        val sourceEvent = resolveCommitmentSourceEvent(userId, entity)
+        val original = sourceEvent?.let { source ->
+            sourceOriginalResolver.resolve(
+                userId = userId,
+                event = source.event,
+                fallbackRawEventIds = source.fallbackRawEventIds,
+            )
+        }
+        val originalText = original?.toDisplayText()
+            ?: entity.quote.takeIf { it.isNotBlank() }
+            ?: entity.description?.takeIf { it.isNotBlank() }
+            ?: return null
+        return PersonActionEvidenceDetailUi(
+            actionItemId = entity.id,
+            evidenceLabel = entity.sourceEventTitle?.takeIf { it.isNotBlank() } ?: entity.title,
+            whyText = entity.quote.takeIf { it.isNotBlank() } ?: entity.title,
+            originalTitle = sourceEvent?.event?.eventTitle?.takeIf { it.isNotBlank() }
+                ?: entity.sourceEventTitle?.takeIf { it.isNotBlank() },
+            originalText = originalText,
+            sourceType = entity.sourceType,
+        )
+    }
+
+    private suspend fun resolveCommitmentSourceEvent(
+        userId: String,
+        entity: CommitmentEntity,
+    ): CommitmentSourceEvent? {
+        val idCandidates = listOfNotNull(
+            entity.sourceEventId,
+            entity.sourceRef?.removePrefix("raw:"),
+        ).distinctNonBlank()
+        firstRawEventById(userId, idCandidates)?.let {
+            return CommitmentSourceEvent(event = it, fallbackRawEventIds = emptyList())
+        }
+
+        val anchor = firstSourceAnchor(
+            userId = userId,
+            refs = listOfNotNull(entity.sourceEventId, entity.sourceRef).distinctNonBlank(),
+        )
+        if (anchor != null) {
+            anchor.localRawEventId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { rawIngestionEventDao.findById(it, userId) }
+                ?.let { raw ->
+                    return CommitmentSourceEvent(event = raw, fallbackRawEventIds = emptyList())
+                }
+            return CommitmentSourceEvent(
+                event = anchor.toSyntheticRawEvent(),
+                fallbackRawEventIds = listOfNotNull(anchor.localRawEventId).distinctNonBlank(),
+            )
+        }
+
+        val sourceRefCandidates = listOfNotNull(
+            entity.sourceRef,
+            entity.sourceEventId?.let { "raw:$it" },
+            entity.sourceEventId,
+        ).distinctNonBlank()
+        if (sourceRefCandidates.isNotEmpty()) {
+            rawIngestionEventDao.findBySourceRefsForUser(userId, sourceRefCandidates)
+                .firstOrNull()
+                ?.let { return CommitmentSourceEvent(event = it, fallbackRawEventIds = emptyList()) }
+        }
+
+        return entity.toSyntheticRawEvent()?.let {
+            CommitmentSourceEvent(event = it, fallbackRawEventIds = emptyList())
+        }
+    }
+
+    private suspend fun firstRawEventById(
+        userId: String,
+        ids: List<String>,
+    ): RawIngestionEventEntity? {
+        for (candidate in ids) {
+            rawIngestionEventDao.findById(candidate, userId)?.let { return it }
+        }
+        return null
+    }
+
+    private suspend fun firstSourceAnchor(
+        userId: String,
+        refs: List<String>,
+    ): SourceEventAnchorEntity? {
+        for (ref in refs) {
+            sourceEventAnchorDao.findBestForEventRef(userId = userId, eventRef = ref)?.let { return it }
+        }
+        return null
+    }
+
+    private fun SourceEventAnchorEntity.toSyntheticRawEvent(): RawIngestionEventEntity =
+        RawIngestionEventEntity(
+            id = sourceEventId ?: localRawEventId ?: id,
+            userId = userId,
+            clientEventId = localRawEventId ?: sourceEventId ?: id,
+            sourceType = sourceType,
+            sourceRef = sourceRef ?: providerEventId,
+            eventTitle = title,
+            eventSnippet = snippet,
+            conversationRef = conversationRef,
+            commitmentsExtractedCount = 0,
+            timestamp = occurredAt ?: kotlinx.datetime.Clock.System.now(),
+            syncStatus = "synced",
+        )
+
+    private fun CommitmentEntity.toSyntheticRawEvent(): RawIngestionEventEntity? {
+        val eventId = sourceEventId?.takeIf { it.isNotBlank() }
+            ?: sourceRef?.removePrefix("raw:")?.takeIf { it.isNotBlank() }
+            ?: return null
+        return RawIngestionEventEntity(
+            id = eventId,
+            userId = userId,
+            clientEventId = sourceRef?.removePrefix("raw:")?.takeIf { it.isNotBlank() } ?: eventId,
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            eventTitle = sourceEventTitle,
+            eventSnippet = quote,
+            commitmentsExtractedCount = 1,
+            timestamp = sourceEventOccurredAt,
+            syncStatus = syncStatus,
+        )
+    }
+
+    private fun SourceOriginalContext.toDisplayText(): String? =
+        listOfNotNull(
+            emailBody?.bodyPlain?.takeIf { it.isNotBlank() },
+            emailBody?.bodyHtml?.takeIf { it.isNotBlank() },
+            archivedOriginal?.markdown?.takeIf { it.isNotBlank() },
+        ).firstOrNull()
+
+    private fun List<String>.distinctNonBlank(): List<String> =
+        map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+
     private fun applySpeakerAliases(markdown: String, aliases: Map<String, String>): String =
         aliases.entries.fold(markdown) { acc, (speakerId, alias) ->
             acc.replace(Regex("\\b${Regex.escape(speakerId)}\\b"), alias)
@@ -301,4 +561,95 @@ public class CommitmentDetailViewModel @Inject constructor(
     private companion object {
         private val SPEAKER_ID_REGEX = Regex("\\bSPEAKER_\\d+\\b")
     }
+}
+
+private data class CommitmentSourceEvent(
+    val event: RawIngestionEventEntity,
+    val fallbackRawEventIds: List<String>,
+)
+
+private object NoopCommitmentDetailPersonActionRepository : PersonActionRepository {
+    override fun observeActiveForSurface(
+        userId: String,
+        surface: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForPerson(
+        userId: String,
+        personId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForCommitment(
+        userId: String,
+        commitmentId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override fun observeActiveForCalendarEvent(
+        userId: String,
+        calendarEventId: String,
+        limit: Int,
+    ): kotlinx.coroutines.flow.Flow<List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>> =
+        flowOf(emptyList())
+
+    override suspend fun refresh(
+        userId: String,
+        surface: String?,
+    ): BecalmResult<PersonActionRefreshStats> =
+        BecalmResult.Success(
+            PersonActionRefreshStats(
+                fetched = 0,
+                deleted = 0,
+                serverWatermark = null,
+                recomputeState = null,
+            ),
+        )
+
+    override suspend fun completeAction(
+        userId: String,
+        actionItemId: String,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun dismissAction(
+        userId: String,
+        actionItemId: String,
+        reason: String?,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun snoozeAction(
+        userId: String,
+        actionItemId: String,
+        snoozedUntil: kotlinx.datetime.Instant,
+        reason: String?,
+        expectedUpdatedAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun submitActionFeedback(
+        userId: String,
+        actionItemId: String,
+        feedbackType: String,
+        reason: String?,
+        correctedPersonId: String?,
+        correctedDueAt: kotlinx.datetime.Instant?,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    override suspend fun syncPendingMutations(
+        userId: String,
+        limit: Int,
+    ): BecalmResult<com.becalm.android.data.repository.PersonActionMutationSyncStats> =
+        BecalmResult.Success(noopMutationStats())
+
+    private fun noopMutationStats(): com.becalm.android.data.repository.PersonActionMutationSyncStats =
+        com.becalm.android.data.repository.PersonActionMutationSyncStats(queued = 0, synced = 0, retryable = 0, failed = 0)
 }

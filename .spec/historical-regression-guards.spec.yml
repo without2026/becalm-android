@@ -1,0 +1,327 @@
+module: historical-regression-guards
+platform: android-backend
+version: 1
+
+purpose:
+  summary: "이전 QA/실기기/운영 디버깅에서 실제로 드러난 버그 유형을 actual implementation 전에 회귀 방지 계약으로 고정한다."
+  principle:
+    - "이 파일은 새 기능 스펙이 아니라 known-bug regression harness다."
+    - "각 BREG 항목은 구현자가 같은 종류의 버그를 다시 만들지 않도록 함수/endpoint/UX 계약을 명시한다."
+    - "기존 spec과 겹치는 경우에도 과거 버그의 원인 조건, 회복 조건, 테스트 이름을 더 구체적으로 적는다."
+
+behaviors:
+  - id: BREG-001
+    type: runtime_cutover_guard
+    previous_bug: "Railway/Supabase runtime이 staging/dev 또는 data/Auth project 기준을 혼동하면 OAuth callback, JWT 검증, DB 저장 proof가 서로 다른 환경을 보게 된다."
+    contract:
+      owner: backend
+      functions:
+        - name: RuntimeEnvironmentGuard.validate
+          rules:
+            - "Active environment/service is explicit in health/readiness output: environment, service, deployment_id, public_base_url_host, data_project_host, auth_project_host."
+            - "If SUPABASE_AUTH_URL is set and differs from SUPABASE_URL, backend must require SUPABASE_AUTH_ANON_KEY for Auth user flows and must not silently use data-project anon key."
+            - "PUBLIC_BASE_URL must not be localhost or empty in dev/staging/production Railway runtime."
+            - "Verification scripts print only hosts/prefixes and never print JWT, anon key, service-role key, password, OAuth code, or email address."
+        - name: RuntimeCutoverPreflight.check
+          rules:
+            - "Fails closed when Auth/Data project mismatch is ambiguous."
+            - "Reports actionable missing variables without exposing secret values."
+      acceptance:
+        - "GET /health and release preflight can prove Android app, OAuth callback, Auth issuer, Supabase data project, and Railway deployment are aligned."
+
+  - id: BREG-002
+    type: oauth_sync_state_guard
+    previous_bug: "OAuth callback success was easy to mistake for source sync success; UI could show connected/synced before token save/provider fetch/raw persistence/local mirror finished."
+    contract:
+      owner: android-backend
+      functions:
+        - name: OAuthCallbackStateMachine.resolve
+          states: "callback_received | token_saved | sync_job_accepted | provider_fetching | raw_rows_persisted | extraction_pending | mirror_refresh_pending | synced | needs_reauth | failed_retryable | failed_terminal"
+          rules:
+            - "connected=true means token/connection row is durable; it does not mean provider sync completed."
+            - "synced means provider fetch and durable source persistence reached a terminal success and Android local mirror refresh applied."
+            - "Android may show OAuth return success only as connection progress, not as action/source sync completion."
+            - "Status polling must include job_id/status/accepted/retry_after_seconds or equivalent source_status fields."
+        - name: SourceConnectionPoller.awaitTerminal
+          rules:
+            - "Foreground polling has bounded attempts and then hands off to WorkManager/backoff without blocking onboarding indefinitely."
+            - "Terminal needs_reauth opens reconnect action; terminal failed_retryable remains retryable with support/report after sustained failure."
+      acceptance:
+        - "Onboarding/Settings source UI distinguishes connected, syncing, synced, needs_reauth, and failed states after OAuth browser return."
+
+  - id: BREG-003
+    type: onboarding_activation_preview_guard
+    previous_bug: "Gmail activation preview could stay empty or stalled because unresolved-counterparty commitments were hidden and Android waited for terminal backend job completion even though only 2~3 preview items were needed."
+    contract:
+      owner: android-backend
+      functions:
+        - name: ActivationPreviewRepository.loadPreview
+          rules:
+            - "Try local Room preview first for immediate value."
+            - "If local preview is empty after source connection, call backend preview query with source_type/provider and include_unresolved_counterparty=true."
+            - "PREVIEW_LIMIT is display cap only; it must not require backend full sync/extraction completion."
+            - "Preview may return partial items with preview_state=partial while backend continues sync/extraction in the background."
+            - "If source sync job is still running after foreground polling budget, UI shows partial/pending preview plus continue CTA, not indefinite loading."
+        - name: SourceSyncJobPoller.awaitPreviewReady
+          rules:
+            - "Returns PreviewReady when at least one actionable or reviewable item exists, even if full job is not terminal."
+            - "Returns PendingWithBackoff when no preview items exist yet and job remains active."
+            - "Active job reuse must respect requested sync_mode; a stale full-sync job cannot block a preview-mode request without returning current progress."
+      acceptance:
+        - "A user who connects Gmail/Outlook can see 2~3 preview cards or an explicit pending/reconnect/empty reason within the foreground budget."
+
+  - id: BREG-004
+    type: self_identity_gate_guard
+    previous_bug: "Onboarding identity step could look frozen when display name plus email/phone readiness was not satisfied or save failed without visible state."
+    contract:
+      owner: android
+      functions:
+        - name: SelfIdentityReadinessPolicy.evaluate
+          rules:
+            - "Ready only when display_name is non-blank and at least one self email or E.164 phone is present."
+            - "Invalid email/phone returns field-level Korean error before network save."
+        - name: OnboardingViewModel.onIdentityNext
+          rules:
+            - "Shows loading while saveSelfIdentityNow is running."
+            - "If local validation fails, focus the first invalid field and do not call backend."
+            - "If backend save fails retryably, show retry CTA and keep input."
+            - "If backend save fails non-retryably, show fix/support action and keep input."
+            - "Navigation to next step happens only after durable local + backend mirror/outbox contract is satisfied."
+      acceptance:
+        - "No Next button tap can be a no-op without visible validation, loading, retry, or support state."
+
+  - id: BREG-005
+    type: stale_local_state_repair_guard
+    previous_bug: "Backend resolver/policy fixes did not repair already-synced bad local rows, so UI could keep showing stale schedule/person/action state after deploy."
+    contract:
+      owner: android-backend
+      functions:
+        - name: BackendRepairVersionPublisher.publish
+          rules:
+            - "Backend exposes projection_version or repair_required_since for source graph, schedule links, person matching, and action feed when a server-side fix changes derived outputs."
+        - name: LocalProjectionRepairCoordinator.apply
+          rules:
+            - "Compares local projection version/watermark with backend repair version."
+            - "Schedules bounded refresh/reindex for affected scopes."
+            - "Keeps stale UI visible with repair progress instead of silently trusting old rows."
+            - "Does not delete canonical local originals or user corrections."
+      acceptance:
+        - "After backend redeploy that fixes extraction/linking/relation policy, Android has a deterministic refresh path for stale local projections."
+
+  - id: BREG-006
+    type: people_count_distinct_guard
+    previous_bug: "People interaction count badge was inflated by join multiplication between person_interactions and person_identities."
+    contract:
+      owner: android
+      functions:
+        - name: PersonInteractionCountQuery.build
+          rules:
+            - "Counts interaction rows with COUNT(DISTINCT interaction_id) or equivalent de-duplicated projection key."
+            - "Joining person_identities, aliases, emails, phones, or contacts enrichment cannot multiply visible interaction counts."
+            - "UI count label is derived from the same query used by Person detail history list or a documented distinct aggregate."
+        - name: PeopleCountVerifier.compareWithLocalDb
+          rules:
+            - "QA can run a local DB query that proves visible count equals distinct source interaction count for sampled persons."
+      acceptance:
+        - "Adding multiple identities for the same person does not change N회 상호작용 unless new interactions are added."
+
+  - id: BREG-007
+    type: meeting_speaker_identity_guard
+    previous_bug: "Meeting speaker labels could be tempting to promote into canonical people, causing false person matches from source-local labels."
+    contract:
+      owner: android-backend
+      functions:
+        - name: MeetingSpeakerPromotionPolicy.evaluate
+          rules:
+            - "Self speaker can be confirmed by user and linked to self identity."
+            - "Non-self speaker_label alone is review evidence only and cannot create canonical person identity."
+            - "Non-self speaker can become a person candidate only when tied to stronger evidence: email, phone, explicit attendee, or give/take counterparty evidence."
+            - "Manual match persists verified email/phone identity; name-only alias promotion requires explicit user confirmation."
+        - name: PersonMatchingEngine.rank
+          rules:
+            - "Verified email/phone/self anchors outrank name-only and source-local labels."
+            - "Rejected/ignored speaker suggestions remain suppressed across reprocess/reindex."
+      acceptance:
+        - "Meeting transcript speaker labels do not pollute People list or action assignees without user confirmation or stronger counterparty evidence."
+
+  - id: BREG-008
+    type: extraction_preview_error_guard
+    previous_bug: "Extraction preview-cache miss or speaker preview unavailable could surface as opaque server failure instead of retryable/fallback state."
+    contract:
+      owner: backend
+      functions:
+        - name: ExtractionErrorMapper.toEnvelope
+          rules:
+            - "preview_cache_miss, speaker_preview_unavailable, vertex_upstream_error, output_truncated, schema_violation each map to stable error code, retryable, client_action, request_id."
+            - "preview_cache_miss is retryable or client_action=retry_later when backend transient; it is not treated as client corruption by default."
+            - "speaker_preview_unavailable allows audio/transcript fallback when privacy and size constraints are satisfied."
+            - "RequestValidationError uses the same envelope shape as handler-raised extraction errors."
+        - name: AndroidExtractionErrorHandler.handle
+          rules:
+            - "retryable extraction failures remain queued/backoff."
+            - "output_truncated or terminal validation opens review_quarantine/repair/discard."
+            - "No extraction error deletes local raw event automatically."
+      acceptance:
+        - "Every extraction failure is retryable, reviewable, discardable, or support-reportable with stable reason code."
+
+  - id: BREG-009
+    type: foreground_catchup_guard
+    previous_bug: "Foreground catch-up could enqueue wrong source lanes, compete with first frame, or log cancellation as false crash noise."
+    contract:
+      owner: android
+      functions:
+        - name: ForegroundCatchUpScheduler.enqueueForSources
+          rules:
+            - "Gmail/Outlook Mail backend-managed sources are excluded from local provider fetch fan-out when backend-managed flag is true."
+            - "Naver/Daum IMAP, voice, meeting, message_screenshot, local calendar/media lanes are isolated; one source exception cannot abort other source enqueue."
+            - "Automatic ON_START catch-up may delay briefly until first frame/navigation is stable; user pull-to-refresh has no artificial delay."
+            - "CancellationException and JobCancellationException during lifecycle stop/shutdown are rethrown or logged at cancellation level, not reported as app error/crash."
+        - name: WorkSchedulerRequests.uniqueKeyForSource
+          rules:
+            - "Unique work keys include source type and user scope where applicable."
+            - "Repeated foreground events do not create duplicate periodic workers or stale input workers."
+      acceptance:
+        - "Foreground resume never blocks first-screen cached action paint and never reports normal lifecycle cancellation as fatal telemetry."
+
+  - id: BREG-010
+    type: auth_reinstall_boundary_guard
+    previous_bug: "Repeated reinstall/logout/login could leave reminders, notifications, workers, observers, or first-memory/manual-memory sync in the wrong user scope."
+    contract:
+      owner: android-backend
+      functions:
+        - name: AuthBoundaryTeardown.execute
+          rules:
+            - "On signOut/invalidateSession, cancel user-scoped workers, content observers, AlarmManager reminders, and posted notifications for the old user."
+            - "Close old user DB before opening a new user DB."
+            - "Do not delete old user DB unless user explicitly clears data or account deletion contract runs."
+        - name: ManualMemoryOutbox.enqueue
+          rules:
+            - "First-memory/manual-memory remote save failure creates durable local outbox row keyed by client_memory_id."
+            - "Retry is idempotent against backend `(user_id, client_memory_id)`."
+            - "Reinstall/login after successful retry hydrates the mirrored memory or marks local memory pending restore."
+        - name: ManualMemoryOutboxWorker.drain
+          rules:
+            - "Retryable transport/backend statuses keep the outbox row pending, increment retry metadata, and return WorkManager retry."
+            - "Backend idempotency conflict or validation failure marks the row failed instead of silently deleting local first-memory state."
+            - "Successful backend acknowledgement atomically marks the local commitment synced and removes the outbox row."
+      acceptance:
+        - "User A reminders/notifications/workers cannot fire under User B; first memory is not lost when backend save fails after local save."
+
+  - id: BREG-011
+    type: schedule_time_link_guard
+    previous_bug: "KST/timezone normalization or schedule_event_links resolver amplification could create false Today overlaps or bad schedule links that survive local cache."
+    contract:
+      owner: backend-android
+      functions:
+        - name: ScheduleTimeNormalizer.normalizeModelItem
+          rules:
+            - "Never invent precise time from vague due_hint without evidence; use due_is_approximate=true and preserve due_hint."
+            - "All concrete due_at/start_at values include explicit timezone offset; Korean user default is Asia/Seoul only when source lacks timezone and user profile timezone is Korea."
+            - "Model output timezone, source event occurred_at, and user timezone are recorded in conflict/debug fields without exposing raw source body."
+        - name: ScheduleEventLinkResolver.resolve
+          rules:
+            - "False overlap avoidance outranks aggressive auto-linking."
+            - "Ambiguous schedule link sets needs_review/conflict_fields instead of silently linking."
+            - "Resolver fixes publish repair version so Android can refresh stale local links."
+      acceptance:
+        - "Schedule tab does not show false meeting/action overlap after timezone normalization or resolver redeploy."
+
+  - id: BREG-012
+    type: source_status_processing_guard
+    previous_bug: "Connection state and processing state were easy to conflate, making disconnected sources appear syncing or completed sources appear unprocessed."
+    contract:
+      owner: android-backend
+      functions:
+        - name: SourceStatusMerger.merge
+          rules:
+            - "connection_state and sync_state/processing_state are separate fields and UI concepts."
+            - "connected + syncing means credential exists and work is running."
+            - "never_connected/needs_reauth cannot display as synced even if old last_sync_at exists."
+            - "client_managed source keeps local-derived state when backend source_status omits authority."
+        - name: ProcessingStatusRepository.project
+          rules:
+            - "Processing status reflects active/pending work, not credential existence."
+            - "SourceStatusStrip uses compact source health; ProcessingStatusScreen may show detailed pipeline phase."
+      acceptance:
+        - "Settings and main tabs show the same source health semantics after reconnect, disconnect, permission revoke, and backend outage."
+
+  - id: BREG-013
+    type: analytics_privacy_guard
+    previous_bug: "Observability/analytics hardening could accidentally become a raw-content or PII sink while debugging beta failures."
+    contract:
+      owner: android-backend
+      functions:
+        - name: ProductAnalyticsValidation.validate
+          rules:
+            - "Reject or redact raw email, phone, transcript, OCR text, audio path, local path, signed URL, auth token, refresh token, cookie, provider account email, raw source body."
+            - "Allow only bounded enum/reason/source_type/status/build/request_id/user_id_hash fields."
+            - "Queue/drop behavior is fail-open for user workflow and fail-closed for privacy."
+        - name: ObservabilityClient.capture
+          rules:
+            - "Sanitize before writing to Crashlytics/Amplitude/backend mirror."
+            - "PII validation test samples must include Korean names, emails, phone numbers, file paths, URLs, and token-looking strings."
+      acceptance:
+        - "Debugging beta failures cannot require sending raw user content through telemetry."
+
+  - id: BREG-014
+    type: build_release_evidence_guard
+    previous_bug: "Readiness docs and actual build config/test state could drift, e.g. targetSdk claims, stale failing tests, or runtime proof tied to old staging scripts."
+    contract:
+      owner: release_manager
+      functions:
+        - name: ReleaseEvidenceCollector.collect
+          rules:
+            - "Records actual versionCode/versionName, targetSdk, compileSdk, git sha, backend deployment id, Railway environment/service, and test commands run."
+            - "Fails if readiness doc claims a different targetSdk/runtime environment than build config or Railway status."
+            - "Historical staging script names are allowed only when command flags prove active dev/staging target explicitly."
+            - "Known stale tests must be either fixed or marked unrelated with current evidence; no blanket green claim from old CI."
+      acceptance:
+        - "A reviewer can reproduce the exact Android build/backend runtime/test evidence used for beta go/no-go."
+
+non_functional_requirements:
+  regression_budget:
+    known_bug_recurrence_allowed: 0
+    opaque_loading_without_state_allowed: 0
+    silent_success_after_partial_failure_allowed: 0
+    stale_local_projection_without_repair_allowed: 0
+  evidence:
+    requires_current_checkout: true
+    requires_live_runtime_when_runtime_claimed: true
+    requires_device_when_device_behavior_claimed: true
+
+test_plan:
+  unit:
+    - "RuntimeEnvironmentGuard validates Auth/Data/Public base URL combinations without exposing secrets."
+    - "OAuthCallbackStateMachine separates connected from synced and terminal retryable from terminal reconnect."
+    - "ActivationPreviewRepository returns local preview first and backend include_unresolved_counterparty fallback when local is empty."
+    - "SelfIdentityReadinessPolicy covers blank display name, invalid email, invalid phone, and valid email/phone cases."
+    - "PersonInteractionCountQuery remains stable when a person has multiple identities."
+    - "MeetingSpeakerPromotionPolicy rejects speaker_label-only canonical identity promotion."
+    - "ExtractionErrorMapper maps preview_cache_miss and speaker_preview_unavailable to stable ErrorEnvelope."
+    - "SourceStatusMerger keeps connection_state separate from processing/sync state."
+    - "ProductAnalyticsValidation rejects PII/raw-content examples."
+    - "ScheduleTimeNormalizer preserves vague time and explicit timezone."
+  integration:
+    - "OAuth callback -> status polling -> source sync job -> local mirror refresh does not mark synced before terminal source persistence."
+    - "Backend deploy with projection repair version triggers Android bounded refresh without deleting canonical local rows."
+    - "Logout/login switch cancels workers/reminders/notifications for old user and opens only new user DB."
+    - "ForegroundCatchUpScheduler isolates per-source failures and does not enqueue backend-managed Gmail/Outlook local fetch lanes."
+    - "ScheduleEventLinkResolver ambiguous overlap creates needs_review instead of false link."
+  ui:
+    - "Identity Next button always shows validation/loading/retry/support or advances; never silent no-op."
+    - "Gmail/Outlook activation preview shows partial preview/pending/reconnect/empty reason within foreground budget."
+    - "Source status chips distinguish connected, syncing, synced, needs_reauth, client_managed, and error."
+  smoke:
+    - "Real-device OAuth return and preview path captured with screenshot/logcat when source connection behavior is changed."
+    - "Device logcat treats lifecycle cancellation as non-fatal and shows no FATAL EXCEPTION/ANR/OOM."
+
+rollout:
+  rule:
+    - "Any implementation touching these areas must add or update tests named in the relevant BREG acceptance."
+    - "If a BREG item cannot be implemented in the current slice, beta readiness remains no-go or conditional with explicit blocker."
+
+invariants:
+  - "이전 실제 버그는 '이미 고쳤다'가 아니라 '다시 만들 수 없게 계약화했다'가 완료 조건이다."
+  - "UI가 멈춘 것처럼 보이면 반드시 validation, loading, pending, retry, repair, support 중 하나의 상태가 있어야 한다."
+  - "Backend fix가 local stale data를 자동으로 고친다고 가정하지 않는다; repair/refresh/version 경로가 필요하다."
+  - "실기기 동작을 주장할 때는 실기기 proof가 필요하다."

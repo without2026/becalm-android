@@ -2,7 +2,8 @@ version: 1
 # Boundary reference: docs/becalm-mvp-boundary.md
 
 # BeCalm Android MVP — Data Model Contract
-# Persistence: Room (local primary) + Supabase Postgres (mirror via Railway FastAPI).
+# Persistence: Android Room is local origin/outbox/cache. Supabase Postgres via
+# Railway owns durable source facts and backend-computed product projections.
 # Railway is the ONLY writer to Supabase — Android does NOT call Supabase REST directly for data R/W.
 # EmailBody lives in Room only — never uploaded to Railway or Supabase.
 # Transcript (STT 중간 산출물): 어디에도 영속되지 않음. 음성 파이프라인은 오디오 → commitment draft를 한 번에 추출하며, 중간 transcript는 Railway 요청 lifetime 내 ephemeral로만 존재한다.
@@ -162,14 +163,14 @@ tables:
         # schedule / decision rows retain the default 'pending' sentinel for storage compatibility
         # but MUST be excluded from action-state state machine / overdue / reminder queries.
         # Transitions:
-        #   pending → reminded (CMT-005, user taps [리마인드])
-        #   pending|reminded → followed_up (CMT-006, user taps [팔로업])
-        #   pending|reminded|followed_up → completed (CMT-007, user taps [완료])
-        #   pending|reminded|followed_up → overdue (CMT-011, system auto when due_at < now() - 24h AND not completed/cancelled)
-        #   pending|reminded|followed_up → cancelled (CMT-012, user taps [취소])
+        #   pending → reminded (NAP-ACTION-001, user taps reminder on PersonActionCard)
+        #   pending|reminded → followed_up (NAP-ACTION-001)
+        #   pending|reminded|followed_up → completed (NAP-ACTION-001)
+        #   pending|reminded|followed_up → overdue (NAP-ACTION-003, system auto when due_at < now() - 24h AND not completed/cancelled)
+        #   pending|reminded|followed_up → cancelled (NAP-ACTION-001)
         #   overdue → followed_up|completed|cancelled (user can still act on overdue items)
-        #   completed → pending (CMT-013 undo within 5s Snackbar window)
-        #   cancelled → pending (CMT-013 undo within 5s Snackbar window)
+        #   completed → pending (NAP-ACTION-004 undo within configured window)
+        #   cancelled → pending (NAP-ACTION-004 undo within configured window)
       - name: source_type
         type: text
         nullable: false
@@ -195,7 +196,7 @@ tables:
         type: uuid
         nullable: true
         fk: "auth.users.id"
-        # Set on every user-initiated edit/dispute/delete/supersede (commitment-edit.spec.yml EDIT-003). NULL for unedited LLM-extracted commitments and for system-auto transitions (e.g., CMT-011 overdue sweep).
+        # Set on every user-initiated edit/dispute/delete/supersede (commitment-edit.spec.yml EDIT-003). NULL for unedited LLM-extracted commitments and for system-auto transitions (e.g., NAP-ACTION-003 overdue sweep).
       - name: last_edited_at
         type: timestamptz
         nullable: true
@@ -221,7 +222,7 @@ tables:
     indexes:
       - columns: [user_id, item_type, action_state, due_at]
         type: btree
-        # idx_commitments_user_action_due — supports action-only CommitmentManagementScreen / Today queries. Queries MUST still filter `deleted_at IS NULL` at application level.
+        # idx_commitments_user_action_due — supports backend action-only PersonActionItem recomputation. Queries MUST still filter `deleted_at IS NULL` at application level.
       - columns: [user_id, counterparty_ref, due_at]
         type: btree
         # idx_commitments_user_counterparty_due — supports local counterparty-scoped edit/search paths only. Person UI uses commitment_participants/person_id.
@@ -283,10 +284,445 @@ tables:
         type: btree
       - columns: [user_id, status, start_at]
         type: btree
-        # idx_calendar_events_user_status_start — TodayTimelineScreen에서 status='confirmed' 필터링과 회색 처리 분리 쿼리 지원
+        # idx_calendar_events_user_status_start — supports backend action recomputation and schedule evidence filtering while preserving cancelled calendar evidence.
       - columns: [user_id, recurring_event_id]
         type: btree
         # idx_calendar_events_user_recurring — series-level lookup for master-event view (post-MVP).
+    rls: true
+
+  - name: person_action_items
+    # Backend-owned product projection. These rows are regeneratable from
+    # durable source facts, but canonical for what the Android UI should render
+    # as the optimized Person/Schedule/Commitment action feed.
+    columns:
+      - name: id
+        type: text
+        primary: true
+        nullable: false
+      - name: action_version
+        type: int
+        nullable: false
+        default: "1"
+        # Increment when the stable-id recipe or generator semantics materially change.
+      - name: user_id
+        type: uuid
+        nullable: false
+        fk: "auth.users.id"
+      - name: person_id
+        type: uuid
+        nullable: true
+      - name: surfaces
+        type: text[]
+        nullable: false
+        # enum values: person | schedule | commitment
+      - name: action_kind
+        type: text
+        nullable: false
+      - name: status
+        type: text
+        nullable: false
+        default: "'active'"
+        # enum: active | completed | dismissed | snoozed | superseded | stale
+      - name: title
+        type: text
+        nullable: false
+      - name: primary_verb
+        type: text
+        nullable: false
+      - name: short_reason
+        type: text
+        nullable: false
+      - name: commitment_id
+        type: uuid
+        nullable: true
+      - name: calendar_event_id
+        type: uuid
+        nullable: true
+      - name: source_event_id
+        type: uuid
+        nullable: true
+      - name: source_type
+        type: text
+        nullable: true
+      - name: source_ref
+        type: text
+        nullable: true
+      - name: due_at
+        type: timestamptz
+        nullable: true
+      - name: due_hint
+        type: text
+        nullable: true
+      - name: due_is_approximate
+        type: boolean
+        nullable: false
+        default: "false"
+      - name: stale_after
+        type: timestamptz
+        nullable: true
+      - name: urgency_score
+        type: float
+        nullable: false
+        default: "0.0"
+      - name: importance_score
+        type: float
+        nullable: false
+        default: "0.0"
+      - name: confidence
+        type: float
+        nullable: false
+        default: "0.0"
+      - name: reason_codes
+        type: text[]
+        nullable: false
+        default: "'{}'"
+      - name: input_watermarks_json
+        type: text
+        nullable: false
+        default: "'[]'"
+        # JSON array of PersonActionInputWatermark. Proves which input classes this row includes.
+      - name: input_watermark
+        type: timestamptz
+        nullable: false
+        # Max high_watermark across input_watermarks_json. Used for coarse incremental queries.
+      - name: computed_at
+        type: timestamptz
+        nullable: false
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+      - name: deleted_at
+        type: timestamptz
+        nullable: true
+        # Tombstone retained long enough for changed_since clients to receive deleted_ids.
+      - name: superseded_by_action_id
+        type: text
+        nullable: true
+      - name: snoozed_until
+        type: timestamptz
+        nullable: true
+      - name: completed_at
+        type: timestamptz
+        nullable: true
+      - name: dismissed_at
+        type: timestamptz
+        nullable: true
+    indexes:
+      - columns: [user_id, status, urgency_score]
+        type: btree
+      - columns: [user_id, person_id, status]
+        type: btree
+      - columns: [user_id, due_at]
+        type: btree
+      - columns: [user_id, input_watermark]
+        type: btree
+      - columns: [user_id, updated_at]
+        type: btree
+      - columns: [user_id, deleted_at]
+        type: btree
+    rls: true
+
+  - name: person_action_item_evidence_refs
+    # Bounded evidence handles for PersonActionItem rows. Full originals, local
+    # archive paths, signed URLs, transcripts, OCR text, and raw model output
+    # are forbidden.
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+        default: gen_random_uuid()
+      - name: user_id
+        type: uuid
+        nullable: false
+        fk: "auth.users.id"
+      - name: action_item_id
+        type: text
+        nullable: false
+      - name: kind
+        type: text
+        nullable: false
+      - name: evidence_id
+        type: text
+        nullable: false
+      - name: source_ref
+        type: text
+        nullable: true
+      - name: occurred_at
+        type: timestamptz
+        nullable: true
+      - name: label
+        type: text
+        nullable: false
+      - name: quote
+        type: text
+        nullable: true
+    indexes:
+      - columns: [user_id, action_item_id]
+        type: btree
+    rls: true
+
+  - name: person_action_item_user_states
+    # Backend canonical user state for generated action items.
+    columns:
+      - name: action_item_id
+        type: text
+        primary: true
+        nullable: false
+      - name: user_id
+        type: uuid
+        nullable: false
+        fk: "auth.users.id"
+      - name: client_mutation_id
+        type: uuid
+        nullable: false
+        # Idempotency key of the mutation that last wrote this state.
+      - name: status
+        type: text
+        nullable: false
+        # enum: completed | dismissed | snoozed
+      - name: snoozed_until
+        type: timestamptz
+        nullable: true
+      - name: reason
+        type: text
+        nullable: true
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+    indexes:
+      - columns: [user_id, client_mutation_id]
+        type: btree
+        unique: true
+      - columns: [user_id, status, updated_at]
+        type: btree
+    rls: true
+
+  - name: person_action_mutation_ledger
+    # Backend idempotency ledger for action-state patches and feedback. This is
+    # separate from the latest user state row so duplicate client_mutation_id
+    # replay can return the original result without applying side effects twice.
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+        default: gen_random_uuid()
+      - name: user_id
+        type: uuid
+        nullable: false
+        fk: "auth.users.id"
+      - name: client_mutation_id
+        type: uuid
+        nullable: false
+      - name: action_item_id
+        type: text
+        nullable: false
+      - name: mutation_kind
+        type: text
+        nullable: false
+        # enum: state_patch | feedback
+      - name: payload_hash
+        type: text
+        nullable: false
+        # Server-computed hash of canonicalized bounded request payload.
+      - name: request_payload_json
+        type: text
+        nullable: false
+        # Bounded action mutation/feedback payload only; raw source content is forbidden.
+      - name: result_action_json
+        type: text
+        nullable: true
+        # Bounded PersonActionItem response snapshot for replaying duplicate success.
+      - name: result_status
+        type: text
+        nullable: false
+        # enum: committed | rejected | retryable_failed
+      - name: error_code
+        type: text
+        nullable: true
+      - name: error_client_action
+        type: text
+        nullable: true
+      - name: request_id
+        type: text
+        nullable: true
+      - name: created_at
+        type: timestamptz
+        nullable: false
+        default: now()
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+        default: now()
+    indexes:
+      - columns: [user_id, client_mutation_id]
+        type: btree
+        unique: true
+      - columns: [user_id, action_item_id, updated_at]
+        type: btree
+      - columns: [result_status, updated_at]
+        type: btree
+    rls: true
+
+  - name: person_action_recompute_jobs
+    # Durable backend queue for action recomputation. This prevents accepted
+    # source/correction writes from being lost when Railway restarts or workers
+    # crash mid-computation.
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+        default: gen_random_uuid()
+      - name: user_id
+        type: uuid
+        nullable: false
+        fk: "auth.users.id"
+      - name: scope_kind
+        type: text
+        nullable: false
+        # enum: user | person | source_event | commitment | calendar_event | source_status | correction
+      - name: scope_id
+        type: text
+        nullable: true
+      - name: input_watermark
+        type: timestamptz
+        nullable: false
+      - name: priority
+        type: int
+        nullable: false
+        default: "100"
+        # Lower value claims first. Used for due-soon/reconnect/review priority, never for correctness.
+      - name: shard_key
+        type: int
+        nullable: false
+        default: "0"
+        # Stable hash(user_id) modulo configured shard count for worker fairness/partitioning.
+      - name: status
+        type: text
+        nullable: false
+        default: "'pending'"
+        # enum: pending | processing | completed | failed | dead_letter
+      - name: attempt_count
+        type: int
+        nullable: false
+        default: "0"
+      - name: next_attempt_at
+        type: timestamptz
+        nullable: true
+      - name: locked_until
+        type: timestamptz
+        nullable: true
+      - name: locked_by
+        type: text
+        nullable: true
+        # Worker instance id written only by claim_person_action_recompute_jobs.
+      - name: claimed_at
+        type: timestamptz
+        nullable: true
+      - name: last_error_code
+        type: text
+        nullable: true
+      - name: last_error_retryable
+        type: boolean
+        nullable: true
+      - name: last_error_client_action
+        type: text
+        nullable: true
+        # retry_later | full_refresh | open_source_settings | review_quarantine | contact_support
+      - name: incident_id
+        type: text
+        nullable: true
+        # Non-secret operator-visible id for dead_letter/requeue tracking.
+      - name: coalesced_count
+        type: int
+        nullable: false
+        default: "0"
+        # Incremented when repeated pending triggers are folded into an existing job.
+      - name: completed_at
+        type: timestamptz
+        nullable: true
+      - name: created_at
+        type: timestamptz
+        nullable: false
+        default: now()
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+        default: now()
+    indexes:
+      - columns: [user_id, scope_kind, scope_id, input_watermark]
+        type: btree
+        unique: true
+      - columns: [status, next_attempt_at]
+        type: btree
+      - columns: [status, priority, next_attempt_at, created_at]
+        type: btree
+      - columns: [shard_key, status, next_attempt_at]
+        type: btree
+      - columns: [user_id, status, next_attempt_at]
+        type: btree
+      - columns: [locked_until]
+        type: btree
+      - columns: [locked_by, locked_until]
+        type: btree
+    rls: true
+
+  - name: person_action_feed_watermarks
+    # Per-user action feed snapshot/watermark state. Android changed_since must
+    # compare against this, not client clocks.
+    columns:
+      - name: user_id
+        type: uuid
+        primary: true
+        nullable: false
+        fk: "auth.users.id"
+      - name: server_watermark
+        type: timestamptz
+        nullable: false
+      - name: input_watermarks_json
+        type: text
+        nullable: false
+        default: "'[]'"
+      - name: recompute_state
+        type: text
+        nullable: false
+        default: "'pending'"
+        # enum: caught_up | pending | stale | degraded
+      - name: capacity_state
+        type: text
+        nullable: false
+        default: "'normal'"
+        # enum: normal | backlog | degraded
+      - name: backlog_lag_seconds
+        type: int
+        nullable: true
+        # Derived from oldest eligible recompute job and emitted to PersonActionFeedResponse.
+      - name: last_caught_up_at
+        type: timestamptz
+        nullable: true
+      - name: recovery_actions_json
+        type: text
+        nullable: false
+        default: "'[]'"
+        # JSON PersonActionRecoveryAction[] returned when pending/stale/degraded requires user or operator recovery.
+      - name: last_error_code
+        type: text
+        nullable: true
+      - name: last_error_at
+        type: timestamptz
+        nullable: true
+      - name: last_completed_job_at
+        type: timestamptz
+        nullable: true
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+        default: now()
+    indexes:
+      - columns: [recompute_state, updated_at]
+        type: btree
     rls: true
 
   # ---- Room-only table (never uploaded to Railway or Supabase) ----
@@ -447,6 +883,268 @@ tables:
         type: btree
         type: btree
 
+  - name: person_action_item_cache
+    room_only: true
+    # Offline cache of backend-computed PersonActionItem rows. Android applies
+    # rows from Railway /v1/person_action_items and must not generate or rank
+    # replacement action rows locally.
+    columns:
+      - name: id
+        type: text
+        primary: true
+        nullable: false
+        # Stable backend deterministic id: sha256(user/action/evidence identity/action_version).
+      - name: user_id
+        type: uuid
+        nullable: false
+      - name: payload_json
+        type: text
+        nullable: false
+        # Full PersonActionItem JSON payload from backend, including bounded evidence refs.
+      - name: surfaces_json
+        type: text
+        nullable: false
+        # JSON string array: person | schedule | commitment.
+      - name: action_kind
+        type: text
+        nullable: false
+        # enum: do_work | attend | prepare | reply | follow_up | wait | confirm_schedule | review_person | review_extraction | source_reconnect
+      - name: status
+        type: text
+        nullable: false
+        default: "'active'"
+        # enum: active | completed | dismissed | snoozed | superseded | stale
+      - name: title
+        type: text
+        nullable: false
+        # User-facing short action title, Korean-first, max 120 chars.
+      - name: primary_verb
+        type: text
+        nullable: false
+        # Short command verb such as "답장", "참석", "준비", "확인", max 20 chars.
+      - name: short_reason
+        type: text
+        nullable: false
+        # Backend-generated explanation, max 160 chars.
+      - name: person_id
+        type: uuid
+        nullable: true
+      - name: person_display_name
+        type: text
+        nullable: true
+      - name: commitment_id
+        type: uuid
+        nullable: true
+      - name: calendar_event_id
+        type: uuid
+        nullable: true
+      - name: source_event_id
+        type: uuid
+        nullable: true
+      - name: source_type
+        type: text
+        nullable: true
+      - name: source_ref
+        type: text
+        nullable: true
+      - name: due_at
+        type: timestamptz
+        nullable: true
+      - name: due_hint
+        type: text
+        nullable: true
+      - name: due_is_approximate
+        type: boolean
+        nullable: false
+        default: "false"
+      - name: stale_after
+        type: timestamptz
+        nullable: true
+      - name: urgency_score
+        type: float
+        nullable: false
+        default: "0.0"
+      - name: importance_score
+        type: float
+        nullable: false
+        default: "0.0"
+      - name: confidence
+        type: float
+        nullable: false
+        default: "0.0"
+      - name: reason_codes_json
+        type: text
+        nullable: false
+        default: "'[]'"
+        # JSON string array. Examples: due_today, overdue, meeting_prep, waiting_on_counterparty, unresolved_person.
+      - name: evidence_refs_json
+        type: text
+        nullable: false
+        default: "'[]'"
+        # JSON array of bounded evidence refs. Each quote <=200 chars. No full body/transcript/OCR/raw model output.
+      - name: input_watermark
+        type: timestamptz
+        nullable: false
+        # Backend input watermark used to expose stale/pending-context state.
+      - name: server_watermark
+        type: timestamptz
+        nullable: false
+        # Feed-level watermark from the snapshot that produced this row.
+      - name: computed_at
+        type: timestamptz
+        nullable: false
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+      - name: snoozed_until
+        type: timestamptz
+        nullable: true
+      - name: completed_at
+        type: timestamptz
+        nullable: true
+      - name: dismissed_at
+        type: timestamptz
+        nullable: true
+      - name: fetched_at
+        type: timestamptz
+        nullable: false
+      - name: last_visible_at
+        type: timestamptz
+        nullable: true
+        # Updated when the row is rendered in a default action surface.
+      - name: prune_after
+        type: timestamptz
+        nullable: true
+        # Backend-provided retention hint for completed/dismissed/superseded/stale rows. Active rows are not pruned by age alone.
+      - name: cache_status
+        type: text
+        nullable: false
+        default: "'fresh'"
+        # enum: fresh | stale | offline | pending_context
+    indexes:
+      - columns: [user_id, status, urgency_score]
+        type: btree
+      - columns: [user_id, person_id, status]
+        type: btree
+      - columns: [user_id, due_at]
+        type: btree
+      - columns: [user_id, server_watermark]
+        type: btree
+      - columns: [user_id, commitment_id]
+        type: btree
+      - columns: [user_id, calendar_event_id]
+        type: btree
+
+  - name: person_action_sync_state
+    room_only: true
+    # Surface/status-scoped delta progress for backend-computed PersonActionItem
+    # cache. This table exists because an empty or deletion-only feed still must
+    # advance the proven server watermark without inventing sentinel action rows.
+    columns:
+      - name: user_id
+        type: uuid
+        nullable: false
+      - name: surface_key
+        type: text
+        nullable: false
+        # "__all__", "person", "schedule", or "commitment"; surface-scoped watermarks are not interchangeable.
+      - name: status
+        type: text
+        nullable: false
+        # Usually "active" for first-screen tabs.
+      - name: server_watermark
+        type: timestamptz
+        nullable: false
+      - name: recompute_state
+        type: text
+        nullable: true
+      - name: capacity_state
+        type: text
+        nullable: true
+      - name: last_synced_at
+        type: timestamptz
+        nullable: false
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+    primary_key: [user_id, surface_key, status]
+    indexes:
+      - columns: [user_id, updated_at]
+        type: btree
+    rules:
+      - "Android updates server_watermark only after all pages for the snapshot have been applied in one Room transaction."
+      - "If snapshot pagination fails midway, this table keeps the previous watermark so the next refresh cannot miss rows or tombstones."
+      - "Person, Schedule, and Commitment tabs keep independent surface_key progress unless Railway returns a full main-feed scope and Android explicitly refreshes all surfaces."
+
+  - name: person_action_mutation_queue
+    room_only: true
+    # Android outbox for user mutations on backend-computed person action
+    # items. Backend ack is canonical; this table exists for offline retry and
+    # optimistic UI only.
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+      - name: client_mutation_id
+        type: uuid
+        nullable: false
+        # Stable across retries and sent to Railway as the idempotency key.
+      - name: action_item_id
+        type: text
+        nullable: false
+      - name: user_id
+        type: uuid
+        nullable: false
+      - name: mutation
+        type: text
+        nullable: false
+        # enum: complete | dismiss | snooze | undo | feedback
+      - name: payload_json
+        type: text
+        nullable: false
+      - name: created_at
+        type: timestamptz
+        nullable: false
+      - name: last_attempt_at
+        type: timestamptz
+        nullable: true
+      - name: retry_count
+        type: int
+        nullable: false
+        default: "0"
+      - name: next_attempt_at
+        type: timestamptz
+        nullable: true
+      - name: last_error_code
+        type: text
+        nullable: true
+      - name: last_error_retryable
+        type: boolean
+        nullable: true
+      - name: last_error_client_action
+        type: text
+        nullable: true
+        # retry_later | refresh_action | fix_input | discard_local_mutation | login
+      - name: sync_status
+        type: text
+        nullable: false
+        default: "'pending'"
+        # enum: pending | syncing | synced | failed
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+    indexes:
+      - columns: [user_id, client_mutation_id]
+        type: btree
+        unique: true
+      - columns: [user_id, sync_status, updated_at]
+        type: btree
+      - columns: [user_id, sync_status, next_attempt_at]
+        type: btree
+      - columns: [user_id, action_item_id]
+        type: btree
+
   - name: persons_enrichment
     room_only: true
     # PIPA invariant: 연락처 데이터는 온디바이스 전용. Railway/Supabase로 전송 절대 금지.
@@ -517,6 +1215,76 @@ relationships:
     on_delete: set_null
     # 체인의 중간 node가 하드 삭제되더라도 tail node는 유지. 일반적으로 EDIT-007은 예전 row를 soft delete(deleted_at)로 보존하므로 이 FK는 cascade 대상 아님.
 
+database_functions:
+  - name: claim_person_action_recompute_jobs
+    owner: backend_service_role_only
+    purpose: "Atomically claim action recompute jobs across concurrent Railway workers without duplicate processing or missing jobs."
+    args:
+      p_limit: int
+      p_worker_id: text
+      p_shard_key?: int
+      p_user_id?: uuid
+    returns: "person_action_recompute_jobs[]"
+    contract:
+      - "p_limit is clamped to 1..200."
+      - "Eligible rows are pending/failed with next_attempt_at <= now() or processing rows whose locked_until expired."
+      - "Selection uses FOR UPDATE SKIP LOCKED, ordered by priority, next_attempt_at NULLS FIRST, input_watermark, attempt_count, created_at."
+      - "The claim statement sets status='processing', locked_by=p_worker_id, claimed_at=now(), locked_until=now()+configured lease, attempt_count=attempt_count+1 before returning rows."
+      - "A worker cannot process rows it did not claim by id+locked_by+unexpired locked_until."
+      - "Fairness enforcement must prevent one user from exceeding the configured rolling claim share while other eligible users have backlog."
+
+  - name: complete_person_action_recompute_job
+    owner: backend_service_role_only
+    purpose: "Atomically publish computed action rows and advance feed watermark only if the claimed job is still current."
+    args:
+      p_job_id: uuid
+      p_worker_id: text
+      p_action_rows_json: text
+      p_deleted_ids_json: text
+      p_input_watermarks_json: text
+      p_server_watermark: timestamptz
+    returns: "person_action_feed_watermarks"
+    contract:
+      - "The function validates job id, locked_by, and unexpired locked_until."
+      - "Upsert person_action_items and deleted/superseded tombstones in the same transaction as person_action_feed_watermarks."
+      - "Advance server_watermark only when p_server_watermark and the job input_watermark are not older than the current feed watermark state."
+      - "If a newer recompute already completed, mark the job completed without overwriting newer rows or watermark metadata."
+      - "On success, set recompute_state='caught_up' when no newer pending eligible job exists for the user; otherwise keep pending/backlog state visible."
+
+  - name: fail_person_action_recompute_job
+    owner: backend_service_role_only
+    purpose: "Close retry/dead-letter paths without leaving an unrecoverable processing lock."
+    args:
+      p_job_id: uuid
+      p_worker_id: text
+      p_error_code: text
+      p_retryable: boolean
+      p_client_action?: text
+      p_incident_id?: text
+    returns: "person_action_recompute_jobs"
+    contract:
+      - "Retryable failures set status='failed', next_attempt_at with exponential backoff+jitter, locked_until=NULL, and last_error_retryable=true."
+      - "Non-retryable failures set status='dead_letter', last_error_client_action, incident_id, locked_until=NULL, and feed recompute_state='degraded'."
+      - "Every dead_letter row has a requeue path and either a user repair action or an operator incident id."
+
+  - name: requeue_person_action_recompute_job
+    owner: backend_service_role_only
+    purpose: "Operator/service-role recovery path for dead_letter, failed, or stale processing person-action recompute jobs."
+    args:
+      p_job_id: uuid
+      p_actor: text
+      p_reason: text
+      p_reset_attempts?: boolean
+    returns: "person_action_recompute_jobs"
+    contract:
+      - "The function validates the job id and user scope with service-role privileges only."
+      - "Eligible statuses are dead_letter, failed, or processing with expired locked_until."
+      - "The function sets status='pending', locked_by=NULL, locked_until=NULL, claimed_at=NULL, next_attempt_at=now(), and updated_at=now()."
+      - "If p_reset_attempts is true, attempt_count resets to 0; otherwise attempts are preserved for audit."
+      - "The affected person_action_feed_watermarks row is set to recompute_state='pending' or remains degraded until a later complete_person_action_recompute_job catches up."
+      - "The recovery audit stores actor/reason/incident metadata only; raw source content, tokens, emails, transcripts, paths, signed URLs, and raw model output are forbidden."
+      - "Deleting a dead_letter row or directly marking the feed caught_up is not a valid recovery path."
+
 derived_models:
   SourceStatusProjection:
     owner: android_client_only
@@ -563,9 +1331,61 @@ derived_models:
       - "dirty queue가 비어 있으면 현재 source graph를 전체 재검증한다. 별도 person_index_source_state fingerprint cache는 active schema에 두지 않는다"
       - "person_interactions의 canonical grouping key는 person_id이며 raw/commitment counterparty_ref fallback은 projection input으로 쓰지 않는다"
 
+  PersonActionFeed:
+    owner: backend_railway_canonical_projection_android_cache
+    description: "Person/Schedule/Commitment 3탭이 기본으로 읽는 backend-computed person action feed. source history가 아니라 nearest future action을 렌더링한다."
+    inputs:
+      - "backend durable commitments action rows where deleted_at IS NULL and action_state is active"
+      - "backend durable calendar_events for today plus next 7 days"
+      - "source_event_participants, commitment_participants, person_interactions"
+      - "source_status for reconnect/stale-source actions"
+      - "person_memory semantic/context rows and content_hash freshness as compact context signals"
+      - "backend person_action_item_user_states for completed/dismissed/snoozed override"
+      - "user_corrections and confirmed match/rejection state"
+      - "person_action_recompute_jobs as durable recompute trigger queue"
+      - "person_action_feed_watermarks as server-side delta source of truth"
+    robustness_anchors:
+      durable_acceptance: "Source/commitment/calendar/person/correction writes that can affect actions must commit source facts and enqueue or coalesce person_action_recompute_jobs before returning HTTP 200/201/204."
+      recompute_idempotency: "person_action_recompute_jobs unique(user_id, scope_kind, scope_id, input_watermark) plus stable person_action_items action_version/input_watermarks_json make recompute replay-safe."
+      delta_completeness: "person_action_feed_watermarks.server_watermark, person_action_items.deleted_at, and PersonActionFeedResponse.deleted_ids are the no-missing-data contract for changed_since clients."
+      mutation_replay: "person_action_item_user_states.client_mutation_id and person_action_mutation_queue.client_mutation_id dedupe retrying complete/dismiss/snooze/feedback writes."
+      mutation_ledger: "person_action_mutation_ledger stores payload_hash and replay result for every action mutation/feedback client_mutation_id so divergent duplicate payloads become 409 idempotency_conflict without double side effects."
+      latency_boundary: "Android person_action_item_cache supports fast cached paint, but person_action_sync_state.server_watermark/recompute_state must expose stale/pending/degraded state instead of local action generation."
+      worker_isolation: "person_action_recompute_jobs must be drained by a dedicated person-action-recompute Railway worker lane; production web/API processes do not run this queue by default."
+      atomic_claim: "claim_person_action_recompute_jobs and complete_person_action_recompute_job are the only supported claim/publish path; ad hoc SELECT/UPDATE worker loops are dead contracts."
+      capacity_fairness: "priority, shard_key, locked_by, claimed_at, locked_until, and coalesced_count enforce 1000-user year-1 drain SLO, lease reclaim, and noisy-user isolation."
+      retention_boundary: "deleted/superseded tombstones are retained for 90 days; changed_since outside that window must become 409 full_refresh rather than a partial delta."
+      observability_boundary: "Action-feed counters measure recompute backlog, watermark lag, delta gaps, retries, and stale-cache visibility without raw content payloads."
+      recovery_closure: "person_action_feed_watermarks.recovery_actions_json, person_action_recompute_jobs.incident_id, and person_action_mutation_queue.last_error_client_action ensure every stale/degraded/failed state has auto retry, user repair, operator requeue, or explicit discard."
+    forbidden_inputs:
+      - "memory.md runtime parsing"
+      - "full email bodies, transcripts, OCR text, audio bytes, raw_model_text"
+      - "source_artifacts markdown_original body"
+    rules:
+      - "Backend PersonActionItem rows are canonical product projections but not source facts. Deleting Android cache rows must not delete commitments, calendar_events, source graph rows, raw events, or person memory."
+      - "status='active' rows are the only default rows on the three main tabs."
+      - "Completed/cancelled/deleted commitment rows and decision-only facts do not produce default active actions unless they create a concrete review/confirm next action."
+      - "Person tab caps one primary active next action per person by default."
+      - "Schedule tab defaults to attend/prepare/confirm rows for today plus next 7 days, not a broad historical timeline."
+      - "Commitment tab defaults to open obligations grouped by now/mine/waiting/review, not source or item-type history."
+      - "Evidence refs are bounded drill-down handles; they must not include full originals or storage paths."
+      - "If a stable action id has backend user state, recomputation preserves that state until the underlying canonical evidence is materially edited or superseded."
+      - "Android must not locally regenerate action rows when backend action endpoints fail. It renders stale person_action_item_cache rows and pending source/mutation state."
+      - "Every accepted source/correction/commitment/calendar/person write that can affect actions must enqueue or coalesce a person_action_recompute_jobs row before returning durable success."
+      - "Backend accepts Android local-origin source rows as durable source input, but all action ranking/grouping/generation runs on Railway after upload and recompute."
+      - "Recompute workers must use atomic claim/complete functions with FOR UPDATE SKIP LOCKED, lease expiry, and compare-and-swap watermarks."
+      - "One noisy user cannot monopolize worker capacity while other eligible users have backlog; fairness can throttle claim count but cannot drop jobs."
+      - "GET /v1/person_action_items changed_since responses must include changed rows, deleted_ids, server_watermark, input_watermarks, and recompute_state from one snapshot."
+      - "GET /v1/person_action_items includes capacity_state/backlog_lag_seconds when the feed is not normal, and returns 409 full_refresh for changed_since older than the tombstone window."
+      - "Android advances person_action_sync_state.server_watermark only after applying all snapshot pages, changed rows, and deleted_ids in one Room transaction."
+      - "Mutation outbox retries are keyed by client_mutation_id; duplicate payloads are safe, divergent duplicate payloads fail with idempotency_conflict."
+      - "Backend mutation idempotency is backed by person_action_mutation_ledger, not by inspecting only the latest person_action_item_user_states row."
+      - "No failed/stale/degraded/backlog person action state may persist without a recovery action: retry_later, full_refresh, source repair, action refetch, user input fix, operator requeue, app update, support, or explicit discard."
+      - "Action-feed metrics are async/batched/off-path and must not include raw content."
+
   PersonMemoryArtifact:
     owner: android_generated_backend_mirrored
-    description: "사람별 compact context artifact. canonical DB를 대체하지 않는 재생성 가능한 people/{person_id}/memory.md"
+    description: "사람별 compact business context artifact. Backend PersonActionItem reasoning context가 될 수 있지만 canonical DB나 UI source of truth를 대체하지 않는 재생성 가능한 people/{person_id}/memory.md"
     local_path: "person_memory/<user_hash>/<person_id>/memory.md"
     supabase_storage:
       bucket: person-memory
@@ -586,7 +1406,8 @@ derived_models:
       - "raw_model_text"
     rules:
       - "memory.md는 compact skill처럼 structured DB에서 파생된 요약 artifact이며 source of truth가 아니다"
-      - "UI 렌더링, source 계산, deterministic/semantic matching, PersonInteractionIndexWorker는 memory.md 생성·업로드 성공에 의존하지 않는다"
+      - "UI 렌더링, source 계산, deterministic/semantic matching, PersonInteractionIndexWorker, backend action recomputation은 memory.md 생성·업로드 성공에 의존하지 않는다"
+      - "Backend action recomputation은 person_memory_semantic_index나 content_hash freshness를 context signal로 사용할 수 있지만 Android UI는 memory.md 본문을 runtime parse하지 않는다"
       - "person_id는 local path, Supabase object path, object metadata, Markdown frontmatter가 모두 동일해야 하며 불일치 시 업로드 실패"
       - "Profile/Work Context/Matching Notes의 사실 bullet은 source ref를 포함해야 한다"
       - "email/phone/confirmed exact alias만 person_identities deterministic anchor가 될 수 있고, 'Acme 대표' 같은 role/title/company 문구는 profile fact로만 기록한다"
@@ -594,7 +1415,7 @@ derived_models:
 
 migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
-  - "Room 전용 엔티티 (Supabase 없음): EmailBody, source_artifacts, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only. source_artifacts는 app-private Markdown 원문 archive의 metadata만 저장하며, 파일 본문과 local_path는 네트워크 DTO에 포함 금지. Transcript는 voice pipeline에서 제거되었고, 저장되는 voice/meeting audio text는 commitment.quote(<=100 chars)와 raw_ingestion_events.event_snippet뿐이다. meeting transcript 원문은 Android local archive와 Recordings/BeCalm Meetings/ 복사본에만 보존된다"
+  - "Room 전용 엔티티 (Supabase 없음): EmailBody, source_artifacts, person_action_item_cache, person_action_sync_state, person_action_mutation_queue, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 및 offline/outbox 목적으로 로컬 only. person_action_item_cache는 Railway /v1/person_action_items 응답 cache이며 Android가 생성·랭킹하지 않는다. person_action_sync_state는 빈 피드/삭제-only 피드/부분 pagination crash에서도 server_watermark를 안전하게 전진시키는 surface별 delta 상태다. source_artifacts는 app-private Markdown 원문 archive의 metadata만 저장하며, 파일 본문과 local_path는 네트워크 DTO에 포함 금지. Transcript는 voice pipeline에서 제거되었고, 저장되는 voice/meeting audio text는 commitment.quote(<=100 chars)와 raw_ingestion_events.event_snippet뿐이다. meeting transcript 원문은 Android local archive와 Recordings/BeCalm Meetings/ 복사본에만 보존된다"
   - "Today/Settings의 source status는 별도 Room 테이블이 아니라 로컬 파생 projection이다. source status row/chip을 서버 API 또는 단일 DB row에서 직접 읽는 계약은 없다"
   - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase durable row shape를 기본 mirror하되, sync_status·retry_count·last_attempt_at·quarantine_reason와 counterparty_ref는 Android-side tracking/seed 컬럼으로 Supabase durable table에는 존재하지 않음"
   - "Supabase 쓰기 경로: Android → Railway POST /v1/raw_ingestion_events:batch → Supabase INSERT. Android에서 Supabase REST 직접 쓰기 없음"
@@ -602,6 +1423,8 @@ migration_notes:
   - "relation intelligence 전환: Supabase와 Android Room은 canonical person/relation mirror(`persons`, `person_identities`, `source_event_participants`, `commitment_participants`, `person_interactions`)를 공유한다. Android-only sync/projection/cache 컬럼은 허용하지만 backend-managed source wiring의 기준 key는 `person_id`다"
   - "person_index_dirty_sources는 Android Room-only incremental projection queue다. Supabase mirror 대상이 아니며, source_event_participants/commitment_participants/commitments 쓰기 이후 changed source key만 기록해 PersonInteractionIndexWorker가 전체 source graph를 매번 scan하지 않도록 한다."
   - "person memory artifact: 별도 Supabase table을 추가하지 않는다. Android ProfileMemoryWorker가 person_id별 memory.md를 비동기 생성하고 Railway `PUT /v1/persons/{person_id}/memory`가 Supabase Storage bucket `person-memory/{user_id}/{person_id}/memory.md`로 mirror한다. Storage object metadata와 Markdown frontmatter의 person_id가 path person_id와 일치해야 한다."
+  - "person action feed: Backend Railway가 `person_action_items`, `person_action_item_user_states`, bounded evidence refs를 canonical product projection으로 소유한다. Android Room은 `person_action_item_cache`, `person_action_sync_state`, `person_action_mutation_queue`만 보유하며, 3탭 UI는 이 cache를 렌더링한다. Android local DB가 source origin인 경우에도 backend durable commit과 recomputation 전까지 action feed에는 반영하지 않고 stale/pending-context 상태만 표시한다. Railway `GET /v1/person_action_items`, `PATCH /v1/person_action_items/{id}`, `POST /v1/person_action_items/{id}:feedback`가 active 계약이다."
+  - "person action reliability: Backend는 `person_action_recompute_jobs`와 `person_action_feed_watermarks`, `claim_person_action_recompute_jobs`/`complete_person_action_recompute_job`/`fail_person_action_recompute_job` RPC를 추가해 recomputation trigger, retry, lock reclaim, delta watermark를 durable하게 관리한다. person-action-recompute는 dedicated Railway worker queue이며 web/API process의 기본 background task가 아니다. Android는 `person_action_sync_state.server_watermark`를 terminal snapshot apply transaction 이후에만 갱신하고, `person_action_mutation_queue.client_mutation_id`로 complete/dismiss/snooze/feedback 재시도를 멱등 처리한다. deleted/superseded action row는 90일 tombstone window 동안 `person_action_items.deleted_at`으로 보존되어 changed_since client가 `deleted_ids`를 받을 수 있어야 하며, 더 오래된 changed_since는 409 full_refresh로 닫는다."
   - "raw_ingestion_events / commitments의 상대방 seed 필드는 `counterparty_ref`로 통일한다. Android Room, DTO 내부 모델, Railway API input 모두 이 이름을 사용한다. People/PersonDetail UI 모델과 route argument는 `person_id`만 사용한다."
   - "`person_ref`는 Vertex/LLM item output schema와 Android local contacts enrichment cache(`persons_enrichment.person_ref`)의 legacy-compatible anchor 이름으로만 허용된다. raw/commitment durable schema나 People/PersonDetail primary projection에서 `person_ref` grouping/fallback은 제거됐다."
   - "commitments.status 컬럼 → action_state 컬럼으로 대체: enum이 pending|done|overdue에서 pending|reminded|followed_up|completed로 변경. Room 마이그레이션: ALTER TABLE commitments RENAME COLUMN status TO action_state; UPDATE commitments SET action_state='pending' WHERE action_state='done' OR action_state='overdue'"

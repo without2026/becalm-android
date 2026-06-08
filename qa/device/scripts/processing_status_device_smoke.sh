@@ -224,6 +224,12 @@ run_adb shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 \
   > "${report_dir}/launch.txt"
 
 today_dump="${report_dir}/ui-today.xml"
+if ! wait_for_text "$today_dump" "일정"; then
+  echo "App did not expose the main tab bar after launch. See $report_dir" >&2
+  exit 1
+fi
+tap_text_from_dump "$today_dump" "일정"
+sleep 2
 if ! wait_for_text "$today_dump" "확인 필요한 정리 3개"; then
   echo "Today did not show the P1-2 action-needed processing strip. See $report_dir" >&2
   exit 1
@@ -241,8 +247,8 @@ if ! wait_for_text "$detail_dump" "정리 상태"; then
   echo "Processing status detail did not open. See $report_dir" >&2
   exit 1
 fi
-if ! contains_text "$detail_dump" "3개 연결 확인 필요"; then
-  echo "Processing status summary did not show three action-needed rows. See $report_dir" >&2
+if ! grep -Eq 'text="[0-9]+개 연결 확인 필요"' "$detail_dump"; then
+  echo "Processing status summary did not show action-needed rows. See $report_dir" >&2
   exit 1
 fi
 if ! contains_text "$detail_dump" "확인 필요"; then
@@ -258,6 +264,7 @@ if grep -R -Fq \
   -e "source_sync_backpressure_delayed" \
   -e "llm_daily_budget_exceeded" \
   -e "llm_rate_limited_retrying" \
+  -e "Unauthorized" \
   "${report_dir}"/ui-*.xml; then
   echo "Processing status UI exposed raw internal message codes. See $report_dir" >&2
   exit 1

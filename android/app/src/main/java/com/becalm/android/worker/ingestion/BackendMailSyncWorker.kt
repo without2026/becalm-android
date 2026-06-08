@@ -5,11 +5,14 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmError
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
@@ -17,12 +20,15 @@ import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.SOURCE_CONNECTION_STATUS_NEEDS_REAUTH
 import com.becalm.android.data.repository.SourceSyncJobPollResult
 import com.becalm.android.data.repository.SourceSyncJobPoller
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.UserCorrectionRepository
-import com.becalm.android.data.repository.toSourceSyncJobSnapshot
+import com.becalm.android.data.repository.isSyncableBackendSourceConnectionStatus
+import com.becalm.android.data.repository.toSnapshot
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.WorkScheduler
@@ -33,15 +39,14 @@ import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import retrofit2.HttpException
 
 /**
  * Periodically nudges backend-managed mail providers so new Gmail / Outlook Mail
  * messages are discovered without user interaction.
  *
  * Naver / Daum IMAP remain local workers. This worker only calls Railway's
- * `/v1/mail_sources:sync` endpoint for OAuth providers whose local connection state
- * is marked backend-managed.
+ * `source_connections/{id}:sync` endpoint for OAuth providers whose local connection
+ * state is marked backend-managed.
  */
 @HiltWorker
 public class BackendMailSyncWorker @AssistedInject constructor(
@@ -51,6 +56,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
     private val apiProvider: Provider<RailwayApi>,
     private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
+    private val sourceConnectionRepositoryProvider: Provider<SourceConnectionRepository>,
     private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
     private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
     private val userCorrectionRepositoryProvider: Provider<UserCorrectionRepository>,
@@ -69,7 +75,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
         WorkerRunGuard(
             tag = TAG,
             runAttemptCount = runAttemptCount,
-            maxRetries = MAX_RETRIES,
+            maxRetries = null,
             processingPauseGate = processingPauseGate,
             logger = logger,
         ).terminalResultOrNull()?.let { return@withContext it }
@@ -134,57 +140,78 @@ public class BackendMailSyncWorker @AssistedInject constructor(
                     rawSourceType = provider.sourceType,
                     resetMirrorCursorBeforeRefresh = true,
                 ),
-                trigger = { triggerMailSync(provider) },
+                trigger = {
+                    triggerConnectionScopedMailSync(
+                        userId = userId,
+                        sourceType = provider.sourceType,
+                    )
+                },
             ),
         )
     }
 
-    private suspend fun triggerMailSync(provider: MailProviderSpec): ServerBackedTriggerResult =
-        try {
-            val response = apiProvider.get().syncMailSource(provider = provider.sourceType)
-            if (!response.isSuccessful) {
-                val message = "HTTP ${response.code()}"
-                ServerBackedTriggerResult.Failure(
-                    message = message,
-                    retryable = response.code() == 429 || response.code() in 500..599,
-                )
-            } else {
-                val body = response.body()
-                    ?: return ServerBackedTriggerResult.Failure("Empty response", retryable = true)
-                when (
-                    val pollResult = SourceSyncJobPoller(
-                        api = apiProvider.get(),
-                        logger = logger,
-                    ).awaitTerminal(provider.sourceType, body.toSourceSyncJobSnapshot())
-                ) {
-                    is SourceSyncJobPollResult.Completed -> {
-                        logger.d(TAG, "backend mail sync success source=${provider.sourceType} synced=${pollResult.synced}")
-                        ServerBackedTriggerResult.Success(syncedCount = pollResult.synced)
-                    }
-                    is SourceSyncJobPollResult.Pending -> ServerBackedTriggerResult.Pending(
-                        message = pollResult.message,
-                        retryAfterSeconds = pollResult.retryAfterSeconds,
-                        reasonCode = pollResult.reasonCode,
-                        syncedCount = pollResult.synced,
-                    )
-                    is SourceSyncJobPollResult.Failed -> ServerBackedTriggerResult.Failure(
-                        message = pollResult.message,
-                        retryable = pollResult.retryable,
-                    )
+    private suspend fun triggerConnectionScopedMailSync(
+        userId: String,
+        sourceType: String,
+    ): ServerBackedTriggerResult {
+        val connections = when (val refresh = sourceConnectionRepositoryProvider.get().refresh(userId)) {
+            is BecalmResult.Success -> {
+                val mailConnections = refresh.value.mailConnectionsFor(sourceType)
+                if (mailConnections.any { it.status == SOURCE_CONNECTION_STATUS_NEEDS_REAUTH }) {
+                    return ServerBackedTriggerResult.Failure(SOURCE_CONNECTION_STATUS_NEEDS_REAUTH, retryable = false)
                 }
+                mailConnections.syncableMailConnections()
             }
-        } catch (error: Exception) {
-            when (error) {
-                is HttpException -> ServerBackedTriggerResult.Failure(
-                    message = "HTTP ${error.code()}",
-                    retryable = error.code() == 429 || error.code() in 500..599,
+            is BecalmResult.Failure -> {
+                val message = refresh.error.toMailSyncMessage()
+                logger.w(TAG, "source connection refresh failed before backend mail sync: $message")
+                return ServerBackedTriggerResult.Failure(
+                    message = message,
+                    retryable = refresh.error is BecalmError.Network || refresh.error is BecalmError.ServerError,
                 )
-                else -> {
-                    logger.w(TAG, "backend mail sync transient failure source=${provider.sourceType}", error)
-                    ServerBackedTriggerResult.Failure(message = "Network error", retryable = true)
-                }
             }
         }
+        if (connections.isEmpty()) {
+            return ServerBackedTriggerResult.Failure("No source connection for $sourceType", retryable = false)
+        }
+
+        val jobs = mutableListOf<Pair<SourceConnectionEntity, com.becalm.android.data.remote.dto.SourceSyncJobResponse>>()
+        for (connection in connections) {
+            val response = apiProvider.get().syncSourceConnection(connection.id)
+            if (!response.isSuccessful) {
+                return ServerBackedSyncErrorMapping.triggerFailureFor(response)
+            }
+            val body = response.body()
+                ?: return ServerBackedTriggerResult.Failure("Empty response", retryable = true)
+            jobs += connection to body
+        }
+
+        var synced = 0
+        for ((connection, body) in jobs) {
+            when (
+                val pollResult = SourceSyncJobPoller(
+                    api = apiProvider.get(),
+                    logger = logger,
+                ).awaitTerminal(sourceType, body.toSnapshot())
+            ) {
+                is SourceSyncJobPollResult.Completed -> {
+                    synced += pollResult.synced
+                    logger.d(TAG, "backend mail connection sync success source=$sourceType connectionId=${connection.id} synced=${pollResult.synced}")
+                }
+                is SourceSyncJobPollResult.Pending -> return ServerBackedTriggerResult.Pending(
+                    message = pollResult.message,
+                    retryAfterSeconds = pollResult.retryAfterSeconds,
+                    reasonCode = pollResult.reasonCode,
+                    syncedCount = pollResult.synced,
+                )
+                is SourceSyncJobPollResult.Failed -> return ServerBackedTriggerResult.Failure(
+                    message = pollResult.message,
+                    retryable = pollResult.retryable,
+                )
+            }
+        }
+        return ServerBackedTriggerResult.Success(syncedCount = synced)
+    }
 
     private sealed class MailProviderSpec(
         val sourceType: String,
@@ -195,6 +222,32 @@ public class BackendMailSyncWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "BackendMailSyncWorker"
-        private const val MAX_RETRIES: Int = 5
     }
+}
+
+private fun List<SourceConnectionEntity>.mailConnectionsFor(sourceType: String): List<SourceConnectionEntity> =
+    filter { connection -> connection.toMailSourceType() == sourceType }
+
+private fun List<SourceConnectionEntity>.syncableMailConnections(): List<SourceConnectionEntity> =
+    filter { connection -> isSyncableBackendSourceConnectionStatus(connection.status) }
+
+private fun SourceConnectionEntity.toMailSourceType(): String? =
+    when {
+        provider == "google" && capability == "mail" -> SourceType.GMAIL
+        provider == "outlook" && capability == "mail" -> SourceType.OUTLOOK_MAIL
+        else -> null
+    }
+
+private fun BecalmError.toMailSyncMessage(): String = when (this) {
+    is BecalmError.Network -> "Network error HTTP $code: $message"
+    is BecalmError.Unauthorized -> "Unauthorized"
+    is BecalmError.RateLimited -> "Rate limited (retryAfter=${retryAfterSeconds}s)"
+    is BecalmError.ServerError -> "Server error HTTP $code"
+    is BecalmError.Validation -> "Validation error field=$field: $message"
+    is BecalmError.Io -> "IO error: $message"
+    is BecalmError.Permission -> "Permission denied: $permission"
+    is BecalmError.NotFound -> "Not found: $resource"
+    is BecalmError.Cancelled -> "Cancelled"
+    is BecalmError.ExtractorUnavailable -> "Extractor unavailable: reason=$reason"
+    is BecalmError.Unknown -> "Unknown: ${throwable.message}"
 }

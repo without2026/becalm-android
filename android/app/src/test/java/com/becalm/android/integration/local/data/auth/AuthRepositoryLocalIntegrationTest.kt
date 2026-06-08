@@ -12,6 +12,9 @@ import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
+import com.becalm.android.data.local.db.entity.PersonActionMutationQueueEntity
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
 import com.becalm.android.data.local.secure.OAuthCredentialStore
@@ -290,6 +293,9 @@ class AuthRepositoryLocalIntegrationTest {
         databaseProvider.current().commitmentDao().insert(
             commitment(id = "wipe-row", userId = USER_ID),
         )
+        databaseProvider.current().personActionDao().upsertActionItems(listOf(personActionItem()))
+        databaseProvider.current().personActionDao().upsertSyncState(personActionSyncState())
+        databaseProvider.current().personActionDao().upsertMutation(personActionMutation())
         enrichmentRepository.upsert(
             PersonEnrichmentEntity(
                 personRef = "+821012345678",
@@ -319,6 +325,9 @@ class AuthRepositoryLocalIntegrationTest {
 
         databaseProvider.ensureOpenFor(hash)
         assertEquals(0, databaseProvider.current().commitmentDao().observeAllForUser(USER_ID).first().size)
+        assertEquals(0, databaseProvider.current().personActionDao().observeActiveForSurface(USER_ID, "onboarding").first().size)
+        assertNull(databaseProvider.current().personActionDao().observeSyncState(USER_ID, "onboarding", "active").first())
+        assertEquals(0, databaseProvider.current().personActionDao().observePendingMutationCount(USER_ID).first())
         assertEquals(0, enrichmentRepository.observeAll().first().size)
         coVerify { authClient.signOut(session.accessToken) }
     }
@@ -370,6 +379,76 @@ class AuthRepositoryLocalIntegrationTest {
         createdAt = Instant.parse("2026-04-23T01:00:00Z"),
         updatedAt = Instant.parse("2026-04-23T01:00:00Z"),
     )
+
+    private fun personActionItem(): PersonActionItemCacheEntity =
+        PersonActionItemCacheEntity(
+            id = "pa-source-repair",
+            userId = USER_ID,
+            personId = null,
+            personDisplayName = null,
+            personSortKey = null,
+            surfacesCsv = "onboarding,source_repair",
+            actionKind = "reconnect_source",
+            status = "active",
+            title = "Work Gmail 재연결",
+            primaryVerb = "재연결",
+            shortReason = "gmail 연결 인증이 필요합니다",
+            commitmentId = null,
+            calendarEventId = null,
+            sourceEventId = null,
+            sourceType = "gmail",
+            sourceRef = "connection-1",
+            dueAt = null,
+            dueHint = null,
+            dueIsApproximate = false,
+            staleAfter = Instant.parse("2026-06-04T02:00:00Z"),
+            urgencyScore = 96.0,
+            importanceScore = 95.0,
+            confidence = 1.0,
+            reasonCodesCsv = "source_health,source:gmail,source_status:needs_reauth,retryable:user_action",
+            inputWatermark = Instant.parse("2026-06-03T02:00:00Z"),
+            serverWatermark = Instant.parse("2026-06-03T03:00:00Z"),
+            computedAt = Instant.parse("2026-06-03T02:00:01Z"),
+            updatedAt = Instant.parse("2026-06-03T02:00:02Z"),
+            snoozedUntil = null,
+            completedAt = null,
+            dismissedAt = null,
+            primaryEvidenceKind = "source_status",
+            primaryEvidenceId = "connection-1",
+            primaryEvidenceSourceRef = "connection-1",
+            primaryEvidenceOccurredAt = Instant.parse("2026-06-03T02:00:00Z"),
+            primaryEvidenceLabel = "Work Gmail",
+            primaryEvidenceQuote = "provider token expired",
+        )
+
+    private fun personActionSyncState(): PersonActionSyncStateEntity =
+        PersonActionSyncStateEntity(
+            userId = USER_ID,
+            surfaceKey = "onboarding",
+            status = "active",
+            serverWatermark = Instant.parse("2026-06-03T03:00:00Z"),
+            recomputeState = "caught_up",
+            capacityState = "normal",
+            lastSyncedAt = Instant.parse("2026-06-03T03:00:01Z"),
+            updatedAt = Instant.parse("2026-06-03T03:00:02Z"),
+        )
+
+    private fun personActionMutation(): PersonActionMutationQueueEntity =
+        PersonActionMutationQueueEntity(
+            id = "mutation-1",
+            userId = USER_ID,
+            actionItemId = "pa-source-repair",
+            clientMutationId = "android:mutation-1",
+            mutationKind = "state_patch",
+            payloadJson = """{"status":"completed","updated_at":"2026-06-03T03:00:00Z"}""",
+            syncStatus = "pending",
+            attemptCount = 0,
+            lastErrorCode = null,
+            lastErrorClientAction = null,
+            nextAttemptAt = null,
+            createdAt = Instant.parse("2026-06-03T03:00:00Z"),
+            updatedAt = Instant.parse("2026-06-03T03:00:00Z"),
+        )
 
     private class InMemorySessionStore : SupabaseSessionStore {
         private val flow = MutableSharedFlow<SupabaseSession?>(extraBufferCapacity = 1)

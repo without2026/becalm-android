@@ -205,6 +205,45 @@ class RawIngestionRepositoryLocalIntegrationTest {
     }
 
     @Test
+    fun `refreshSince discards stored cursor when local raw mirror is empty`() = runTest {
+        val cursorStore = SyncCursorStoreImpl(
+            dataStore = LocalIntegrationSupport.prefsDataStore("raw-mirror-empty-cursor-reset"),
+        )
+        cursorStore.setCursor("raw_ingestion_events:v4_user:user-1:source_event_anchor:gmail", "ks1:stale")
+        val cursorBackedRepository = cursorBackedRepository(cursorStore)
+        coEvery {
+            api.getRawIngestionEvents(
+                cursor = null,
+                limit = any(),
+                since = null,
+                sourceType = SourceType.GMAIL,
+            )
+        } returns rawPage(1, hasMore = false)
+
+        val result = cursorBackedRepository.refreshSince(USER_ID, SourceType.GMAIL, since = null)
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(1, (result as BecalmResult.Success).value.fetched)
+        assertEquals("ks1:page-1", cursorStore.observeCursor("raw_ingestion_events:v4_user:user-1:source_event_anchor:gmail").first())
+        coVerify(exactly = 1) {
+            api.getRawIngestionEvents(
+                cursor = null,
+                limit = any(),
+                since = null,
+                sourceType = SourceType.GMAIL,
+            )
+        }
+        coVerify(exactly = 0) {
+            api.getRawIngestionEvents(
+                cursor = "ks1:stale",
+                limit = any(),
+                since = null,
+                sourceType = SourceType.GMAIL,
+            )
+        }
+    }
+
+    @Test
     fun `uploadBatch sends source participants for non-email counterparty seed`() = runTest {
         val requestSlot = slot<BatchUploadRequest>()
         coEvery { api.batchUploadRawEvents(request = capture(requestSlot)) } returns Response.success(

@@ -37,6 +37,8 @@ internal object PersonsUiProjector {
                 query.isBlank() ||
                     projection.displayName?.contains(query, ignoreCase = true) == true ||
                     projection.nickname?.contains(query, ignoreCase = true) == true ||
+                    projection.jobTitle?.contains(query, ignoreCase = true) == true ||
+                    projection.companyName?.contains(query, ignoreCase = true) == true ||
                     projection.personId.contains(query, ignoreCase = true)
             }
             .map(PersonsUiProjector::toPersonRow)

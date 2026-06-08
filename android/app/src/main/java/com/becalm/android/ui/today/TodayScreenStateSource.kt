@@ -9,6 +9,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
+import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
@@ -49,6 +50,7 @@ internal data class TodaySnapshot(
     val commitments: List<TodayCommitmentRow>,
     val calendarEvents: List<CalendarEventEntity>,
     val scheduleActions: List<PersonActionItemCacheEntity>,
+    val scheduleActionSyncState: PersonActionSyncStateEntity?,
     val scheduleLinks: List<ScheduleEventLinkEntity>,
     val sourceStatuses: List<SourceStatus>,
     val processingStates: List<ProcessingSourceState>,
@@ -68,7 +70,13 @@ private data class TodayRowsSnapshot(
     val commitments: List<TodayCommitmentRow>,
     val calendarEvents: List<CalendarEventEntity>,
     val scheduleActions: List<PersonActionItemCacheEntity>,
+    val scheduleActionSyncState: PersonActionSyncStateEntity?,
     val scheduleLinks: List<ScheduleEventLinkEntity>,
+)
+
+private data class TodayScheduleActionSnapshot(
+    val actions: List<PersonActionItemCacheEntity>,
+    val syncState: PersonActionSyncStateEntity?,
 )
 
 internal class TodayScreenStateSource @Inject constructor(
@@ -100,7 +108,7 @@ internal class TodayScreenStateSource @Inject constructor(
     fun observeUiState(
         userIdFlow: StateFlow<String?>,
         refreshingFlow: Flow<Boolean>,
-        scheduleRangeFilterFlow: Flow<ScheduleRangeFilter> = flowOf(ScheduleRangeFilter.ALL),
+        scheduleRangeFilterFlow: Flow<ScheduleRangeFilter> = flowOf(ScheduleRangeFilter.NEXT_7_DAYS),
     ): Flow<TodayUiState> {
         val userDayFlow = combine(userIdFlow, todayFlow(), scheduleRangeFilterFlow) { userId, today, filter ->
             ScheduleQueryScope(userId = userId, today = today, rangeFilter = filter)
@@ -127,13 +135,22 @@ internal class TodayScreenStateSource @Inject constructor(
             val userId = scope.userId
             val repository = personActionRepository
             if (userId == null || repository == null) {
-                flowOf(emptyList())
+                flowOf(TodayScheduleActionSnapshot(actions = emptyList(), syncState = null))
             } else {
-                repository.observeActiveForSurface(
-                    userId = userId,
-                    surface = "schedule",
-                    limit = SCHEDULE_ACTION_LIMIT,
-                )
+                combine(
+                    repository.observeActiveForSurface(
+                        userId = userId,
+                        surface = "schedule",
+                        limit = SCHEDULE_ACTION_LIMIT,
+                    ),
+                    repository.observeSyncState(
+                        userId = userId,
+                        surface = "schedule",
+                        status = "active",
+                    ),
+                ) { actions, syncState ->
+                    TodayScheduleActionSnapshot(actions = actions, syncState = syncState)
+                }
             }
         }
 
@@ -170,12 +187,13 @@ internal class TodayScreenStateSource @Inject constructor(
             calendarFlow,
             scheduleActionFlow,
             scheduleLinkFlow,
-        ) { scope, commitments, calendarEvents, scheduleActions, scheduleLinks ->
+        ) { scope, commitments, calendarEvents, scheduleActionSnapshot, scheduleLinks ->
             TodayRowsSnapshot(
                 scope = scope,
                 commitments = commitments,
                 calendarEvents = calendarEvents,
-                scheduleActions = scheduleActions,
+                scheduleActions = scheduleActionSnapshot.actions,
+                scheduleActionSyncState = scheduleActionSnapshot.syncState,
                 scheduleLinks = scheduleLinks,
             )
         }
@@ -186,6 +204,7 @@ internal class TodayScreenStateSource @Inject constructor(
                 commitments = rows.commitments,
                 calendarEvents = rows.calendarEvents,
                 scheduleActions = rows.scheduleActions,
+                scheduleActionSyncState = rows.scheduleActionSyncState,
                 scheduleLinks = rows.scheduleLinks,
                 sourceStatuses = sourceProcessing.sourceStatuses,
                 processingStates = sourceProcessing.processingStates,

@@ -301,7 +301,7 @@ public fun OnboardingSetupScreen(
                         phoneReadOnly = state.selfPhoneReadOnly,
                         phoneVerified = state.selfPhoneVerified,
                     ),
-                    gmailActivationReturnAvailable = false,
+                    gmailActivationReturnAvailable = state.gmailActivationPreview.canReturnToActivationPreview(),
                     onNext = onIntroNext ?: { resolvedViewModel?.onIntroNext(); Unit },
                     onBack = onIntroBack ?: { resolvedViewModel?.onIntroBack(); Unit },
                     onConnectContacts = connectContacts,
@@ -351,6 +351,12 @@ public fun OnboardingSetupScreen(
                     onRetry = { requireNotNull(resolvedViewModel).onRetryGmailActivationPreview() },
                     onStartWithoutPreview = {
                         requireNotNull(resolvedViewModel).onStartWithoutGmailActivationPreview()
+                    },
+                    onAcceptPreview = { preview ->
+                        requireNotNull(resolvedViewModel).onAcceptGmailActivationPreview(preview.actionItemId)
+                    },
+                    onDismissPreview = { preview ->
+                        requireNotNull(resolvedViewModel).onDismissGmailActivationPreview(preview.actionItemId)
                     },
                     modifier = contentModifier,
                 )

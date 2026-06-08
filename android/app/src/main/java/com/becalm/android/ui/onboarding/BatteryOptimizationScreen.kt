@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,7 +43,7 @@ import com.becalm.android.ui.theme.BecalmTheme
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingBattery]
- * Navigation exit: authenticated home.
+ * Navigation exit: [BecalmRoute.OnboardingComplete].
  */
 @Composable
 public fun BatteryOptimizationScreen(
@@ -64,9 +65,34 @@ public fun BatteryOptimizationScreen(
         viewModel
     }
     val advance = onAdvance ?: {
-        navController.navigate(BecalmNavigationDefaults.authenticatedHomeRoute) {
-            popUpTo(BecalmRoute.OnboardingBattery.path) { inclusive = true }
-            launchSingleTop = true
+        requireNotNull(onboardingViewModel).onCompleteSetup()
+    }
+
+    if (onAdvance == null && onboardingViewModel != null) {
+        LaunchedEffect(onboardingViewModel, navController) {
+            onboardingViewModel.setupEffects.collect { effect ->
+                when (effect) {
+                    OnboardingSetupEffect.NavigateToPeople -> {
+                        navController.navigate(BecalmNavigationDefaults.authenticatedHomeRoute) {
+                            popUpTo(0) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                    is OnboardingSetupEffect.NavigateToSetupRoute -> {
+                        if (navController.currentDestination?.route != effect.route) {
+                            navController.navigate(effect.route) {
+                                launchSingleTop = true
+                            }
+                        }
+                    }
+                    is OnboardingSetupEffect.NavigateToCompletion -> {
+                        navController.navigate(BecalmRoute.OnboardingComplete(effect.personId).path) {
+                            popUpTo(0) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                }
+            }
         }
     }
 

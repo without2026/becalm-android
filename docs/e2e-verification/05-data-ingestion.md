@@ -3,10 +3,10 @@
 Spec: `becalm-android/.spec/data-ingestion.spec.yml`
 
 > **Sync architecture note**
-> - **PRIMARY local-arrival**: ING-011 foreground catch-up (ON_START / pull-to-refresh) for Android-owned sources + Room-as-source-of-truth + SYNC-006 즉시 업로드
+> - **PRIMARY local-arrival**: ING-011 foreground catch-up (ON_START / pull-to-refresh) for Android-owned sources + Room local origin/outbox + SYNC-006 즉시 업로드
 > - **SECONDARY**: WorkManager 주기 job (ING-006~010)
 > - **ContentObserver (ING-001)**: 프로세스 alive 동안만. 사망 중 발생 이벤트는 ING-011 의 MediaStore cursor 로 복구.
-> - **Owner split**: Room/UI source of truth와 provider fetch owner는 별도다. Gmail/Outlook Mail/Calendar provider fetch는 Railway owner이고, IMAP/voice provider fetch는 Android local worker owner다.
+> - **Owner split**: source origin/fetch owner와 product action decision owner는 별도다. Gmail/Outlook Mail/Calendar provider fetch는 Railway owner이고, IMAP/voice provider fetch는 Android local worker owner다. Person/Schedule/Commitment action feed 계산은 Railway `/v1/person_action_items` owner다.
 
 ---
 
@@ -25,10 +25,10 @@ Backend-managed adapters (Railway):
    └─ Outlook Calendar OAuth + sync  outlook_calendar
         │
         ▼
-Railway / device both converge on source_status + mirrored event tables
+Railway / device both converge on durable source_status + mirrored event tables
         │
         ▼
-Android reads Room-backed UI projections / local status cache as the source-of-truth UI surface
+Railway computes person_action_items, then Android renders person_action_item_cache
 ```
 
 Schedulers:

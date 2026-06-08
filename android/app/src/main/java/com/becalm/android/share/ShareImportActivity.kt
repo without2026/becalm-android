@@ -29,7 +29,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.SourceImportRepository
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
-import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.BecalmNavigationDefaults
 import com.becalm.android.ui.theme.BecalmTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -80,7 +80,10 @@ public class ShareImportActivity : ComponentActivity() {
         uiState.value = ShareImportState.Importing
         lifecycleScope.launch {
             when (sourceImportRepository.importMessageScreenshot(uri)) {
-                is BecalmResult.Success -> openMainApp(route = BecalmRoute.Today.path, importCompleted = true)
+                is BecalmResult.Success -> openMainApp(
+                    route = BecalmNavigationDefaults.authenticatedHomeRoute,
+                    importCompleted = true,
+                )
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "shared image import failed")
                     uiState.value = ShareImportState.Error

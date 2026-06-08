@@ -184,6 +184,8 @@ public class MessageScreenshotUploadWorker @AssistedInject constructor(
         val requestBody = object : RequestBody() {
             override fun contentType() = mimeType.toMediaTypeOrNull()
 
+            override fun isOneShot(): Boolean = true
+
             override fun writeTo(sink: BufferedSink) {
                 streamProvider.use { input ->
                     val buffer = ByteArray(STREAM_BUFFER_BYTES)

@@ -7,17 +7,22 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.actions.PersonActionFeedStatusKind
+import com.becalm.android.ui.actions.PersonActionFeedStatusUi
 import com.becalm.android.ui.components.OverallSyncIndicator
 import com.becalm.android.ui.components.SourceStatusChip
 import com.becalm.android.ui.components.SourceStatusStrip
@@ -26,11 +31,15 @@ import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.today.CalendarWriteJobStatusKind
+import com.becalm.android.ui.today.CalendarWriteJobUi
 import com.becalm.android.ui.today.ScheduleConflictReviewItem
 import com.becalm.android.ui.today.TodayTimelineContent
 import com.becalm.android.ui.today.TodayProcessingStatusUi
 import com.becalm.android.ui.today.TodayUiState
+import com.becalm.android.ui.today.TimelineItem
 import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.ui.actions.PersonActionEvidenceUi
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -125,6 +134,201 @@ class TodayTimelineUiTest {
     }
 
     @Test
+    fun `today shows schedule action feed quota delay as persistent status`() {
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        scheduleActionFeedStatus = PersonActionFeedStatusUi(
+                            kind = PersonActionFeedStatusKind.QUOTA_DELAY,
+                            backlogLagSeconds = 240,
+                        ),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onOpenProcessingStatus = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("schedule-action-feed-statusline").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_quota), substring = true)
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun `P1-GAP-004 today keeps cached schedule actions visible with degraded feed status`() {
+        var processingStatusClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        scheduleActionFeedStatus = PersonActionFeedStatusUi(
+                            kind = PersonActionFeedStatusKind.QUOTA_DELAY,
+                            backlogLagSeconds = 240,
+                        ),
+                        scheduleActions = listOf(
+                            scheduleAction(
+                                id = "pa-cached",
+                                title = "캘린더에 없는 미팅 후보",
+                                reason = "Gmail에서 일정 후보가 보였지만 캘린더에는 아직 없습니다.",
+                            ),
+                        ),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onOpenProcessingStatus = { processingStatusClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("schedule-action-feed-statusline").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.persons_action_feed_status_quota), substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-action-panel").assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-action-pa-cached").assertIsDisplayed()
+        composeRule.onNodeWithText("캘린더에 없는 미팅 후보").assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-action-feed-statusline-action").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, processingStatusClicks)
+        }
+    }
+
+    @Test
+    fun `P1-GAP-005 schedule candidates keep confirmed calendar context visible`() {
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        today = kotlinx.datetime.LocalDate(2026, 6, 4),
+                        scheduleActions = listOf(
+                            scheduleAction(
+                                id = "pa-missing-calendar",
+                                title = "김도현 대표 계약서 회신 마감",
+                                reason = "메일에는 약속이 있지만 캘린더에는 확정 일정이 없습니다.",
+                            ),
+                        ),
+                        timeline = listOf(
+                            TimelineItem.Meeting(
+                                id = "calendar-investor-meeting",
+                                sourceType = SourceType.GOOGLE_CALENDAR,
+                                sourceRef = "cal-investor-meeting",
+                                title = "투자자 미팅",
+                                attendeesRaw = "최신 IR 자료 확인",
+                                status = "confirmed",
+                                sortKey = Instant.parse("2026-06-04T06:00:00Z"),
+                            ),
+                        ),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("schedule-action-panel").assertIsDisplayed()
+        composeRule.onNodeWithText("김도현 대표 계약서 회신 마감").assertIsDisplayed()
+        composeRule.onAllNodes(hasScrollAction())[1].performScrollToNode(hasText("투자자 미팅"))
+        composeRule.onNodeWithText("투자자 미팅").assertExists()
+    }
+
+    @Test
+    fun `today shows calendar write job status with reconnect and retry actions`() {
+        var sourceManagementClicks = 0
+        var openedSource: String? = null
+        val retriedJobs = mutableListOf<String>()
+
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        calendarWriteJobs = listOf(
+                            CalendarWriteJobUi(
+                                jobId = "job-reauth",
+                                actionItemId = "pa-schedule-1",
+                                title = "Jane Kim calendar candidate",
+                                provider = SourceType.GOOGLE_CALENDAR,
+                                scheduleEventLinkId = "schedule-link-1",
+                                status = CalendarWriteJobStatusKind.NEEDS_REAUTH,
+                                clientAction = "connect_calendar",
+                            ),
+                            CalendarWriteJobUi(
+                                jobId = "job-failed",
+                                actionItemId = "pa-schedule-2",
+                                title = "Investor meeting",
+                                provider = "google_calendar",
+                                scheduleEventLinkId = "schedule-link-2",
+                                status = CalendarWriteJobStatusKind.CHECK_FAILED,
+                            ),
+                        ),
+                    ),
+                    onOpenSettings = {},
+                    onOpenSources = { sourceManagementClicks += 1 },
+                    onOpenSource = { openedSource = it },
+                    onPullRefresh = {},
+                    onRetryCalendarWriteJob = { retriedJobs += it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("schedule-calendar-write-status-panel").assertIsDisplayed()
+        composeRule.onNodeWithText("Jane Kim calendar candidate").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.schedule_calendar_write_status_needs_reauth)).assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-calendar-write-reconnect-job-reauth")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag("schedule-calendar-write-retry-job-failed")
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        composeRule.runOnIdle {
+            assertEquals(0, sourceManagementClicks)
+            assertEquals(SourceType.GOOGLE_CALENDAR, openedSource)
+            assertEquals(listOf("job-failed"), retriedJobs)
+        }
+    }
+
+    @Test
+    fun `today calendar write reconnect falls back to source list without provider route`() {
+        var sourceManagementClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        calendarWriteJobs = listOf(
+                            CalendarWriteJobUi(
+                                jobId = "job-reauth",
+                                actionItemId = "pa-schedule-1",
+                                title = "Calendar candidate",
+                                provider = null,
+                                scheduleEventLinkId = "schedule-link-1",
+                                status = CalendarWriteJobStatusKind.NEEDS_REAUTH,
+                                clientAction = "connect_calendar",
+                            ),
+                        ),
+                    ),
+                    onOpenSettings = {},
+                    onOpenSources = { sourceManagementClicks += 1 },
+                    onPullRefresh = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("schedule-calendar-write-reconnect-job-reauth")
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        composeRule.runOnIdle {
+            assertEquals(1, sourceManagementClicks)
+        }
+    }
+
+    @Test
     fun `today content shows error state`() {
         var retryClicks = 0
 
@@ -146,6 +350,36 @@ class TodayTimelineUiTest {
 
         composeRule.runOnIdle {
             assertEquals(1, retryClicks)
+        }
+    }
+
+    @Test
+    fun `P1-GAP-004 today auth failure opens recovery instead of blind retry`() {
+        var recoverAuthClicks = 0
+        var retryClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        error = UiMessage.resource(R.string.today_error_sign_in_required),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = { retryClicks += 1 },
+                    onRecoverAuth = { recoverAuthClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.auth_recovery_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.today_error_sign_in_required)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.error_state_retry)).assertDoesNotExist()
+        composeRule.onNodeWithText(string(R.string.auth_recovery_login_cta)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, recoverAuthClicks)
+            assertEquals(0, retryClicks)
         }
     }
 
@@ -372,4 +606,37 @@ class TodayTimelineUiTest {
         sourceType = SourceType.GMAIL,
         evidence = evidence,
     )
+
+    private fun scheduleAction(
+        id: String,
+        title: String,
+        reason: String,
+    ): com.becalm.android.ui.actions.PersonActionItemUi =
+        com.becalm.android.ui.actions.PersonActionItemUi(
+            id = id,
+            personId = "person-schedule",
+            personDisplayName = "김민홍",
+            actionKind = "add_to_calendar",
+            title = title,
+            primaryVerb = string(R.string.schedule_action_add_to_calendar),
+            shortReason = reason,
+            commitmentId = "commitment-$id",
+            calendarEventId = null,
+            sourceEventId = "source-$id",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-thread-$id",
+            dueAt = Instant.parse("2026-06-04T01:00:00Z"),
+            dueHint = "오늘",
+            urgencyScore = 0.86,
+            confidence = 0.81,
+            reasonCodes = listOf("surface:schedule", "calendar:missing"),
+            evidence = PersonActionEvidenceUi(
+                kind = "source_event",
+                id = "source-$id",
+                sourceRef = "gmail-thread-$id",
+                occurredAt = Instant.parse("2026-06-03T10:00:00Z"),
+                label = "Gmail",
+                quote = "목요일 오후에 미팅 가능할까요?",
+            ),
+        )
 }

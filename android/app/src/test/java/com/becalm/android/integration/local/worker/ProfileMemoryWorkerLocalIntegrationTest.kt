@@ -2,8 +2,6 @@ package com.becalm.android.integration.local.worker
 
 import androidx.work.ListenableWorker
 import androidx.work.workDataOf
-import com.becalm.android.core.result.BecalmError
-import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CommitmentEntity
@@ -15,8 +13,6 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.repository.PersonMemoryInputCollector
-import com.becalm.android.data.repository.PersonMemoryRemoteMirror
-import com.becalm.android.data.repository.PersonMemoryRemoteRepository
 import com.becalm.android.data.repository.PersonMemorySemanticIndexStore
 import com.becalm.android.data.repository.PersonMemoryStore
 import com.becalm.android.domain.person.PersonMemoryHash
@@ -58,16 +54,15 @@ class ProfileMemoryWorkerLocalIntegrationTest {
     }
 
     @Test
-    fun `writes validated person memory markdown and uploads mirror from local graph`() = runTest {
+    fun `writes validated local person memory markdown and semantic index from local graph`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         seedPersonGraph()
 
         val result = newWorker(PERSON_ID).doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
-        assertEquals(ProfileMemoryWorker.STATUS_WRITTEN_UPLOADED, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
+        assertEquals(ProfileMemoryWorker.STATUS_WRITTEN_LOCAL, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
         assertEquals(PERSON_ID, result.outputData.getString(ProfileMemoryWorker.KEY_PERSON_ID))
-        assertEquals("$USER_ID/$PERSON_ID/memory.md", result.outputData.getString(ProfileMemoryWorker.KEY_REMOTE_OBJECT_PATH))
 
         val relativePath = requireNotNull(result.outputData.getString(ProfileMemoryWorker.KEY_RELATIVE_PATH))
         assertEquals(PersonMemoryPathResolver.localRelativePath(USER_ID, PERSON_ID), relativePath)
@@ -86,51 +81,14 @@ class ProfileMemoryWorkerLocalIntegrationTest {
     }
 
     @Test
-    fun `keeps local memory and retries when mirror upload is transient`() = runTest {
+    fun `local memory generation succeeds without a remote mirror dependency`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         seedPersonGraph()
 
-        val result = newWorker(
-            personId = PERSON_ID,
-            remoteResult = BecalmResult.Failure(BecalmError.Network(503, "offline")),
-        ).doWork()
-
-        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
-        assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
-        val markdown = memoryFile(USER_ID, PERSON_ID).readText(Charsets.UTF_8)
-        assertEquals(
-            emptyList<PersonMemoryValidationError>(),
-            PersonMemoryMarkdownValidator.validate(markdown, USER_ID, PERSON_ID).errors,
-        )
-    }
-
-    @Test
-    fun `e2e 064 offline mirror failure leaves local memory for workmanager retry`() = runTest {
-        userPrefsStore.setCurrentUserId(USER_ID)
-        seedPersonGraph()
-
-        val result = newWorker(
-            personId = PERSON_ID,
-            remoteResult = BecalmResult.Failure(BecalmError.Network(0, "offline")),
-        ).doWork()
-
-        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
-        assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
-    }
-
-    @Test
-    fun `keeps local memory and reports pending when mirror upload is not retryable`() = runTest {
-        userPrefsStore.setCurrentUserId(USER_ID)
-        seedPersonGraph()
-
-        val result = newWorker(
-            personId = PERSON_ID,
-            remoteResult = BecalmResult.Failure(BecalmError.Validation("content_markdown", "rejected")),
-        ).doWork()
+        val result = newWorker(personId = PERSON_ID).doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
-        assertEquals(ProfileMemoryWorker.STATUS_WRITTEN_UPLOAD_PENDING, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
-        assertEquals("Validation", result.outputData.getString(ProfileMemoryWorker.KEY_UPLOAD_ERROR))
+        assertEquals(ProfileMemoryWorker.STATUS_WRITTEN_LOCAL, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
         assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
     }
 
@@ -175,15 +133,6 @@ class ProfileMemoryWorkerLocalIntegrationTest {
 
     private fun newWorker(
         personId: String?,
-        remoteResult: BecalmResult<PersonMemoryRemoteMirror> = BecalmResult.Success(
-            PersonMemoryRemoteMirror(
-                bucket = "person-memory",
-                objectPath = "$USER_ID/$PERSON_ID/memory.md",
-                personId = PERSON_ID,
-                contentHash = "hash",
-                generatedAt = NOW,
-            ),
-        ),
     ): ProfileMemoryWorker =
         ProfileMemoryWorker(
             appContext = LocalIntegrationSupport.appContext(),
@@ -201,7 +150,6 @@ class ProfileMemoryWorkerLocalIntegrationTest {
                 personIndexDao = db.personIndexDao(),
                 ioDispatcher = dispatcher,
             ),
-            remoteRepository = FakePersonMemoryRemoteRepository(remoteResult),
             logger = logger,
             ioDispatcher = dispatcher,
         )
@@ -398,12 +346,6 @@ class ProfileMemoryWorkerLocalIntegrationTest {
         return relativePath.split('/')
             .filter { it.isNotBlank() && it != ".." }
             .fold(LocalIntegrationSupport.appContext().filesDir) { parent, child -> File(parent, child) }
-    }
-
-    private class FakePersonMemoryRemoteRepository(
-        private val result: BecalmResult<PersonMemoryRemoteMirror>,
-    ) : PersonMemoryRemoteRepository {
-        override suspend fun uploadLocalMemory(userId: String, personId: String): BecalmResult<PersonMemoryRemoteMirror> = result
     }
 
     private companion object {

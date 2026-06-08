@@ -181,6 +181,9 @@ public class PersonMemoryInputCollector @Inject constructor(
             status = memoryStatus(),
             quote = quote,
             occurredAt = sourceEventOccurredAt,
+            direction = direction,
+            dueAt = dueAt,
+            dueHint = dueHint,
         )
 
     private fun CommitmentEntity.memoryStatus(): String? =

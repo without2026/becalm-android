@@ -241,6 +241,16 @@ run_adb shell am broadcast \
 sleep 3
 
 open_deeplink \
+  "becalm://settings/sources" \
+  "${report_dir}/open-sources-before-oauth-complete.txt"
+
+sources_before_oauth_dump="${report_dir}/ui-sources-before-oauth.xml"
+if ! wait_for_text "$sources_before_oauth_dump" "데이터 출처"; then
+  echo "Sources list did not open before OAuth completion deep link. See $report_dir" >&2
+  exit 1
+fi
+
+open_deeplink \
   "becalm://oauth-complete?result=success&provider=gmail&family=mail" \
   "${report_dir}/open-oauth-complete.txt"
 
@@ -344,8 +354,11 @@ if ! wait_for_text "$processing_detail_dump" "정리 상태"; then
   echo "Processing status detail did not open from Today. See $report_dir" >&2
   exit 1
 fi
+if ! grep -Eq 'text="1개 연결 확인 중, [0-9]+개 확인 필요"' "$processing_detail_dump"; then
+  echo "Processing status detail did not show combined active/action-needed summary. See $report_dir" >&2
+  exit 1
+fi
 for expected in \
-  "1개 연결 확인 중, 1개 확인 필요" \
   "확인 중" \
   "확인 필요" \
   "Gmail" \

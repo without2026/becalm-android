@@ -44,6 +44,8 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.actions.PersonActionEvidenceDialog
+import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmSheetSkeleton
@@ -164,6 +166,9 @@ public fun CommitmentDetailSheet(
                     source = state.source,
                     history = state.history,
                     meetingTranscript = state.meetingTranscript,
+                    relatedAction = state.relatedAction,
+                    loadingEvidenceActionId = state.loadingEvidenceActionId,
+                    loadingSourceEvidence = state.loadingSourceEvidence,
                     actionButtons = state.actionButtons,
                     counterpartyDisplayName = state.counterpartyDisplayName,
                     onReminderToggle = onReminderToggle ?: { enabled ->
@@ -184,6 +189,16 @@ public fun CommitmentDetailSheet(
                     onEdit = {
                         requireNotNull(resolvedDetailViewModel).onEditClick()
                     },
+                    onOpenRelatedActionEvidence = { actionId, evidenceKind, evidenceId ->
+                        resolvedDetailViewModel?.onOpenRelatedActionEvidence(
+                            actionItemId = actionId,
+                            evidenceKind = evidenceKind,
+                            evidenceId = evidenceId,
+                        )
+                    },
+                    onOpenSourceEvidence = {
+                        resolvedDetailViewModel?.onOpenSourceEvidence()
+                    },
                     onSpeakerAliasChange = onSpeakerAliasChange ?: { speakerId, displayName ->
                         if (resolvedDetailViewModel != null) {
                             resolvedDetailViewModel.onSpeakerAliasChange(speakerId, displayName)
@@ -192,6 +207,22 @@ public fun CommitmentDetailSheet(
                 )
             }
         }
+    }
+    state.evidenceDetail?.let { detail ->
+        PersonActionEvidenceDialog(
+            detail = detail,
+            onDismiss = {
+                resolvedDetailViewModel?.onDismissRelatedActionEvidence()
+            },
+        )
+    }
+    state.sourceEvidenceDetail?.let { detail ->
+        PersonActionEvidenceDialog(
+            detail = detail,
+            onDismiss = {
+                resolvedDetailViewModel?.onDismissSourceEvidence()
+            },
+        )
     }
 }
 
@@ -205,6 +236,9 @@ internal fun DetailSheetContent(
     source: CommitmentSourcePresentation,
     history: CommitmentHistoryPresentation,
     meetingTranscript: MeetingTranscriptPresentation? = null,
+    relatedAction: PersonActionItemUi? = null,
+    loadingEvidenceActionId: String? = null,
+    loadingSourceEvidence: Boolean = false,
     actionButtons: CommitmentDetailActionState,
     counterpartyDisplayName: String?,
     onReminderToggle: (Boolean) -> Unit,
@@ -212,6 +246,8 @@ internal fun DetailSheetContent(
     onComplete: () -> Unit,
     onCancel: () -> Unit,
     onEdit: () -> Unit,
+    onOpenRelatedActionEvidence: (String, String?, String?) -> Unit = { _, _, _ -> },
+    onOpenSourceEvidence: () -> Unit = {},
     onSpeakerAliasChange: (String, String) -> Unit = { _, _ -> },
 ) {
     val scrollState = rememberScrollState()
@@ -270,6 +306,21 @@ internal fun DetailSheetContent(
 
             Spacer(modifier = Modifier.height(12.dp))
         }
+
+        CommitmentDetailRelatedActionEvidenceCard(
+            action = relatedAction,
+            loadingEvidence = relatedAction?.id == loadingEvidenceActionId,
+            onOpenEvidence = onOpenRelatedActionEvidence,
+        )
+        CommitmentDetailSourceEvidenceCard(
+            visible = relatedAction?.evidence == null &&
+                !source.isManual &&
+                !source.sourceType.isNullOrBlank() &&
+                quote.isNotBlank(),
+            quote = quote,
+            loadingEvidence = loadingSourceEvidence,
+            onOpenEvidence = onOpenSourceEvidence,
+        )
 
         // 4. Quote section (read-only; disputed badge if applicable)
         EvidenceCard(
@@ -418,6 +469,82 @@ internal fun DetailSheetContent(
 
         Spacer(modifier = Modifier.height(12.dp))
     }
+}
+
+@Composable
+private fun CommitmentDetailRelatedActionEvidenceCard(
+    action: PersonActionItemUi?,
+    loadingEvidence: Boolean,
+    onOpenEvidence: (String, String?, String?) -> Unit,
+) {
+    val evidence = action?.evidence ?: return
+    val evidenceKind = evidence.kind ?: return
+    val evidenceId = evidence.id ?: return
+    EvidenceCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("commitment-detail-action-evidence-card"),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel(text = stringResource(R.string.commitment_action_evidence_why))
+            Text(
+                text = action.shortReason.ifBlank { evidence.quote.orEmpty() }.ifBlank { evidence.label.orEmpty() },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            evidence.quote?.takeIf { it.isNotBlank() }?.let { quote ->
+                Text(
+                    text = quote,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            BecalmButton(
+                text = stringResource(R.string.commitment_action_evidence),
+                onClick = { onOpenEvidence(action.id, evidenceKind, evidenceId) },
+                loading = loadingEvidence,
+                modifier = Modifier.align(Alignment.End),
+                variant = BecalmButtonVariant.Text,
+            )
+        }
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+}
+
+@Composable
+private fun CommitmentDetailSourceEvidenceCard(
+    visible: Boolean,
+    quote: String,
+    loadingEvidence: Boolean,
+    onOpenEvidence: () -> Unit,
+) {
+    if (!visible) return
+    EvidenceCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("commitment-detail-source-evidence-card"),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel(text = stringResource(R.string.commitment_action_evidence_why))
+            Text(
+                text = quote,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            BecalmButton(
+                text = stringResource(R.string.commitment_action_evidence),
+                onClick = onOpenEvidence,
+                loading = loadingEvidence,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .testTag("commitment-detail-source-evidence-open"),
+                variant = BecalmButtonVariant.Text,
+            )
+        }
+    }
+    Spacer(modifier = Modifier.height(12.dp))
 }
 
 // ─── Action button strip ──────────────────────────────────────────────────────

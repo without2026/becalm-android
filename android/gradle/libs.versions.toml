@@ -65,6 +65,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 # ─── AndroidX Core ──────────────────────────────────────────────────────────
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version = "1.12.0" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version = "1.6.1" }
+androidx-browser = { group = "androidx.browser", name = "browser", version = "1.8.0" }
 
 # ─── Google Material (Theme.Material3.* XML style parents for AAPT) ─────────
 # Compose material3 only ships the runtime; XML theme parents live in this artifact.

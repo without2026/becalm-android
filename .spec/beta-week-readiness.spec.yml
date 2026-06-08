@@ -1,0 +1,401 @@
+module: beta-week-readiness
+platform: android-backend
+version: 1
+
+assessment:
+  question: "현재 spec/contract를 온전히 구현하면 99% 이상의 confidence로 베타테스터가 1주일 이상 앱을 쓰고 효용을 느낄 수 있는가?"
+  answer_before_this_spec: "No"
+  reason:
+    - "next-action-projection contract는 action feed의 idempotency, retry, no-missing-delta, worker isolation을 강하게 정의하지만, 베타 1주일 운영은 앱 전체 crash-free/session/migration/API-envelope/release-observability 계약까지 필요하다."
+    - "기존 contract에는 모든 Android-facing Railway endpoint의 ErrorEnvelope 강제, Android 전역 remote error normalizer, Room migration/readiness gate, crash/ANR budget, remote kill switch, 7-day soak gate가 충분히 명시되어 있지 않았다."
+    - "따라서 현 상태 그대로 구현하면 action feed 자체는 견고해도 auth/source sync/migration/unknown 5xx/malformed error/process death가 베타 신뢰도를 99% 아래로 낮춘다."
+  answer_after_this_spec_if_fully_implemented_and_verified: "Conditional yes"
+  condition: "아래 BETA-* hard gates와 e2e verification을 모두 통과하고, beta cohort에서 crash-free/session/API/data failure telemetry가 release budget 안에 들어오는 경우에만 99% confidence claim을 허용한다."
+  historical_regression_dependency: "BREG-001~014 guards must be implemented or explicitly waived with non-crash/non-data justification before beta invite. Known previous bugs are not considered closed by happy-path implementation alone."
+
+success_definition:
+  beta_window_days: 7
+  minimum_beta_users_for_gate: 10
+  product_utility_threshold:
+    - "각 tester는 첫 24시간 안에 Person/Schedule/Commitment 중 최소 1개 actionable card 또는 source repair action을 본다."
+    - "각 tester는 7일 동안 최소 3회 이상 앱을 열었을 때 빈 history feed가 아니라 현재/가까운 미래 action surface를 본다."
+    - "source가 아직 연결되지 않은 계정도 source_reconnect 또는 guided setup action으로 utility path를 가진다."
+  reliability_threshold:
+    crash_free_sessions_min: 0.995
+    crash_free_users_min: 0.99
+    anr_count_allowed: 0
+    unrecoverable_server_error_count_allowed: 0
+    acknowledged_data_loss_allowed: 0
+    cross_user_data_leak_allowed: 0
+    destructive_migration_allowed: false
+  interpretation:
+    - "No server error means user-visible unrecoverable 5xx/unknown error가 없어야 한다는 뜻이다. Transient backend/downstream failure는 retryable ErrorEnvelope, backoff, stale cache, support/repair CTA로 닫히면 허용된다."
+    - "No data failure means HTTP durable success 이후 source fact/action/mutation이 사라지거나 다른 user scope로 섞이거나 watermark가 역행하는 일이 0건이어야 한다."
+
+behaviors:
+  - id: BETA-001
+    type: go_no_go_gate
+    description: "베타 초대 전 단일 go/no-go 판정은 기능 구현 완료가 아니라 crash/API/data/UX/readiness evidence가 모두 green일 때만 통과한다"
+    owner: product_lead_release_manager
+    function_contract:
+      name: BetaWeekReadinessGate.evaluate
+      input:
+        android_build:
+          version_code: int
+          version_name: string
+          git_sha: string
+          release_track: "debug_qa | firebase_app_distribution | play_internal"
+        backend_runtime:
+          environment: "dev | staging | production"
+          deployment_id: string
+          health_status: string
+          worker_queues: "string[]"
+        gates:
+          android_unit: "passed | failed | skipped"
+          android_lint: "passed | failed | skipped"
+          android_assemble: "passed | failed | skipped"
+          android_device_smoke: "passed | failed | skipped"
+          backend_tests: "passed | failed | skipped"
+          backend_compile: "passed | failed | skipped"
+          live_health: "passed | failed | skipped"
+          historical_regression_guards: "passed | failed | skipped"
+          beta_soak: "passed | failed | skipped"
+        metrics:
+          crash_free_sessions: float
+          crash_free_users: float
+          anr_count: int
+          unrecoverable_server_errors: int
+          acknowledged_data_loss: int
+          missing_delta_detected: int
+          migration_failures: int
+          cross_user_scope_violations: int
+      output:
+        decision: "go | no_go"
+        blockers: "string[]"
+        warnings: "string[]"
+        required_actions: "string[]"
+      rules:
+        - "Any failed hard gate returns no_go."
+        - "Any skipped hard gate returns no_go unless release manager records an explicit, time-bound exception and the skipped gate is not crash/API/data related."
+        - "historical_regression_guards must pass for every BREG area touched by the release."
+        - "crash_free_sessions < 0.995, crash_free_users < 0.99, anr_count > 0, unrecoverable_server_errors > 0, acknowledged_data_loss > 0, missing_delta_detected > 0, migration_failures > 0, or cross_user_scope_violations > 0 returns no_go."
+        - "The decision artifact must include backend deployment id, Android build id, test command outputs, and a list of known rollback switches."
+    acceptance:
+      - "베타 초대 전 release owner가 BETA-001 결과를 문서/CI artifact로 남긴다."
+      - "No-go blocker가 하나라도 있으면 APK/AAB 배포는 가능해도 외부 tester 초대는 금지한다."
+
+  - id: BETA-002
+    type: crash_free_contract
+    description: "앱은 베타 1주일 동안 remote/network/JSON/auth/source failure 때문에 crash/ANR/OOM을 내지 않는다"
+    android_function_contracts:
+      - name: AppCrashBoundary.install
+        rules:
+          - "Process-level uncaught exception handler reports sanitized crash metadata before default crash handling."
+          - "PII, tokens, raw source body, local file paths, email/phone 원문은 crash metadata에 포함하지 않는다."
+      - name: SafeCoroutineLauncher.launchObserved
+        rules:
+          - "Application/ViewModel/background coroutine에서 IOException, HttpException, SerializationException, SQLiteException을 UI/retry/data-recovery state로 map하고 SupervisorJob boundary 밖으로 전파하지 않는다."
+          - "Programmer error는 숨기지 않되 beta runtime에서는 sanitized crash report와 route-safe fallback을 남긴다."
+      - name: WorkerResultMapper.map
+        rules:
+          - "WorkManager doWork는 known transient failure를 Result.retry로, terminal user repair를 Result.success + quarantine/recovery state로, true programmer corruption만 Result.failure로 반환한다."
+          - "Worker는 raw exception을 throw해서 process crash를 만들면 안 된다."
+    acceptance:
+      - "Cold start, login, source connection, action feed refresh, mutation, background sync, process death restore smoke에서 FATAL EXCEPTION/ANR/OOM 0건."
+      - "Crashlytics/observability가 없는 debug/dev 환경도 Noop/Logger port로 crash-free 동작한다."
+
+  - id: BETA-003
+    type: api_error_contract
+    description: "모든 Android-facing Railway API 실패는 ErrorEnvelope 또는 Android-normalized RecoverableError로 닫힌다"
+    backend_contract:
+      - "Every /v1 endpoint consumed by Android returns ErrorEnvelope for non-2xx by beta cutover: error, message, request_id, retryable, client_action, retry_after_seconds when known."
+      - "Plain {error,message} response shapes are legacy-compatible only if Android ApiErrorNormalizer maps them to RecoverableError with deterministic retryable/client_action."
+      - "500/502/503/504/429/network timeout are retryable unless the endpoint contract explicitly marks a non-retryable user repair path."
+      - "401 maps to login/session refresh. 403 maps to permission/consent repair. 404 maps to refresh_action, upgrade_app, or not_found user-visible state depending on endpoint."
+    android_function_contracts:
+      - name: ApiErrorNormalizer.normalize
+        input: "Throwable | HttpResponse | Retrofit Response"
+        output: "ClientRecoverableError"
+        rules:
+          - "Never return null and never throw."
+          - "Preserve request_id when present."
+          - "If body cannot be parsed, use error='malformed_error_envelope', retryable=true for 5xx/429/network and retryable=false for validation 4xx."
+          - "Map every endpoint to one of retry_later, login, full_refresh, reconnect_source, open_source_settings, review_quarantine, refresh_action, discard_local_mutation, fix_input, upgrade_app, contact_support, disable_feature."
+      - name: SafeRemoteCall.execute
+        rules:
+          - "All repositories call Railway through this wrapper or an equivalent typed Result adapter."
+          - "No ViewModel catches raw Retrofit/OkHttp exceptions directly."
+    acceptance:
+      - "Synthetic malformed JSON/error-body/empty 500/timeout tests produce retriable UI state, not crash."
+      - "No Android-facing endpoint has an undocumented terminal error path."
+
+  - id: BETA-004
+    type: data_integrity_contract
+    description: "Durable success 이후 local/backend data가 누락, 중복 확정, watermark 역행, cross-user leak을 만들지 않는다"
+    function_contracts:
+      - name: DurableAckGuard.accept
+        owner: backend
+        rules:
+          - "HTTP 200/201/204 means canonical DB write and required recompute/enqueue side effect are committed."
+          - "HTTP 202 means accepted/queued only and Android must not mark local source/action as synced or advance feed watermark."
+      - name: TransactionalDeltaApplier.applyPersonActionFeed
+        owner: android
+        rules:
+          - "Apply changed rows, deleted_ids, cache metadata, and server_watermark in one Room transaction."
+          - "Crash before commit leaves previous watermark intact so next launch refetches safely."
+          - "Reject response if server_watermark regresses unless endpoint explicitly returns full_refresh reset."
+          - "If PersonActionFeedResponse.has_more=true, persist rows as a snapshot-bound pending apply and advance server_watermark only after the final page with the same snapshot_id is committed."
+          - "Cursor without matching snapshot_id, expired snapshot, or changed_since outside backend tombstone window must become full_refresh recovery, not partial apply."
+      - name: PersonActionRecomputeTriggerMap.verify
+        owner: backend
+        rules:
+          - "Source graph, commitment, calendar, source status, person memory, person/review, schedule link, correction, and feedback writes enqueue or coalesce person_action_recompute_jobs before durable success."
+          - "A missing recompute trigger for an action-impacting write is acknowledged data failure because Android cannot prove the feed includes the accepted input."
+      - name: PersonActionGenerator.generate
+        owner: backend
+        rules:
+          - "Action kind, surfaces, stable id, score tie-breaks, collapse, user-state overlay, and action_version migrations follow next-action-projection.spec.yml action_generation_algorithm_contract."
+          - "Generator output is deterministic for the same canonical input snapshot."
+      - name: OutboxFlushCoordinator.flush
+        owner: android
+        rules:
+          - "Every mutation/source upload has a stable client id and idempotency key."
+          - "Remove local outbox row only after durable backend ack or explicit user discard."
+          - "Divergent duplicate idempotency conflict opens repair/discard state, never silent overwrite."
+      - name: PersonActionMutationLedger.write
+        owner: backend
+        rules:
+          - "Action state patch and feedback mutations are idempotent through person_action_mutation_ledger payload_hash/result replay, not by inspecting only the latest state row."
+          - "Duplicate client_mutation_id with same payload_hash replays stored result; divergent duplicate returns 409 idempotency_conflict with client_action."
+      - name: RequeuePersonActionRecomputeJob.execute
+        owner: backend
+        rules:
+          - "dead_letter, retry-exhausted failed, and expired processing recompute jobs have service-role requeue path."
+          - "Requeue sets job pending and keeps feed stale/degraded until a normal complete transaction catches up."
+      - name: DataIntegritySentinel.scan
+        owner: android-backend
+        rules:
+          - "Detect cross-user rows in Room after login switch."
+          - "Detect negative counts, orphaned action cache rows without user_id, pending outbox rows older than SLO, and server_watermark gaps."
+          - "Report sanitized product_event/observability signal and surface data recovery if user action is needed."
+    acceptance:
+      - "No acknowledged source fact/action/mutation disappears after app restart, backend deploy, network retry, or duplicate request replay."
+      - "User A data is never visible under User B session after logout/login/reinstall restore."
+      - "No beta invite if action-feed pagination is unbound, mutation idempotency lacks ledger proof, operator requeue is missing, generator output is nondeterministic, or any action-impacting write lacks recompute trigger coverage."
+
+  - id: BETA-005
+    type: migration_upgrade_contract
+    description: "베타 사용자 앱 업데이트/재시작/Room migration 실패가 crash나 데이터 삭제로 이어지지 않는다"
+    function_contracts:
+      - name: RoomMigrationReadinessVerifier.verify
+        rules:
+          - "Every released beta versionCode has a forward migration path to the current schema."
+          - "Destructive migration fallback is forbidden for beta/user data DB."
+          - "Migration tests seed realistic source/action/person/commitment/outbox rows and verify row counts, user_id scope, watermarks, pending queues after migration."
+      - name: DatabaseOpenRecoveryPolicy.resolve
+        rules:
+          - "If Room open fails, app routes to DataRecoveryScreen instead of crashing."
+          - "Recovery screen offers retry, sign out, support/report issue, and non-PII diagnostic export. It must not delete DB automatically."
+          - "If failure is known unsupported downgrade, show upgrade-required path."
+    acceptance:
+      - "Upgrade from every beta build candidate to current build opens DB successfully in tests."
+      - "Process death during migration does not create partial destructive state."
+
+  - id: BETA-006
+    type: auth_session_contract
+    description: "7일 사용 중 Supabase session, OAuth source token, user-scoped DB boundary가 깨져도 recoverable해야 한다"
+    function_contracts:
+      - name: AuthRefreshSingleFlight.refreshAndRetry
+        rules:
+          - "Concurrent 401s share one refresh attempt and retry original requests at most once with the new access token."
+          - "Refresh failure clears in-memory auth only after preserving user-scoped local DB/outbox."
+      - name: UserScopedDatabaseManager.openForUser
+        rules:
+          - "No user-scoped DB/worker opens before authenticated user id is known."
+          - "Login switch closes previous user DB and cancels previous user workers before opening the new user scope."
+      - name: SourceReconnectPolicy.resolve
+        rules:
+          - "Provider OAuth revoke/auth failure becomes source reconnect action or settings CTA."
+          - "Callback success is not sync success; Android polls status until token save and provider fetch are separately confirmed or retriable."
+    acceptance:
+      - "Token expiry, refresh failure, logout, login as another user, OAuth revoke, OAuth callback return, and app restart have deterministic routes and no cross-user data leak."
+
+  - id: BETA-007
+    type: release_kill_switch_contract
+    description: "베타 중 backend/API/client mismatch가 발생해도 원격 설정, feature disable, force upgrade, rollback path로 닫힌다"
+    api_contracts:
+      - "GET /v1/client_config returns min_supported_version_code, latest_version_code, feature_flags, disabled_sources, maintenance state, and retry_after_seconds."
+      - "Android caches last good config and falls back to safe defaults if config fetch fails."
+      - "If action_feed_enabled=false, Android renders last backend action cache as stale and source reconnect/setup actions only; it must not revive local action generation."
+      - "If min_supported_version_code > current versionCode, Android shows upgrade-required screen and stops background writes except telemetry/session cleanup."
+    function_contracts:
+      - name: ClientConfigRepository.refresh
+        rules:
+          - "Fetch on cold start, login, app foreground, and every 6h while authenticated."
+          - "A failed config fetch is retryable and must not blank the app."
+      - name: FeatureGate.resolve
+        rules:
+          - "Resolve feature state from remote config, build flag, user cohort, and local emergency override in a deterministic order."
+          - "Disabled feature returns disabled-with-reason UI state, not hidden crash path."
+    acceptance:
+      - "Release manager can disable action feed, disable a source connector, force upgrade, or show maintenance/retry message without shipping a new APK."
+
+  - id: BETA-008
+    type: observability_alerting_contract
+    description: "운영자는 베타 1주일 동안 crash/server/data/utility 문제를 raw PII 없이 발견하고 조치할 수 있어야 한다"
+    required_signals:
+      android:
+        - app_cold_start_completed
+        - app_foreground_session_started
+        - app_crash_sanitized
+        - app_anr_detected
+        - api_recoverable_error
+        - api_unrecoverable_error
+        - room_migration_failed
+        - outbox_stuck
+        - action_feed_first_value_visible
+        - action_feed_empty_blocked
+        - beta_aha_action_seen
+      backend:
+        - http_5xx_total_by_endpoint
+        - error_envelope_missing_total
+        - retryable_error_total
+        - unrecoverable_error_total
+        - source_sync_job_lag_seconds
+        - raw_ingestion_retry_depth
+        - person_action_worker_backlog_depth
+        - person_action_delta_missing_detected_total
+        - product_event_ingestion_failed_total
+    alert_rules:
+      - "Any unrecoverable_server_error > 0 in beta cohort pages the operator."
+      - "Any acknowledged_data_loss/cross_user_scope_violation pages immediately."
+      - "Crash-free sessions below 99.5% or ANR > 0 blocks next cohort expansion."
+      - "Action feed empty for >24h after at least one connected source creates product intervention ticket."
+    privacy_rules:
+      - "Telemetry may include user_id hash, endpoint, status code, request_id, build id, source_type, reason_code, queue age."
+      - "Telemetry must not include raw email, phone, transcript, OCR, audio bytes, local path, signed URL, auth token, refresh token, cookie, or source body."
+    acceptance:
+      - "Before beta invite, release owner can answer from dashboards/log queries: crash rate, 5xx by endpoint, retry depth, action feed visibility, source sync lag, data integrity sentinel count."
+
+  - id: BETA-009
+    type: product_utility_contract
+    description: "안정성만으로 베타 성공을 선언하지 않는다. 사용자가 일주일 안에 action-first 효용을 실제로 봐야 한다"
+    function_contracts:
+      - name: FirstWeekActionSurfaceProjector.project
+        rules:
+          - "No-source user gets source setup/reconnect action, not an empty dashboard."
+          - "Connected source but no parsed actions gets source synced/no-action state plus next suggested source, not history feed."
+          - "Pending backend recompute shows stale/pending context with progress and retry path."
+          - "At least one actionable card or repair/setup action is visible within first session after onboarding completion."
+      - name: BetaAhaTelemetry.markActionSeen
+        rules:
+          - "Emit beta_aha_action_seen once per user when an active Person/Schedule/Commitment action or source repair action is visible for >=2 seconds."
+          - "Emit beta_action_completed when user completes/dismisses/snoozes/retries a visible action."
+    acceptance:
+      - "Beta readiness requires beta_aha_action_seen for >=90% of active beta users by day 1 unless user has intentionally connected no source and dismissed setup."
+
+  - id: BETA-010
+    type: seven_day_soak_contract
+    description: "실제 베타 초대 전 7일 사용을 압축 재현하는 soak scenario가 green이어야 한다"
+    scenario_matrix:
+      - "fresh install -> signup/login -> onboarding -> connect one backend provider -> action feed visible"
+      - "fresh install -> local voice/meeting/message import -> upload pending -> backend accept -> action feed visible"
+      - "network offline 12h -> foreground cache visible -> mutations queued -> network returns -> outbox flushes exactly once"
+      - "backend 503/429 -> retryable UI -> stale cache remains -> later success clears degraded state"
+      - "token expires -> refresh single-flight -> request retry once -> success or login route"
+      - "provider OAuth revoked -> source reconnect action -> reconnect -> sync resumes"
+      - "app killed during delta apply -> restart -> previous watermark refetch -> no missing rows"
+      - "paginated action delta -> app killed after page 1 -> restart -> previous watermark refetch -> no missing rows"
+      - "app update migration -> DB opens -> outbox and watermarks preserved"
+      - "logout user A -> login user B -> no user A rows visible"
+      - "action feed worker backlog -> capacity_state backlog -> compact health -> caught_up clears"
+      - "dead_letter recompute -> service-role requeue -> worker completes -> stale/degraded UI clears"
+      - "fresh install with no action rows -> explicit caught-up/setup/sync-pending state instead of blank dashboard"
+    acceptance:
+      - "All scenarios pass on at least one real Samsung device and one emulator/API-level target used for beta."
+      - "Backend dev/staging runtime health and queue drain are verified during the same build window."
+
+  - id: BETA-011
+    type: support_incident_contract
+    description: "복구 자동화가 실패한 경우 사용자가 지원 요청을 할 수 있고 운영자가 request_id/incident_id로 원인을 찾을 수 있어야 한다"
+    contracts:
+      - "Every ErrorEnvelope includes request_id."
+      - "Every dead-letter/degraded/long-backlog state includes reason_code or incident_id."
+      - "Android support/report action attaches build id, sanitized device model, endpoint, status code, request_id, incident_id, source_type, and recent non-PII breadcrumbs."
+      - "Support report never attaches raw content or local source file path."
+    acceptance:
+      - "Tester can send a support report from stale/degraded/data recovery/update-required screens without developer assistance."
+
+  - id: BETA-012
+    type: privacy_security_contract
+    description: "베타 안정성 계측과 support flow가 개인정보 보호 원칙을 약화시키면 안 된다"
+    contracts:
+      - "Crash/analytics/support event property allowlist is enforced before sending."
+      - "Auth token, refresh token, OAuth code, Cookie, Set-Cookie, Authorization, raw email, raw phone, full transcript, OCR text, local path, signed URL are forbidden in logs/events."
+      - "Release builds use redacted HTTP logging or no HTTP body logging."
+      - "Account deletion and telemetry opt-out remain honored during beta instrumentation."
+    acceptance:
+      - "PII grep/static validation and runtime telemetry sample validation pass before beta invite."
+
+non_functional_requirements:
+  hard_release_budgets:
+    crash_free_sessions_min: 0.995
+    crash_free_users_min: 0.99
+    anr_count_allowed: 0
+    unrecoverable_server_error_count_allowed: 0
+    acknowledged_data_loss_allowed: 0
+    missing_delta_detected_allowed: 0
+    cross_user_scope_violation_allowed: 0
+    destructive_migration_allowed: false
+  latency:
+    cold_start_to_first_cached_surface_p95_ms: 2000
+    app_foreground_to_cached_action_p95_ms: 500
+    healthy_action_delta_fetch_p95_ms: 1500
+    source_repair_action_visible_p95_seconds: 5
+  durability:
+    durable_ack_loss_tolerance: "zero"
+    local_outbox_loss_tolerance: "zero after enqueue"
+    action_watermark_regression_tolerance: "zero"
+    user_scope_leak_tolerance: "zero"
+
+test_plan:
+  unit:
+    - "ApiErrorNormalizer maps every documented status/body/exception into ClientRecoverableError without throwing."
+    - "BetaWeekReadinessGate no_go cases cover crash, ANR, unrecoverable server error, missing delta, migration failure, data loss, skipped hard gate."
+    - "FeatureGate resolves remote kill switch/build flag/cohort/local emergency state deterministically."
+    - "RoomMigrationReadinessVerifier seeds previous beta schemas and verifies forward migration preserves source/action/outbox/watermark rows."
+    - "DataIntegritySentinel detects cross-user rows, orphan cache rows, stuck outbox, and watermark regression."
+  integration:
+    - "Every Railway endpoint consumed by Android returns ErrorEnvelope for representative 401/404/409/422/429/500/503 failures or Android normalizes legacy body."
+    - "App killed during action delta transaction restarts with previous watermark and refetches without missing rows."
+    - "Duplicate source upload/action mutation replay is idempotent and removes outbox only after durable ack."
+    - "Auth refresh single-flight handles concurrent 401s and login route on terminal refresh failure without data deletion."
+  ui:
+    - "No-source, pending-context, stale, degraded, backend-down, migration-recovery, force-upgrade, and support-report screens are user-readable Korean and have one primary next step."
+    - "Long degraded/backlog shows compact health and does not repeat blocking modal in the same session."
+  smoke:
+    - "Real Samsung 7-day compressed scenario matrix passes with FATAL EXCEPTION/ANR/OOM 0."
+    - "Backend live health shows API, Supabase, and required worker queues ready before tester invite."
+    - "Release artifact install/upgrade over previous beta build preserves DB and action cache."
+
+rollout:
+  pre_beta_hard_gates:
+    - "BETA-001 returns go."
+    - "All BETA-* unit/integration/UI/smoke gates pass or are explicitly not applicable with non-crash/non-data justification."
+    - "All BREG-* historical regression guards touched by this release pass. A known previous bug class without a regression test/smoke is a no-go for beta expansion."
+    - "Remote client_config supports force upgrade, maintenance, source disable, action_feed disable."
+    - "Rollback plan identifies Android build rollback, Railway deploy rollback, feature flag disable, and data migration forward-only constraints."
+  beta_expansion_policy:
+    - "Start with internal dogfood, then <=10 testers, then expand only if 48h crash/API/data/utility dashboards remain inside budget."
+    - "Any data loss, cross-user leak, destructive migration, unrecoverable server error, or ANR stops expansion immediately."
+  rollback:
+    - "Prefer remote kill switch for feature-specific failures."
+    - "Use Railway rollback for backend regression after confirming migrations are forward-compatible."
+    - "Do not ship Android downgrade if Room schema downgrade is unsupported; use force-upgrade/fixed build instead."
+
+invariants:
+  - "베타 readiness는 구현 완료 선언이 아니라 evidence-gated go/no-go decision이다."
+  - "Unknown server error is never an open path: it is ErrorEnvelope or Android-normalized retry/support state."
+  - "Unknown local data failure is never a crash/destructive reset path: it is DataRecoveryScreen/support/report path."
+  - "Action feed may be stale or degraded, but it must remain visible with recovery context; blank dashboard is allowed only for truly empty no-source account with setup action."
+  - "No beta instrumentation may weaken privacy boundaries."

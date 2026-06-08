@@ -68,6 +68,9 @@ public interface WorkScheduler {
     /** Retries backend mirrors for source participant manual/self match decisions. */
     public fun enqueueSourceParticipantMirrorRetry(initialDelaySeconds: Long = 0L)
 
+    /** Retries first/manual-memory backend writes that were saved locally while offline. */
+    public fun enqueueManualMemoryOutboxRetry(initialDelaySeconds: Long = 0L) {}
+
     /** Continues backend mirror pagination for [sourceType] after a capped refresh reports `hasMore=true`. */
     public fun enqueueSourceRelationRefresh(
         sourceType: String,

@@ -50,6 +50,7 @@ import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -68,9 +69,11 @@ import com.becalm.android.ui.navigation.dispatchSourceDetailEffect
 import com.becalm.android.ui.sources.SourceDetailActionResolver
 import com.becalm.android.ui.sources.SourceDetailEffect
 import com.becalm.android.ui.sources.SourceReconnectDestination
+import com.becalm.android.ui.sources.SourceReconnectTargetResolver
 import com.becalm.android.ui.sources.SourceSyncPort
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -79,6 +82,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -132,6 +136,7 @@ public sealed interface ProcessingStatusEffect {
     public data class OpenReconnect(
         val destination: SourceReconnectDestination,
         val sourceType: String,
+        val sourceConnectionId: String? = null,
     ) : ProcessingStatusEffect
 
     public data object OpenConsentSettings : ProcessingStatusEffect
@@ -144,7 +149,8 @@ public class ProcessingStatusViewModel @Inject constructor(
     rawIngestionRepository: RawIngestionRepository,
     private val audioProcessingConfirmationRepository: AudioProcessingConfirmationRepository,
     private val sourceSyncPort: SourceSyncPort,
-    authRepository: AuthRepository,
+    private val sourceConnectionRepository: SourceConnectionRepository,
+    private val authRepository: AuthRepository,
 ) : ViewModel() {
     private val actionInProgressSourceType: MutableStateFlow<String?> = MutableStateFlow(null)
     private val _effects: MutableSharedFlow<ProcessingStatusEffect> =
@@ -259,12 +265,27 @@ public class ProcessingStatusViewModel @Inject constructor(
 
     private fun openReconnect(sourceType: String) {
         val destination = SourceDetailActionResolver.reconnectDestinationFor(sourceType) ?: return
-        _effects.tryEmit(
-            ProcessingStatusEffect.OpenReconnect(
-                destination = destination,
-                sourceType = sourceType,
-            ),
-        )
+        viewModelScope.launch {
+            _effects.emit(
+                ProcessingStatusEffect.OpenReconnect(
+                    destination = destination,
+                    sourceType = sourceType,
+                    sourceConnectionId = reconnectTargetConnectionId(sourceType),
+                ),
+            )
+        }
+    }
+
+    private suspend fun reconnectTargetConnectionId(sourceType: String): String? {
+        return try {
+            val userId = authRepository.currentSession()?.userId?.takeIf { it.isNotBlank() } ?: return null
+            val connections = sourceConnectionRepository.observeAll(userId).first()
+            SourceReconnectTargetResolver.targetConnectionId(connections, sourceType)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun recoveryActionFor(
@@ -380,6 +401,7 @@ public fun ProcessingStatusScreen(
                     SourceDetailEffect.OpenReconnect(
                         destination = effect.destination,
                         sourceType = effect.sourceType,
+                        sourceConnectionId = effect.sourceConnectionId,
                     ),
                 )
             ProcessingStatusEffect.OpenConsentSettings ->
@@ -759,9 +781,13 @@ private fun ProcessingStatusRow.statusText(): String {
 @Composable
 private fun ProcessingStatusRow.userFacingMessage(): String? {
     localizedProcessingStatusMessage(message)?.let { return uiMessageStringResource(it) }
+    val normalizedMessage = message.normalizedRecoveryMessage()
     return when {
         phase == ProcessingPhase.ERROR && message?.startsWith("HTTP ") == true ->
             stringResource(R.string.processing_status_error_server_temporary)
+        (phase == ProcessingPhase.BLOCKED || phase == ProcessingPhase.ERROR) &&
+            normalizedMessage.isCredentialOrAuthMessage() ->
+            stringResource(R.string.processing_status_error_reconnect_needed)
         phase == ProcessingPhase.AWAITING_CONFIRMATION ->
             message?.takeIf { it.isNotBlank() }
                 ?: stringResource(R.string.processing_status_audio_confirmation_required)

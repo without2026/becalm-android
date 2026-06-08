@@ -14,14 +14,14 @@ version: 3
 behaviors:
   - id: MAN-001
     type: ui_interaction
-    description: "CommitmentManagementScreen 우하단 + 버튼은 신규 manual CommitmentCreateSheet를 열지 않는다. 대신 evidence import sheet를 연다"
-    screen: "CommitmentManagementScreen"
+    description: "CommitmentActionInboxScreen 우하단 + 버튼은 신규 manual CommitmentCreateSheet를 열지 않는다. 대신 evidence import sheet를 연다"
+    screen: "CommitmentActionInboxScreen"
     interaction: "FAB [+] 탭"
-    precondition: "CommitmentManagementScreen 표시됨"
+    precondition: "CommitmentActionInboxScreen 표시됨"
     expected: "CommitmentCreateSheet 빈 폼은 열리지 않는다. 화면에는 '증거 추가' sheet가 표시되고 메신저 스크린샷, 회의 녹음, 회의 전사본 import action이 보인다. 신규 manual source_type row는 생성되지 않는다"
     source: phase2-acceptance
     tests:
-      - "CommitmentManagementScreenTest.commitment_management_fab_opens_evidence_import_sheet"
+      - "CommitmentActionInboxScreenTest.commitment_action_inbox_fab_opens_evidence_import_sheet"
 
   - id: MAN-002
     type: ui_interaction
@@ -38,7 +38,7 @@ behaviors:
     description: "신규 source_type='manual' commitment 생성은 primary UI에서 제거된다. manual source_type은 기존 데이터/서버 contract 호환과 supersede fallback을 위해서만 남는다"
     screen: "CommitmentCreateSheet"
     interaction: "일반 Commitments FAB"
-    precondition: "CommitmentManagementScreen 표시됨"
+    precondition: "CommitmentActionInboxScreen 표시됨"
     expected: "source_type='manual' raw_ingestion_events row는 생성되지 않고, 신규 manual commitment 생성 API 호출도 발생하지 않는다. 새 evidence가 필요하면 message_screenshot/meeting source raw event를 먼저 만들고 LLM extraction 결과로 action/schedule/decision을 저장한다"
     source: phase2-acceptance
     tests: []
@@ -46,7 +46,7 @@ behaviors:
   - id: MAN-004
     type: ui_interaction
     description: "수동 약속은 UI에서 '수동 추가' 배지로 구분된다 — CommitmentCard 상단 우측에 📝 아이콘과 '수동 추가' 라벨. CommitmentDetailSheet의 '출처' 섹션은 '사용자 직접 추가 ({created_at}, KST)'로 표시되며 source_event_title·source_event_occurred_at은 숨김. PersonDetailScreen 목록에서도 동일 배지 표시"
-    screen: "CommitmentManagementScreen | CommitmentDetailSheet | PersonDetailScreen"
+    screen: "CommitmentActionInboxScreen | CommitmentDetailSheet | PersonDetailScreen"
     interaction: "화면 진입"
     precondition: "Room에 source_type='manual' commitment 존재"
     expected: "CommitmentCard: 📝 아이콘 + '수동 추가' 라벨. CommitmentDetailSheet: '출처' 섹션 텍스트 '사용자 직접 추가 2026-04-18 14:30 KST' + 원문 링크 없음. LLM 추출 약속의 '출처: {source_event_title}'과 시각적 구분. direction 배지·quote·due_at·action_state는 LLM 추출 약속과 동일하게 렌더링 — 생명주기는 구분 없음"
@@ -79,5 +79,5 @@ invariants:
   - "manual source_type은 commitments.source_type compatibility 및 supersede 결과 provenance 값으로만 남고 raw_ingestion_events에는 쓰지 않는다"
   - "새 evidence 입력은 message_screenshot/meeting raw event를 생성한 뒤 공통 LLM extraction pipeline을 거친다"
   - "LLM 추출 파이프라인(CommitmentExtractionWorker·VoiceExtractionWorker 등)은 source_type='manual' commitment를 재처리하지 않는다"
-  - "action_state 전이·편집(commitment-edit.spec.yml)·알림(CMT-008)은 LLM 추출 약속과 완전히 동일하게 동작한다 — source_type만 시각 배지로 구분"
+  - "action_state 전이(next-action-projection.spec.yml NAP-ACTION-*)·편집(commitment-edit.spec.yml)·알림(NAP-ACTION-002)은 LLM 추출 약속과 완전히 동일하게 동작한다 — source_type만 시각 배지로 구분"
   - "raw_ingestion_events 30일 리텐션 정책은 manual commitment에 영향 없음 (연관 raw event 없음)"

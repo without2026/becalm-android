@@ -151,10 +151,10 @@ public data class RawIngestionEventDto(
     @field:Json(name = "email_body_plain") val emailBodyPlain: String? = null,
 
     /** Safe email header signals for server-side noise filtering. Raw header values stay on-device. */
-    @field:Json(name = "has_list_unsubscribe") val hasListUnsubscribe: Boolean = false,
-    @field:Json(name = "has_list_id") val hasListId: Boolean = false,
-    @field:Json(name = "auto_submitted") val autoSubmitted: Boolean = false,
-    @field:Json(name = "bulk_precedence") val bulkPrecedence: Boolean = false,
+    @field:Json(name = "has_list_unsubscribe") val hasListUnsubscribe: Boolean? = false,
+    @field:Json(name = "has_list_id") val hasListId: Boolean? = false,
+    @field:Json(name = "auto_submitted") val autoSubmitted: Boolean? = false,
+    @field:Json(name = "bulk_precedence") val bulkPrecedence: Boolean? = false,
 
     /** ISO 8601 timestamp of when the event occurred (not upload time). */
     @field:Json(name = "timestamp") val timestamp: Instant,

@@ -25,6 +25,8 @@ import com.becalm.android.ui.sources.ContactsSourceDetailEffect
 import com.becalm.android.ui.sources.ContactsSourceDetailViewModel
 import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.sources.SourcesListViewModel
+import com.becalm.android.ui.sources.SourceSyncPort
+import com.becalm.android.worker.SourceConnectionLocalStateHydrator
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -57,15 +59,20 @@ class SourcesListViewModelSpecTest {
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk()
     private val contactsPermissionChecker = FakeContactsPermissionChecker()
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val sourceConnectionLocalStateHydrator: SourceConnectionLocalStateHydrator = mockk(relaxed = true)
+    private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session()))
+        coEvery { authRepository.currentSession() } returns session()
         every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
         every { userPrefsStore.observeContactsConsent() } returns flowOf(true)
+        coEvery { sourceConnectionLocalStateHydrator.hydrate(any()) } returns Unit
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
+        coEvery { sourceSyncPort.requestManualSync(any()) } returns BecalmResult.Success(Unit)
     }
 
     @After
@@ -265,7 +272,7 @@ class SourcesListViewModelSpecTest {
     }
 
     @Test
-    fun `sources list can refresh server status when screen resumes`() = runTest {
+    fun `sources list hydrates source connections when screen resumes`() = runTest {
         every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
 
@@ -274,7 +281,78 @@ class SourcesListViewModelSpecTest {
         viewModel.refreshStatuses()
         testDispatcher.scheduler.advanceUntilIdle()
 
+        coVerify(exactly = 1) { sourceConnectionLocalStateHydrator.hydrate("user-1") }
+        coVerify(exactly = 0) { sourceStatusRepository.refreshFromServer() }
+    }
+
+    @Test
+    fun `sources list falls back to source status refresh when hydration throws`() = runTest {
+        every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
+        coEvery { sourceConnectionLocalStateHydrator.hydrate("user-1") } throws IllegalStateException("boom")
+
+        val viewModel = buildSourcesListViewModel()
+
+        viewModel.refreshStatuses()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { sourceConnectionLocalStateHydrator.hydrate("user-1") }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+    }
+
+    @Test
+    fun `oauth success result requests immediate backend sync for connected gmail`() = runTest {
+        every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
+
+        val viewModel = buildSourcesListViewModel()
+
+        viewModel.onSourceConnectionResult(
+            result = "success",
+            provider = "gmail",
+            family = "mail",
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { sourceConnectionLocalStateHydrator.hydrate("user-1") }
+        coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.GMAIL) }
+    }
+
+    @Test
+    fun `oauth error result refreshes state without requesting backend sync`() = runTest {
+        every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
+
+        val viewModel = buildSourcesListViewModel()
+
+        viewModel.onSourceConnectionResult(
+            result = "error",
+            provider = "gmail",
+            family = "mail",
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { sourceConnectionLocalStateHydrator.hydrate("user-1") }
+        coVerify(exactly = 0) { sourceSyncPort.requestManualSync(any()) }
+    }
+
+    @Test
+    fun `oauth success result is handled once per source result key`() = runTest {
+        every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
+
+        val viewModel = buildSourcesListViewModel()
+
+        repeat(2) {
+            viewModel.onSourceConnectionResult(
+                result = "success",
+                provider = "gmail",
+                family = "mail",
+            )
+        }
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.GMAIL) }
     }
 
     @Test
@@ -298,6 +376,8 @@ class SourcesListViewModelSpecTest {
         personEnrichmentRepository = personEnrichmentRepository,
         contactsPermissionChecker = contactsPermissionChecker,
         userPrefsStore = userPrefsStore,
+        sourceConnectionLocalStateHydrator = sourceConnectionLocalStateHydrator,
+        sourceSyncPort = sourceSyncPort,
         logger = logger,
     )
 

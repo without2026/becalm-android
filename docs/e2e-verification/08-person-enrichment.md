@@ -136,7 +136,7 @@ grep -rn "persons_enrichment.*deleteAll\|PersonEnrichmentRepository.*deleteAll" 
 ## 주의 — `ContentObserverBootstrap.registerSmsObserver` / `registerCallLogObserver` 가 존재함
 
 `worker/ContentObserverBootstrap.kt:98` `registerSmsObserver` / L128 `registerCallLogObserver` — 이것은 enrichment 가 아닌 **별도 ingestion 경로**로 보인다. CTO 는 다음을 확인해야 한다:
-- [ ] SMS / CallLog 가 어떤 spec 에 매핑되어 있는가? 현재 `.spec/` 파일 9개 중 이에 대한 behavior 가 **없다** → spec gap 가능.
+- [ ] SMS / CallLog 가 어떤 spec 에 매핑되어 있는가? 현재 active `.spec/` 파일 중 이에 대한 behavior 가 **없다** → spec gap 가능.
 - [ ] 해당 observer 가 실제 raw_ingestion_events 에 insert 한다면, PIPA invariant ("SMS, 통화 기록 접근 없음") 와 **직접 충돌**.
 
 이 gap 은 본 verification 스위프의 1순위 escalation 항목.

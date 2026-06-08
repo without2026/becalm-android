@@ -2,7 +2,9 @@
 # Source management = per-source administration and error recovery path.
 # The PRIMARY sync trigger is ING-011 (foreground catch-up) and DASH-009 (pull-to-refresh).
 # Per-source manual trigger (SMG-005) is intentionally only accessible inside source detail — not on dashboard.
-# Source of truth is local Room/UI state; provider fetch owner is source-specific.
+# Source facts can originate locally or from provider sync; provider fetch owner
+# is source-specific. Product action decisions are backend-owned and Android
+# renders the last person_action_item_cache from Railway.
 # Fetch owner table:
 #   backend-managed: gmail, outlook_mail, google_calendar, outlook_calendar
 #   local-worker: voice, meeting, naver_imap, daum_imap
@@ -74,7 +76,7 @@ behaviors:
 
 invariants:
   - "수동 source sync는 authenticated session이 있을 때만 허용된다 — pre-login 상태에서는 backend endpoint 호출과 WorkManager enqueue 모두 금지"
-  - "Room/local UI source of truth와 provider fetch owner를 혼동하지 않는다: Room은 계속 UI read model이고, Gmail/Outlook Mail/calendar fetch는 Railway owner, IMAP/voice fetch는 Android local worker owner다"
+  - "source origin/cache와 product decision owner를 혼동하지 않는다: Room은 local source origin/outbox/cache 역할을 할 수 있고, Gmail/Outlook Mail/calendar fetch는 Railway owner, IMAP/voice fetch는 Android local worker owner다. 단 Person/Schedule/Commitment action feed의 계산·랭킹은 Railway person_action_items owner다"
   - "Naver/Daum IMAP credential은 Android Keystore에만 저장되며 Railway로 전송하지 않는다"
   - "소스 연결 해제 시 기존 Room 데이터(raw_ingestion_events, EmailBody, commitments/quotes)는 삭제하지 않는다"
   - "소스 연결 해제 시 해당 소스의 Keystore credentials와 DataStore cursor만 삭제된다"

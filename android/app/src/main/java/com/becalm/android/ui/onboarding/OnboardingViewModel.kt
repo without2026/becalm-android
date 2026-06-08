@@ -27,6 +27,7 @@ import com.becalm.android.data.repository.OnboardingActivationProgress
 import com.becalm.android.data.repository.OnboardingActivationPreviewRepository
 import com.becalm.android.data.repository.OnboardingActivationPreviewResult
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.PersonActionMutationSyncStats
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
@@ -271,6 +272,9 @@ public data class GmailActivationPreviewUi(
     val dueHint: String?,
     val sourceType: String,
     val sourceTitle: String?,
+    val actionItemId: String? = null,
+    val actionKind: String? = null,
+    val reasonCodes: List<String> = emptyList(),
 )
 
 public enum class GmailActivationPreviewStatus {
@@ -331,6 +335,7 @@ public data class OnboardingUiState(
     val sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
     val sourceOwnershipsLoaded: Boolean = false,
     val sourceOwnershipLoadFailed: Boolean = false,
+    val sourceOwnershipActionInProgressIds: Set<String> = emptySet(),
     val callRecordingConnectionState: SourceConnectionState = SourceConnectionState.Idle,
     val contactsPreview: OnboardingContactsPreviewUi = OnboardingContactsPreviewUi(),
     val calendarPreview: OnboardingCalendarPreviewUi = OnboardingCalendarPreviewUi(),
@@ -347,6 +352,13 @@ public data class OnboardingUiState(
 private const val TAG = "OnboardingViewModel"
 internal const val ONBOARDING_COMPLETE_GENERIC_PERSON_ID = "ready"
 internal const val ONBOARDING_INTRO_PAGE_COUNT = 5
+
+private data class ConnectedActivationPreviewSources(
+    val includeGmail: Boolean,
+    val includeGoogleCalendar: Boolean,
+) {
+    val hasAny: Boolean = includeGmail || includeGoogleCalendar
+}
 
 private fun FirstMemoryActivationUiState.toDraft(): FirstMemoryDraft =
     FirstMemoryDraft(
@@ -383,6 +395,9 @@ private fun OnboardingActivationPreview.toUi(): GmailActivationPreviewUi =
         dueHint = dueHint,
         sourceType = sourceType,
         sourceTitle = sourceTitle,
+        actionItemId = actionItemId,
+        actionKind = actionKind,
+        reasonCodes = reasonCodes,
     )
 
 /**
@@ -677,10 +692,15 @@ public class OnboardingViewModel @Inject constructor(
     }
 
     private fun routeAfterOptionalOnboardingSources() {
-        routeAfterOptionalOnboardingSources(markGmailPreviewLoading = false)
+        val activationPreviewSources = _uiState.value.connectedActivationPreviewSources()
+        if (activationPreviewSources.hasAny) {
+            startConnectedActivationPreviewScan(activationPreviewSources)
+            return
+        }
+        completeAfterOptionalOnboardingSources(markGmailPreviewLoading = false)
     }
 
-    private fun routeAfterOptionalOnboardingSources(markGmailPreviewLoading: Boolean) {
+    private fun completeAfterOptionalOnboardingSources(markGmailPreviewLoading: Boolean) {
         val state = _uiState.value
         if (!state.hasConnectedOnboardingSource()) {
             _uiState.update {
@@ -716,6 +736,85 @@ public class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             completeFirstMemorySetup {
                 _setupEffects.emit(OnboardingSetupEffect.NavigateToCompletion())
+            }
+        }
+    }
+
+    private fun startConnectedActivationPreviewScan(sources: ConnectedActivationPreviewSources) {
+        if (_uiState.value.isCompleting || _uiState.value.gmailActivationPreview.loading) return
+        viewModelScope.launch {
+            if (!gmailActivationSyncMutex.tryLock()) {
+                return@launch
+            }
+            try {
+                _uiState.update {
+                    it.copy(
+                        setupStage = OnboardingSetupStage.GMAIL_PREVIEW,
+                        introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                        gmailActivationPreview = GmailActivationPreviewUiState(
+                            loading = true,
+                            status = GmailActivationPreviewStatus.Loading,
+                            progress = 0.08f,
+                            progressMessage = sources.activationPreviewLoadingMessage(),
+                            progressStage = "queued",
+                        ),
+                        firstMemoryExitPromptVisible = false,
+                        notice = null,
+                        error = null,
+                    )
+                }
+                emitSetupDestination(OnboardingSetupDestination.GmailPreview)
+
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                if (userId.isNullOrBlank()) {
+                    showGmailActivationFallback(GmailActivationPreviewStatus.FailedTerminal)
+                    return@launch
+                }
+                val result = try {
+                    onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+                        userId = userId,
+                        includeGmail = sources.includeGmail,
+                        includeGoogleCalendar = sources.includeGoogleCalendar,
+                        onProgress = { progress -> updateGmailActivationProgress(progress) },
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.w(TAG, "connected source activation preview failed", e)
+                    OnboardingActivationPreviewResult.Failed(retryable = true)
+                }
+                when (result) {
+                    is OnboardingActivationPreviewResult.Ready -> _uiState.update {
+                        it.copy(
+                            gmailActivationPreview = GmailActivationPreviewUiState(
+                                loading = false,
+                                previews = result.previews.map { preview -> preview.toUi() },
+                                status = GmailActivationPreviewStatus.Ready,
+                                progress = 1f,
+                                progressMessage = "연결한 자료 확인을 마쳤습니다",
+                                progressStage = "complete",
+                            ),
+                            notice = null,
+                            error = null,
+                        )
+                    }
+                    OnboardingActivationPreviewResult.Empty -> showGmailActivationFallback(
+                        GmailActivationPreviewStatus.Empty,
+                    )
+                    is OnboardingActivationPreviewResult.Pending -> showGmailActivationFallback(
+                        GmailActivationPreviewStatus.StillProcessing,
+                        result.progress,
+                    )
+                    is OnboardingActivationPreviewResult.Failed -> showGmailActivationFallback(
+                        if (result.retryable) {
+                            GmailActivationPreviewStatus.FailedRetryable
+                        } else {
+                            GmailActivationPreviewStatus.FailedTerminal
+                        },
+                    )
+                }
+            } finally {
+                gmailActivationSyncMutex.unlock()
             }
         }
     }
@@ -811,17 +910,25 @@ public class OnboardingViewModel @Inject constructor(
     }
 
     public fun onReturnToGmailActivationPreview() {
+        routeToGmailActivationPreviewIfAvailable()
+    }
+
+    private fun routeToGmailActivationPreviewIfAvailable() {
+        if (!_uiState.value.gmailActivationPreview.canReturnToActivationPreview()) return
         _uiState.update { state ->
-            if (!state.gmailActivationPreview.canReturnToActivationPreview()) return@update state
-            state.copy(
-                setupStage = OnboardingSetupStage.GMAIL_PREVIEW,
-                introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
-                firstMemoryExitPromptVisible = false,
-                notice = null,
-                error = null,
-            )
+            if (!state.gmailActivationPreview.canReturnToActivationPreview()) {
+                state
+            } else {
+                state.copy(
+                    setupStage = OnboardingSetupStage.GMAIL_PREVIEW,
+                    introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                    firstMemoryExitPromptVisible = false,
+                    notice = null,
+                    error = null,
+                )
+            }
         }
-        emitCurrentSetupDestination()
+        emitSetupDestination(OnboardingSetupDestination.GmailPreview)
     }
 
     public fun onGmailConnectedForActivation() {
@@ -912,13 +1019,27 @@ public class OnboardingViewModel @Inject constructor(
 
     public fun onStartWithoutGmailActivationPreview() {
         if (_uiState.value.isCompleting || _uiState.value.gmailActivationPreview.loading) return
-        routeAfterOptionalOnboardingSources(markGmailPreviewLoading = true)
+        completeAfterOptionalOnboardingSources(markGmailPreviewLoading = true)
     }
+
+    private fun OnboardingUiState.connectedActivationPreviewSources(): ConnectedActivationPreviewSources =
+        ConnectedActivationPreviewSources(
+            includeGmail = stepStates[OnboardingStep.LINK_GMAIL] == StepStatus.COMPLETE ||
+                gmailActivationPreview.canReturnToActivationPreview(),
+            includeGoogleCalendar = stepStates[OnboardingStep.LINK_GOOGLE_CALENDAR] == StepStatus.COMPLETE,
+        )
 
     private fun OnboardingUiState.hasConnectedOnboardingSource(): Boolean =
         stepStates[OnboardingStep.LINK_GOOGLE_CALENDAR] == StepStatus.COMPLETE ||
             gmailActivationPreview.hasReadyPreview() ||
             callRecordingConnectionState == SourceConnectionState.Connected
+
+    private fun ConnectedActivationPreviewSources.activationPreviewLoadingMessage(): String =
+        when {
+            includeGmail && includeGoogleCalendar -> "Gmail과 Google Calendar를 확인하고 있습니다"
+            includeGoogleCalendar -> "Google Calendar 연결을 확인하고 있습니다"
+            else -> "Gmail 연결을 확인하고 있습니다"
+        }
 
     private fun updateGmailActivationProgress(progress: OnboardingActivationProgress) {
         _uiState.update { state ->
@@ -973,6 +1094,88 @@ public class OnboardingViewModel @Inject constructor(
                 _setupEffects.emit(OnboardingSetupEffect.NavigateToCompletion(personId))
             }
         }
+    }
+
+    public fun onAcceptGmailActivationPreview(actionItemId: String?) {
+        mutateGmailActivationPreviewAction(
+            actionItemId = actionItemId,
+            successMessageRes = R.string.onb_activation_preview_accept_notice,
+            removeOnSuccess = true,
+            mutation = { userId, id ->
+                onboardingActivationPreviewRepository.acceptPreviewAction(
+                    userId = userId,
+                    actionItemId = id,
+                )
+            },
+        )
+    }
+
+    public fun onDismissGmailActivationPreview(actionItemId: String?) {
+        mutateGmailActivationPreviewAction(
+            actionItemId = actionItemId,
+            successMessageRes = R.string.onb_activation_preview_dismiss_notice,
+            removeOnSuccess = true,
+            mutation = { userId, id ->
+                onboardingActivationPreviewRepository.dismissPreviewAction(
+                    userId = userId,
+                    actionItemId = id,
+                )
+            },
+        )
+    }
+
+    private fun mutateGmailActivationPreviewAction(
+        actionItemId: String?,
+        successMessageRes: Int,
+        removeOnSuccess: Boolean,
+        mutation: suspend (String, String) -> BecalmResult<PersonActionMutationSyncStats>,
+    ) {
+        val normalizedActionItemId = actionItemId?.trim().orEmpty()
+        if (normalizedActionItemId.isBlank()) return
+        viewModelScope.launch {
+            val userId = userPrefsStore.observeCurrentUserId().first()?.trim().orEmpty()
+            if (userId.isBlank()) {
+                _uiState.update {
+                    it.copy(error = UiMessage.resource(R.string.onb_activation_preview_action_failed))
+                }
+                return@launch
+            }
+            when (val result = mutation(userId, normalizedActionItemId)) {
+                is BecalmResult.Success -> _uiState.update { state ->
+                    val gmailActivationPreview = if (removeOnSuccess) {
+                        state.gmailActivationPreview.withoutAction(normalizedActionItemId)
+                    } else {
+                        state.gmailActivationPreview
+                    }
+                    state.copy(
+                        gmailActivationPreview = gmailActivationPreview,
+                        notice = UiMessage.resource(successMessageRes),
+                        error = null,
+                    )
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "gmail activation preview action mutation failed: ${result.error}")
+                    _uiState.update {
+                        it.copy(error = UiMessage.resource(R.string.onb_activation_preview_action_failed))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun GmailActivationPreviewUiState.withoutAction(actionItemId: String): GmailActivationPreviewUiState {
+        val nextPreviews = previews.filterNot { it.actionItemId == actionItemId }
+        val nextPreview = preview?.takeUnless { it.actionItemId == actionItemId }
+        val hasPreview = nextPreview != null || nextPreviews.isNotEmpty()
+        return copy(
+            preview = nextPreview,
+            previews = nextPreviews,
+            status = if (!hasPreview && status == GmailActivationPreviewStatus.Ready) {
+                GmailActivationPreviewStatus.Empty
+            } else {
+                status
+            },
+        )
     }
 
     public fun onSaveSelfIdentity() {
@@ -1253,13 +1456,17 @@ public class OnboardingViewModel @Inject constructor(
     }
 
     /** Starts the OAuth flow for a source on the unified source-connection screen. */
-    public fun onConnectSourceProvider(provider: OnboardingSourceProvider, activity: Activity) {
+    public fun onConnectSourceProvider(
+        provider: OnboardingSourceProvider,
+        activity: Activity,
+        sourceConnectionId: String? = null,
+    ) {
         provider.emailProvider?.let { emailProvider ->
-            onConnectEmailProvider(emailProvider, activity)
+            onConnectEmailProvider(emailProvider, activity, sourceConnectionId = sourceConnectionId)
             return
         }
         provider.calendarProvider?.let { calendarProvider ->
-            onConnectCalendarProvider(calendarProvider, activity)
+            onConnectCalendarProvider(calendarProvider, activity, sourceConnectionId = sourceConnectionId)
         }
     }
 
@@ -1318,6 +1525,58 @@ public class OnboardingViewModel @Inject constructor(
         persistStepStatuses(updates)
     }
 
+    public fun onDeleteSourceConnection(connectionId: String) {
+        val normalizedId = connectionId.trim()
+        if (normalizedId.isBlank()) return
+        if (normalizedId in _uiState.value.sourceOwnershipActionInProgressIds) return
+        viewModelScope.launch {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_no_user)) }
+                return@launch
+            }
+            _uiState.update {
+                it.copy(
+                    sourceOwnershipActionInProgressIds = it.sourceOwnershipActionInProgressIds + normalizedId,
+                    error = null,
+                    notice = null,
+                )
+            }
+            try {
+                when (sourceConnectionRepository.deleteConnection(userId, normalizedId)) {
+                    is BecalmResult.Success -> {
+                        sourceStatusRepository.refreshFromServer()
+                        _uiState.update {
+                            it.copy(
+                                sourceOwnerships = it.sourceOwnerships.filterNot { ownership -> ownership.id == normalizedId },
+                                sourceOwnershipActionInProgressIds = it.sourceOwnershipActionInProgressIds - normalizedId,
+                                error = null,
+                            )
+                        }
+                    }
+                    is BecalmResult.Failure -> {
+                        _uiState.update {
+                            it.copy(
+                                sourceOwnershipActionInProgressIds = it.sourceOwnershipActionInProgressIds - normalizedId,
+                                error = UiMessage.resource(R.string.settings_identity_error_delete_connection),
+                            )
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(TAG, "delete source connection failed", e)
+                _uiState.update {
+                    it.copy(
+                        sourceOwnershipActionInProgressIds = it.sourceOwnershipActionInProgressIds - normalizedId,
+                        error = UiMessage.resource(R.string.settings_identity_error_delete_connection),
+                    )
+                }
+            }
+        }
+    }
+
     /**
      * Initiates an interactive calendar OAuth sign-in for [provider].
      *
@@ -1325,9 +1584,13 @@ public class OnboardingViewModel @Inject constructor(
      * is wired. This removes the previous fake-success path while keeping a stable unit-testable
      * contract for future external integration.
      */
-    public fun onConnectCalendarProvider(provider: CalendarOAuthProvider, activity: Activity) {
+    public fun onConnectCalendarProvider(
+        provider: CalendarOAuthProvider,
+        activity: Activity,
+        sourceConnectionId: String? = null,
+    ) {
         viewModelScope.launch {
-            when (val result = calendarOAuthConnector.startSignIn(provider, activity)) {
+            when (val result = calendarOAuthConnector.startSignIn(provider, activity, sourceConnectionId)) {
                 CalendarOAuthResult.Connected -> markCalendarProviderConnected(provider)
                 CalendarOAuthResult.NotConnected -> {
                     _calendarConnectEvents.emit(CalendarConnectEvent.NotConnected(provider))
@@ -1499,9 +1762,10 @@ public class OnboardingViewModel @Inject constructor(
      *
      * Routes through [EmailOAuthConnector.startSignIn]; on success persists the
      * `<provider>_connected=true` flag, marks the appropriate step
-     * [StepStatus.COMPLETE], and emits [EmailConnectEvent.Connected]. Failures emit
+     * [StepStatus.COMPLETE], and emits [EmailConnectEvent.Connected]. Non-auth failures emit
      * [EmailConnectEvent.Failed] and mark the step [StepStatus.SKIPPED] so the ONB-008
-     * terminal gate accepts the flow.
+     * terminal gate accepts the flow. Auth-boundary failures keep the step retryable because
+     * they mean the session must be recovered, not that the user chose to skip the source.
      *
      * [provider] must be [EmailPipaProvider.GMAIL] or [EmailPipaProvider.OUTLOOK_MAIL]
      * — IMAP is credential-based and uses [saveImapCredentials] instead.
@@ -1510,7 +1774,11 @@ public class OnboardingViewModel @Inject constructor(
      * @param activity The foreground activity; required so [EmailOAuthConnector] can
      *   launch the external browser flow for the backend-managed OAuth callback path.
      */
-    public fun onConnectEmailProvider(provider: EmailPipaProvider, activity: Activity) {
+    public fun onConnectEmailProvider(
+        provider: EmailPipaProvider,
+        activity: Activity,
+        sourceConnectionId: String? = null,
+    ) {
         require(provider == EmailPipaProvider.GMAIL || provider == EmailPipaProvider.OUTLOOK_MAIL) {
             "${provider.storageKey} uses saveImapCredentials(), not onConnectEmailProvider()"
         }
@@ -1532,17 +1800,22 @@ public class OnboardingViewModel @Inject constructor(
                 _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, "pipa_consent_missing"))
                 return@launch
             }
-            when (val result = emailOAuthConnector.startSignIn(oauthProvider, activity)) {
+            when (val result = emailOAuthConnector.startSignIn(oauthProvider, activity, sourceConnectionId)) {
                 EmailOAuthResult.Connected -> markEmailProviderConnected(provider, oauthProvider)
                 EmailOAuthResult.NotConnected -> {
                     _emailConnectEvents.emit(EmailConnectEvent.NotConnected(provider))
                 }
                 is EmailOAuthResult.Failed -> {
                     reportOnboardingStepFailed(oauthProvider.step, result.errorCode)
-                    _uiState.update {
-                        it.copy(stepStates = it.stepStates + (oauthProvider.step to StepStatus.SKIPPED))
+                    val failureStatus = if (result.errorCode.isAuthBoundaryOAuthError()) {
+                        StepStatus.NOT_STARTED
+                    } else {
+                        StepStatus.SKIPPED
                     }
-                    persistStepStatus(oauthProvider.step, StepStatus.SKIPPED)
+                    _uiState.update {
+                        it.copy(stepStates = it.stepStates + (oauthProvider.step to failureStatus))
+                    }
+                    persistStepStatus(oauthProvider.step, failureStatus)
                     _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, result.errorCode))
                 }
             }
@@ -1692,11 +1965,17 @@ public class OnboardingViewModel @Inject constructor(
                             error = null,
                         )
                     }
+                    if (provider == EmailPipaProvider.GMAIL) {
+                        routeToGmailActivationPreviewIfAvailable()
+                    }
                     onMarkStepStatus(oauthProvider.step, StepStatus.NOT_STARTED)
                     reportOnboardingStepFailed(oauthProvider.step, "gmail_sync_failed")
                     _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, "gmail_sync_failed"))
                     return
                 }
+            }
+            if (provider == EmailPipaProvider.GMAIL) {
+                routeToGmailActivationPreviewIfAvailable()
             }
             appRuntimeSyncCoordinator.refresh()
             refreshSourceStatusAfterBackendSync(oauthProvider.sourceType)
@@ -2535,7 +2814,7 @@ private fun SourceConnectionEntity.toOnboardingOwnershipUi(): OnboardingSourceOw
 
 private fun List<SourceConnectionEntity>.connectedOnboardingStepUpdates(): Map<OnboardingStep, StepStatus> =
     asSequence()
-        .filter { it.status == SOURCE_CONNECTION_STATUS_CONNECTED }
+        .filter { sourceConnectionStateForStatus(it.status) == SourceConnectionState.Connected }
         .mapNotNull(SourceConnectionEntity::connectedOnboardingStep)
         .associateWith { StepStatus.COMPLETE }
 
@@ -2552,8 +2831,6 @@ private fun SourceConnectionEntity.connectedOnboardingStep(): OnboardingStep? =
         else -> null
     }
 
-private const val SOURCE_CONNECTION_STATUS_CONNECTED = "connected"
-
 private val RECORDING_SOURCE_TYPES = setOf(
     SourceType.VOICE,
     SourceType.CALL_RECORDING,
@@ -2565,6 +2842,9 @@ private const val CALENDAR_PREVIEW_RANGE_MILLIS = 183L * 24L * 60L * 60L * 1000L
 private const val PENDING_BACKEND_REFRESH_DELAY_SECONDS = 45L
 private const val ONBOARDING_ACTIVATION_PREVIEW_MODE = "activation_preview"
 private const val ONBOARDING_PREVIEW_TIMEOUT_MS = 30_000L
+
+private fun String.isAuthBoundaryOAuthError(): Boolean =
+    this == "auth_required" || this == "auth_invalid"
 
 private enum class CalendarSourceRefreshResult {
     Ready,

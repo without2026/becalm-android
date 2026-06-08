@@ -479,6 +479,11 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         val cursorKey = MirrorCursorKeys.rawEvents(userId, sourceType)
         val useStoredCursor = since == null
         var cursor: String? = if (useStoredCursor) cursorStore.observeCursor(cursorKey).first() else null
+        if (cursor != null && localMirrorRowCount(userId, sourceType) == 0) {
+            cursorStore.clearCursor(cursorKey)
+            cursor = null
+            logger.d(TAG, "refreshSince discarded stale raw cursor for empty local mirror sourceType=$sourceType")
+        }
         var totalFetched = 0
         var totalUpserted = 0
         var lastHasMore = false
@@ -537,6 +542,13 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             ),
         )
     }
+
+    private suspend fun localMirrorRowCount(userId: String, sourceType: String?): Int =
+        if (sourceType == null) {
+            dao.countForUser(userId)
+        } else {
+            dao.countForUserAndSourceType(userId, sourceType)
+        }
 
     private fun RawIngestionEventEntity.toSourceEventAnchorEntity(
         serverSourceEventId: String? = null,

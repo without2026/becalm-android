@@ -3,7 +3,6 @@ package com.becalm.android.ui.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
-import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -20,7 +19,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import javax.inject.Provider
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -30,7 +28,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 // ─── UI State ─────────────────────────────────────────────────────────────────
 
@@ -115,7 +112,6 @@ public class AuthViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val userProfileRepository: UserProfileRepository,
     private val runtimeBootstrapProvider: Provider<AuthenticatedRuntimeBootstrap>,
-    @IoDispatcher private val runtimeBootstrapDispatcher: CoroutineDispatcher,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -426,18 +422,7 @@ public class AuthViewModel @Inject constructor(
     private fun startRuntimeBootstrap(userId: String) {
         if (runtimeBootstrapUserId == userId) return
         runtimeBootstrapUserId = userId
-        viewModelScope.launch {
-            runCatching {
-                withContext(runtimeBootstrapDispatcher) {
-                    runtimeBootstrapProvider.get().startForUser(userId)
-                }
-            }.onFailure { error ->
-                if (runtimeBootstrapUserId == userId) {
-                    runtimeBootstrapUserId = null
-                }
-                logger.e(TAG, "runtime bootstrap failed", error)
-            }
-        }
+        runtimeBootstrapProvider.get().startForUserAsync(userId)
     }
 
     private suspend fun bootstrapUiState(): AuthUiState {

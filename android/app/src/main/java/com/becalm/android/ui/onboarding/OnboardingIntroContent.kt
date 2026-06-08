@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -82,7 +83,7 @@ internal fun OnboardingIntroContent(
         modifier = modifier
             .fillMaxWidth()
             .testTag("onboarding-intro"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         OnboardingSetupProgress(
             currentStep = pageIndex + 1,
@@ -161,6 +162,8 @@ internal fun GmailActivationPreviewContent(
     onUsePreview: () -> Unit,
     onRetry: () -> Unit = {},
     onStartWithoutPreview: () -> Unit = {},
+    onAcceptPreview: (GmailActivationPreviewUi) -> Unit = {},
+    onDismissPreview: (GmailActivationPreviewUi) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -173,13 +176,15 @@ internal fun GmailActivationPreviewContent(
             currentStep = ONBOARDING_INTRO_PAGE_COUNT,
             totalSteps = ONBOARDING_INTRO_PAGE_COUNT,
         )
-        if (state.loading && state.preview == null) {
+        val previews = state.previews.ifEmpty {
+            state.preview?.let { listOf(it) }.orEmpty()
+        }
+        if (state.loading && previews.isEmpty()) {
             GmailActivationLoading(state)
             return@Column
         }
 
-        val preview = state.primaryPreview()
-        if (preview == null) {
+        if (previews.isEmpty()) {
             GmailActivationFallback(
                 status = state.status,
                 onRetry = onRetry,
@@ -190,33 +195,100 @@ internal fun GmailActivationPreviewContent(
             )
             return@Column
         }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(
-                imageVector = Icons.Outlined.Email,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp),
-            )
+        val visiblePreviews = previews.take(ACTIVATION_PREVIEW_VISIBLE_LIMIT)
+        val confirmNeededPreviews = visiblePreviews.filter { it.needsOnboardingConfirmation() }
+        val highConfidencePreviews = visiblePreviews.filterNot { it.needsOnboardingConfirmation() }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SourceChip(
+                    icon = Icons.Outlined.CheckCircle,
+                    label = stringResource(R.string.onb_activation_preview_scan_complete),
+                )
+            }
             Text(
-                text = stringResource(R.string.onb_activation_preview_ready_title),
-                style = MaterialTheme.typography.headlineSmall,
+                text = stringResource(R.string.onb_activation_preview_ready_title_fmt, visiblePreviews.size),
+                style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 text = stringResource(R.string.onb_activation_preview_ready_body),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        GmailPreviewCard(preview = preview)
+        Column(
+            modifier = Modifier.testTag("gmail-activation-preview-list"),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (highConfidencePreviews.isNotEmpty()) {
+                GmailActivationPreviewSectionHeader(
+                    count = highConfidencePreviews.size,
+                    titleRes = R.string.onb_activation_preview_high_confidence_section_fmt,
+                    bodyRes = null,
+                    modifier = Modifier.testTag("gmail-activation-preview-high-confidence-section"),
+                )
+                highConfidencePreviews.forEach { preview ->
+                    GmailPreviewCard(
+                        preview = preview,
+                        onAccept = { onAcceptPreview(preview) },
+                        onDismiss = { onDismissPreview(preview) },
+                    )
+                }
+            }
+            if (confirmNeededPreviews.isNotEmpty()) {
+                GmailActivationPreviewSectionHeader(
+                    count = confirmNeededPreviews.size,
+                    titleRes = R.string.onb_activation_preview_confirm_needed_section_fmt,
+                    bodyRes = null,
+                    modifier = Modifier.testTag("gmail-activation-preview-confirm-needed-section"),
+                )
+                confirmNeededPreviews.forEach { preview ->
+                    GmailPreviewCard(
+                        preview = preview,
+                        onAccept = { onAcceptPreview(preview) },
+                        onDismiss = { onDismissPreview(preview) },
+                    )
+                }
+            }
+        }
         BecalmButton(
-            text = stringResource(R.string.onb_setup_start),
+            text = stringResource(R.string.onb_activation_preview_start_action),
             onClick = onUsePreview,
             loading = state.loading,
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("gmail-activation-use-preview"),
         )
+    }
+}
+
+@Composable
+private fun GmailActivationPreviewSectionHeader(
+    count: Int,
+    titleRes: Int,
+    bodyRes: Int?,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(titleRes, count),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        bodyRes?.let { resId ->
+            Text(
+                text = stringResource(resId),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -354,65 +426,121 @@ private fun gmailActivationFallbackCopy(status: GmailActivationPreviewStatus): G
             bodyRes = R.string.onb_activation_preview_ready_body,
             showRetry = false,
         )
-    }
+}
 
 @Composable
-private fun GmailPreviewCard(preview: GmailActivationPreviewUi) {
+private fun GmailPreviewCard(
+    preview: GmailActivationPreviewUi,
+    onAccept: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val source = sourcePresentationFor(preview.sourceType)
+    val canMutate = !preview.actionItemId.isNullOrBlank()
+    val needsConfirmation = canMutate && preview.needsOnboardingConfirmation()
+    val personLabel = preview.personName?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.onb_activation_preview_person_fallback)
+    val metadataLabel = preview.dueHint
+        ?.takeIf { !needsConfirmation && it.isNotBlank() }
+        ?.let { dueHint -> "$personLabel / $dueHint" }
+        ?: personLabel
     QuietPanel(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("gmail-activation-preview-card"),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                text = preview.personName?.takeIf { it.isNotBlank() }
-                    ?: stringResource(R.string.onb_activation_preview_person_fallback),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = preview.title,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (needsConfirmation) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StatusPill(
+                        label = stringResource(R.string.onb_activation_preview_confirm_needed_label),
+                        tone = StatusTone.Attention,
+                        compact = false,
+                    )
+                    preview.dueHint?.takeIf { it.isNotBlank() }?.let { dueHint ->
+                        Text(
+                            text = dueHint,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SourceChip(
-                    icon = source.icon,
-                    label = stringResource(source.labelRes),
-                )
-                preview.dueHint?.takeIf { it.isNotBlank() }?.let { dueHint ->
-                    Text(
-                        text = dueHint,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            preview.sourceTitle?.takeIf { it.isNotBlank() }?.let { sourceTitle ->
                 Text(
-                    text = sourceTitle,
+                    text = preview.title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = metadataLabel,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                if (needsConfirmation) {
+                    SourceChip(
+                        icon = source.icon,
+                        label = stringResource(source.labelRes),
+                        compact = true,
+                    )
+                }
+            }
+            if (needsConfirmation) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    BecalmButton(
+                        text = stringResource(R.string.onb_activation_preview_accept_action),
+                        onClick = onAccept,
+                        variant = BecalmButtonVariant.Secondary,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("gmail-activation-preview-accept"),
+                    )
+                    BecalmButton(
+                        text = stringResource(R.string.onb_activation_preview_reject_action),
+                        onClick = onDismiss,
+                        variant = BecalmButtonVariant.Text,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("gmail-activation-preview-reject"),
+                    )
+                }
             }
         }
     }
 }
 
+private const val ACTIVATION_PREVIEW_VISIBLE_LIMIT = 3
+
+private fun GmailActivationPreviewUi.needsOnboardingConfirmation(): Boolean =
+    actionKind == "confirm_onboarding" || reasonCodes.contains("onboarding:confirm_candidate")
+
 @Composable
-private fun SourceChip(icon: ImageVector, label: String) {
+private fun SourceChip(icon: ImageVector, label: String, compact: Boolean = false) {
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f),
@@ -420,12 +548,22 @@ private fun SourceChip(icon: ImageVector, label: String) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier.padding(
+                horizontal = if (compact) 7.dp else 9.dp,
+                vertical = if (compact) 4.dp else 5.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(14.dp))
-            Text(text = label, style = MaterialTheme.typography.labelMedium)
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(if (compact) 12.dp else 14.dp),
+            )
+            Text(
+                text = label,
+                style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
+            )
         }
     }
 }
@@ -522,11 +660,19 @@ private fun IntroSupportingPanel(
 ) {
     when (page) {
         OnboardingIntroPage.Welcome -> QuietPanel(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = stringResource(R.string.onb_intro_welcome_note),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.onb_intro_welcome_note),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(R.string.onb_intro_welcome_privacy_note),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("onboarding-welcome-privacy-note"),
+                )
+            }
         }
         OnboardingIntroPage.Identity -> SelfIdentitySetupPanel(
             state = selfIdentity,

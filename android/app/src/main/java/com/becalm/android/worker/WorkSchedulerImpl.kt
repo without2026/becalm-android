@@ -95,6 +95,10 @@ public class WorkSchedulerImpl @Inject constructor(
         planRunner.run(WorkSchedulerRequests.sourceParticipantMirrorPlan(initialDelaySeconds))
     }
 
+    override fun enqueueManualMemoryOutboxRetry(initialDelaySeconds: Long) {
+        planRunner.run(WorkSchedulerRequests.manualMemoryOutboxPlan(initialDelaySeconds))
+    }
+
     override fun enqueueSourceRelationRefresh(
         sourceType: String,
         initialDelaySeconds: Long,

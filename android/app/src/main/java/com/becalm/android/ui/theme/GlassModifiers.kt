@@ -1,19 +1,16 @@
 /**
- * Modifier extension functions for BeCalm's light-first frosted glass panels.
+ * Modifier extension functions for BeCalm's ink-mist panels.
  *
- * Each recipe is a precise port of a CSS pattern from v3 global.css:
- *   - translucent fill + hairline border + outer drop-shadow + inset highlight
- *
- * Compose cannot reliably apply true backdrop blur to the content behind a
- * panel. These recipes therefore use higher-opacity warm glass fills, hairline
- * borders, and soft shadows to preserve the frosted hierarchy without blurring
- * foreground content.
+ * The current prototype uses white panels, cool hairline borders, restrained
+ * shadows, and only a subtle elevated-sheet highlight. The historical "glass"
+ * function names remain because many UI call sites already use them as common
+ * surface recipes.
  *
  * The recipes:
- *   1. [glassPanel]         — relationship cards and list items (20 dp corners)
- *   2. [glassPanelElevated] — modals and bottom sheets (28 dp corners)
+ *   1. [glassPanel]         — relationship cards and list items (18 dp corners)
+ *   2. [glassPanelElevated] — modals and bottom sheets (24 dp corners)
  *
- * Source of truth: design token spec §3.
+ * Source of truth: `becalm-v4-ux-inkmist-soft.html`.
  */
 package com.becalm.android.ui.theme
 
@@ -40,7 +37,7 @@ import androidx.compose.ui.unit.dp
  * Compose has no direct `box-shadow` equivalent, so we approximate it by
  * painting a semi-transparent filled shape at [yOffset] behind the content.
  * The visual result is subtler than CSS box-shadow but preserves the depth cue
- * needed for the floating-glass aesthetic.
+ * needed for the elevated panel aesthetic.
  *
  * @param shadowColor  ARGB color of the shadow (includes desired opacity).
  * @param cornerRadius Corner radius that matches the panel shape.
@@ -77,8 +74,7 @@ private fun Modifier.glassShadow(
 
 /**
  * Draws a 1 dp inset highlight along the top edge of the composable.  This
- * mimics the CSS `inset 0 1px 0 rgba(255,255,255,0.05)` inner-shadow convention
- * used in v3's glass recipe.
+ * mimics the CSS `inset 0 1px 0 rgba(255,255,255,0.05)` inner-shadow convention.
  */
 private fun Modifier.glassInsetHighlight(
     highlightColor: Color,
@@ -104,57 +100,57 @@ private fun Modifier.glassInsetHighlight(
 // ─── Public recipes ───────────────────────────────────────────────────────────
 
 /**
- * Default glass surface recipe — cards and list items.
+ * Default ink-mist surface recipe — cards and list items.
  *
- * Property stack (spec §3 `glassPanel`):
- * - Background fill: warm glass at high opacity to compensate for omitted backdrop blur
- * - Border: 1 dp warm neutral hairline
- * - Corner radius: 20 dp (matches [BecalmShapes.medium])
- * - Outer shadow: y-offset 8 dp, blur 24 dp, warm neutral
+ * Property stack:
+ * - Background fill: white app surface
+ * - Border: 1 dp cool grey hairline
+ * - Corner radius: 18 dp (matches [BecalmShapes.medium])
+ * - Outer shadow: very subtle, matching the prototype's flat card stack
  *
- * @param shape Override shape; defaults to [MaterialTheme.shapes.medium] (20 dp rounded).
+ * @param shape Override shape; defaults to [MaterialTheme.shapes.medium] (18 dp rounded).
  */
 @Composable
 public fun Modifier.glassPanel(shape: Shape = MaterialTheme.shapes.medium): Modifier {
     val colors = MaterialTheme.becalmColors
     val fill = colors.glassPanelFill
-    val cornerRadius = 20.dp
+    val cornerRadius = 18.dp
 
     return this
         .glassShadow(
             shadowColor = colors.glassOuterShadow,
             cornerRadius = cornerRadius,
-            yOffset = 8.dp,
-            blur = 24.dp,
+            yOffset = 2.dp,
+            blur = 10.dp,
         )
         .background(fill, shape)
         .border(1.dp, colors.glassBorder, shape)
 }
 
 /**
- * Elevated glass surface recipe — modals and bottom sheets.
+ * Elevated ink-mist surface recipe — modals and bottom sheets.
  *
- * Property stack (spec §3 `glassPanelElevated`):
- * - Background fill: stronger warm glass
- * - Border: 1 dp warm neutral hairline
- * - Corner radius: 28 dp (matches [BecalmShapes.large])
- * - Outer shadow: y-offset 12 dp, blur 36 dp, warm neutral
+ * Property stack:
+ * - Background fill: white app surface
+ * - Border: 1 dp cool grey hairline
+ * - Corner radius: 24 dp (matches [BecalmShapes.large])
+ * - Outer shadow: moderate bottom-sheet depth
  * - Inset highlight: 1 dp top edge
  *
- * @param shape Override shape; defaults to [MaterialTheme.shapes.large] (28 dp rounded).
+ * @param shape Override shape; defaults to [MaterialTheme.shapes.large] (24 dp rounded).
  */
 @Composable
 public fun Modifier.glassPanelElevated(shape: Shape = MaterialTheme.shapes.large): Modifier {
     val colors = MaterialTheme.becalmColors
     val fill = colors.glassPanelFillElevated
-    val cornerRadius = 28.dp
+    val cornerRadius = 24.dp
 
     return this
         .glassShadow(
             shadowColor = colors.glassOuterShadowElevated,
             cornerRadius = cornerRadius,
-            yOffset = 12.dp,
-            blur = 36.dp,
+            yOffset = 8.dp,
+            blur = 24.dp,
         )
         .glassInsetHighlight(
             highlightColor = colors.glassInsetElevated,

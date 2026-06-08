@@ -11,8 +11,8 @@ version: 1
 behaviors:
   - id: ERR-001
     type: ui_interaction
-    description: "네트워크 미연결 상태에서 Today/Persons/Commitments 진입 시 상단 OfflineBadge('오프라인 — 마지막 동기화 HH:mm')가 표시된다. Room 캐시는 정상 렌더링되며 사용자는 로컬 데이터 조작(체크 완료/취소)은 가능하지만 Railway 호출은 대기열에 쌓여 재연결 시 flush"
-    screen: "TodayTimelineScreen | PersonsScreen | CommitmentManagementScreen"
+    description: "네트워크 미연결 상태에서 Schedule/Persons/Commitments 진입 시 상단 OfflineBadge('오프라인 — 마지막 동기화 HH:mm')가 표시된다. Room 캐시는 정상 렌더링되며 사용자는 로컬 데이터 조작(체크 완료/취소)은 가능하지만 Railway 호출은 대기열에 쌓여 재연결 시 flush"
+    screen: "ScheduleScreen | PersonsScreen | CommitmentActionInboxScreen"
     interaction: "화면 진입"
     precondition: "ConnectivityManager.activeNetwork == null, DataStore last_sync_at != null"
     expected: "상단에 OfflineBadge 표시됨(텍스트: '오프라인 — 마지막 동기화 M/d HH:mm', 색: 경고 오렌지). 목록은 Room 캐시로 정상 렌더. action_state 변경 등 mutation은 optimistic Room UPDATE + sync_status='pending'으로 큐잉. 재연결 감지 시 OfflineBadge 사라지고 SYNC-006 즉시 업로드 트리거"
@@ -21,8 +21,8 @@ behaviors:
 
   - id: ERR-002
     type: ui_interaction
-    description: "소스 cursor 무효화(ING-013)가 발생한 소스는 SourceStatusStrip 칩이 error 상태(빨간 점 + 느낌표)로 전환되고 칩 아래 얇은 경고 바('Gmail 재동기화가 필요합니다 — 설정에서 확인')가 TodayTimelineScreen 상단에 표시된다. 탭 시 /settings/sources/{source_id}로 딥링크"
-    screen: "TodayTimelineScreen"
+    description: "소스 cursor 무효화(ING-013)가 발생한 소스는 SourceStatusStrip 칩이 error 상태(빨간 점 + 느낌표)로 전환되고 칩 아래 얇은 경고 바('Gmail 재동기화가 필요합니다 — 설정에서 확인')가 ScheduleScreen 상단에 표시된다. 탭 시 /settings/sources/{source_id}로 딥링크"
+    screen: "ScheduleScreen"
     interaction: "화면 진입 / cursor 무효화 감지"
     precondition: "ING-013이 실행되어 해당 어댑터의 cursor 재동기화가 진행 중이거나 실패한 상태"
     expected: "SourceStatusStrip의 해당 칩이 빨간 점 + 느낌표로 전환. 상단 경고 바 표시됨. 탭 시 /settings/sources/{source_id}로 이동 — SourceDetailScreen에서 마지막 오류 메시지와 기존 CTA([지금 동기화] 또는 [다시 연결])를 통해 복구한다. 커서 복구가 가능한 경우 [지금 동기화]가 재동기화 역할을 수행하고, 인증/권한 오류인 경우 [다시 연결] 경로를 탄다. 복구 진행 중에는 경고 바가 '재동기화 중...' 로 전환되며 성공 시 자동 dismiss"
@@ -32,7 +32,7 @@ behaviors:
   - id: ERR-003
     type: ui_interaction
     description: "OAuth 토큰 만료·revoke로 소스가 disconnect된 경우 SourceStatusStrip 칩이 error 상태로 바뀌고 상단 배너 '[Gmail] 연결이 끊어졌습니다 — 재연결'이 표시된다. 탭 시 OAuth 재연결 플로우(소스별 OAuth 스크린으로 딥링크)"
-    screen: "TodayTimelineScreen | SettingsScreen"
+    screen: "ScheduleScreen | SettingsScreen"
     interaction: "소스 disconnect 감지 (Gmail OAuth revoke / Outlook OAuth revoke / IMAP auth failure)"
     precondition: "소스 어댑터가 AUTH-007 refresh에 실패 (refresh_token도 만료/revoke)"
     expected: "DataStore의 해당 소스 connected=false로 UPDATE. SourceStatusStrip 칩 빨간색 + 배너 표시. 탭 시 해당 소스의 OAuth 재연결 스크린으로 이동. 재연결 성공 시 cursor는 유지(stale cursor는 ERR-002 경로로 다시 reset될 수 있음). 백그라운드 WorkManager 동기화는 재연결 전까지 skip"
@@ -42,7 +42,7 @@ behaviors:
   - id: ERR-004
     type: ui_interaction
     description: "개별 raw event가 quarantine(sync_status='quarantined')된 경우 해당 row에 주황 배지 '업로드 실패 — 탭하여 세부정보'가 표시된다. 탭 시 quarantine 사유(ING-003의 reason enum) + [재시도] / [삭제] 버튼을 가진 바텀시트가 열린다"
-    screen: "UnassignedEventsScreen | PersonDetailScreen | TodayTimelineScreen"
+    screen: "UnassignedEventsScreen | PersonDetailScreen | ScheduleScreen"
     interaction: "quarantined raw event 카드 탭"
     precondition: "Room raw_ingestion_events.sync_status='quarantined' 레코드 존재"
     expected: "카드에 주황 배지 표시. 탭 시 QuarantineDetailSheet 열림 — reason(schema_invalid | source_type_unknown | timestamp_parse_error | output_truncated | internal_error) + message + [재시도] 버튼(sync_status='pending'으로 재전환) + [삭제] 버튼(Room에서 DELETE, 사용자 확인 필요). [재시도]는 retryable=false이던 항목도 강제 재시도 허용 — 사용자가 서버 배포 후 복구를 시도하는 use case"
@@ -51,11 +51,11 @@ behaviors:
 
   - id: ERR-005
     type: ui_interaction
-    description: "Vertex AI output_truncated 오류(VOI-002 HTTP 502)로 voice raw event가 quarantine된 경우 일반 ERR-004 flow에 더해 안내 문구 '이 녹음은 파일이 너무 길어 처리하지 못했습니다. 향후 업데이트에서 자동 분할 처리 예정입니다'가 표시된다. 현재 버전에서는 사용자가 녹음 자체를 짧게 나눠 다시 진행해야 함"
+    description: "Vertex AI output_truncated 오류(VOI-002 HTTP 502)로 voice raw event가 quarantine된 경우 일반 ERR-004 flow에 더해 안내 문구와 명시적 종료/복구 CTA를 표시한다. 자동 복구가 아직 불가능해도 열린 실패로 방치하지 않는다"
     screen: "QuarantineDetailSheet"
     interaction: "voice/call_recording + reason='output_truncated' quarantine 탭"
     precondition: "raw_ingestion_events(source_type IN ('voice','call_recording'), sync_status='quarantined', quarantine_reason='output_truncated')"
-    expected: "ERR-004의 바텀시트 상단에 빨간색 안내 카드 표시. [재시도] 버튼은 숨김(같은 결과 반복 — 유도하지 않음), [삭제] 버튼만 표시. ObservabilityClient 이벤트 'voice_output_truncated_shown' (raw_event_id, duration_seconds) 전송 — post-MVP overlap-chunk 설계 입력으로 활용"
+    expected: "ERR-004의 바텀시트 상단에 안내 카드 표시. [그대로 다시 시도]는 숨김(같은 결과 반복 방지). 대신 [짧게 나누어 다시 가져오기] CTA로 파일 picker/녹음 추가 흐름을 열고, [삭제]는 사용자 확인 후 명시적 discard로 닫는다. ObservabilityClient 이벤트 'voice_output_truncated_shown' (raw_event_id, duration_seconds) 전송 — 자동 분할 처리 설계 입력으로 활용"
     source: phase2-acceptance
     tests: []
 
@@ -71,8 +71,8 @@ behaviors:
 
   - id: ERR-007
     type: ui_interaction
-    description: "Railway 5xx 또는 network timeout 장애가 5분 이상 지속되면 TodayTimelineScreen 상단에 '서버에 연결할 수 없습니다 — 로컬 데이터만 표시 중'이 표시된다. 로컬 Room 조회 기반 UI는 정상 동작 (ERR-001과 다른 점: 네트워크는 살아 있음)"
-    screen: "TodayTimelineScreen"
+    description: "Railway 5xx 또는 network timeout 장애가 5분 이상 지속되면 main action tabs 상단에 '서버에 연결할 수 없습니다 — 로컬 데이터만 표시 중'이 표시된다. 로컬 Room 조회 기반 UI는 정상 동작 (ERR-001과 다른 점: 네트워크는 살아 있음)"
+    screen: "ScheduleScreen | PersonsScreen | CommitmentActionInboxScreen"
     interaction: "화면 진입 / 지속적 5xx 감지"
     precondition: "ConnectivityManager.activeNetwork != null, 최근 5분간 Railway 요청 ≥3회 모두 5xx 또는 timeout"
     expected: "상단 배너 '서버에 연결할 수 없습니다 — 로컬 데이터만 표시 중' 표시. pull-to-refresh 시 재시도. 복구 시 배너 자동 dismiss. 업로드 큐는 expoential backoff로 계속 재시도 유지 (quarantine으로 전환하지 않음 — ING-003 policy)"
@@ -92,15 +92,118 @@ behaviors:
   - id: ERR-009
     type: ui_interaction
     description: "사용자가 필수 권한(READ_MEDIA_AUDIO / READ_CONTACTS 등)을 시스템 설정에서 revoke한 경우 관련 기능 진입 시 권한 회복 유도 배너를 표시한다. 배너 CTA 탭 시 Settings.ACTION_APPLICATION_DETAILS_SETTINGS로 직접 연결"
-    screen: "TodayTimelineScreen | PersonsScreen"
+    screen: "ScheduleScreen | PersonsScreen"
     interaction: "권한 revoked 상태로 관련 기능 진입"
     precondition: "이전에 부여된 권한이 시스템 설정에서 revoke됨 (ContextCompat.checkSelfPermission=PERMISSION_DENIED)"
     expected: "상단 배너: READ_MEDIA_AUDIO revoke = '녹음 폴더 접근 권한이 해제되었습니다 — 설정에서 다시 허용' / READ_CONTACTS revoke = '연락처 권한이 해제되어 이름이 일반 이메일/전화번호로 표시됩니다 — 설정에서 다시 허용'. 탭 시 앱 상세 설정 화면으로 이동. 권한 미회복 상태에서는 해당 소스 ContentObserver·EnrichmentWorker 등록 해제"
     source: phase2-acceptance
     tests: []
 
+  - id: ERR-010
+    type: ui_interaction
+    description: "Person/Schedule/Commitment action feed가 stale, pending_context, degraded 상태이면 마지막 backend cache를 유지하면서 복구 CTA를 표시한다. 빈 화면이나 local-generated action으로 대체하지 않는다"
+    screen: "PersonsScreen | ScheduleScreen | CommitmentActionInboxScreen"
+    interaction: "화면 진입 / pull-to-refresh / GET /v1/person_action_items 200 with recompute_state=pending|stale|degraded"
+    precondition: "person_action_item_cache가 존재하거나 첫 action feed fetch가 진행 중이며 PersonActionFeedResponse.recovery_actions가 존재"
+    expected: "상단 배너 또는 inline status row에 '업데이트가 지연되고 있습니다' 표시. recovery_actions.kind에 따라 [다시 확인], [전체 새로고침], [출처 설정 열기], [실패한 자료 검토], [지원 요청] 중 하나 이상을 노출한다. retry_now/full_refresh는 foreground 1회 실행 후 WorkManager backoff로 넘긴다. 성공 시 배너 자동 dismiss, 실패 시 기존 cache와 CTA 유지"
+    source: user-request
+    tests: []
+
+  - id: ERR-011
+    type: ui_interaction
+    description: "person_action_mutation_queue의 complete/dismiss/snooze/feedback mutation이 실패해도 queue row가 CTA 없이 영구 failed로 남으면 안 된다"
+    screen: "PersonActionCard | CommitmentActionInboxScreen | ScheduleScreen"
+    interaction: "PATCH /v1/person_action_items/{id} 또는 POST /v1/person_action_items/{id}:feedback 실패"
+    precondition: "person_action_mutation_queue.sync_status='failed' 또는 ErrorEnvelope.client_action 수신"
+    expected: "retryable=true 또는 client_action=retry_later이면 자동 backoff + [다시 시도] 노출. client_action=refresh_action이면 action row를 refetch하고 optimistic state를 backend canonical state로 reconcile. client_action=fix_input이면 입력 수정 sheet를 열거나 optimistic state를 undo. client_action=discard_local_mutation이면 사용자 확인 후 queue row를 terminal discard 처리. 401/login은 ERR-008로 이동. 어느 경우에도 failed queue row는 auto retry, user CTA, 또는 explicit discard 없이 남지 않는다"
+    source: user-request
+    tests: []
+
+  - id: ERR-012
+    type: lifecycle
+    description: "changed_since cursor가 너무 오래되었거나 backend에서 알 수 없는 경우 409/full_refresh로 복구한다. delta cursor 오류가 action cache를 영구 stale로 고정하면 안 된다"
+    screen: "PersonsScreen | ScheduleScreen | CommitmentActionInboxScreen"
+    interaction: "GET /v1/person_action_items?changed_since=<server_watermark> returns 409 ErrorEnvelope(client_action='full_refresh')"
+    precondition: "local person_action_item_cache.server_watermark가 backend tombstone window 밖이거나 unknown"
+    expected: "Android는 기존 cache를 즉시 지우지 않고 stale badge를 표시한 채 full refresh를 요청한다. full refresh 성공 시 rows/deleted_ids/server_watermark를 한 Room transaction으로 적용한다. full refresh 실패 시 이전 cache와 ERR-010 CTA를 유지하고 retry_later backoff를 예약한다"
+    source: user-request
+    tests: []
+
+  - id: ERR-013
+    type: ui_interaction
+    description: "person action endpoint 404 또는 version mismatch는 local regeneration으로 우회하지 않고 update/rollback/retry 경로로 닫는다"
+    screen: "PersonsScreen | ScheduleScreen | CommitmentActionInboxScreen"
+    interaction: "GET/PATCH/feedback action endpoint returns 404 ErrorEnvelope(client_action='upgrade_app'|'retry_later'|'contact_support')"
+    precondition: "서버 배포/feature flag/client version mismatch로 endpoint가 unavailable"
+    expected: "마지막 person_action_item_cache를 stale로 렌더링하고 mutation outbox는 보존한다. client_action=upgrade_app이면 앱 업데이트 안내/스토어 경로를 표시한다. retry_later이면 WorkManager backoff와 [다시 확인] CTA를 유지한다. contact_support이면 support/report issue CTA를 표시한다. rollback flag가 있으면 legacy tab은 명시적 rollback UI로만 진입하며 action feed를 local 생성하지 않는다"
+    source: user-request
+    tests: []
+
+  - id: ERR-014
+    type: lifecycle
+    description: "backend recompute job이 dead_letter이거나 watermark lag가 SLO를 넘으면 사용자에게는 degraded 상태와 복구 CTA가 보이고, 운영자에게는 requeue 가능한 incident가 남아야 한다"
+    screen: "PersonsScreen | ScheduleScreen | CommitmentActionInboxScreen | internal ops"
+    interaction: "PersonActionFeedResponse.recompute_state='degraded' 또는 backend person_action_recompute_jobs.status='dead_letter'"
+    precondition: "recompute attempts exhausted, source input validation blocked, 또는 backend worker bug로 affected scope recompute 실패"
+    expected: "Backend는 person_action_feed_watermarks.recompute_state='degraded'와 recovery_actions(reason_code 포함)를 반환하고, dead_letter row는 삭제하지 않는다. Android는 stale/degraded banner와 [다시 확인] 또는 [출처 설정 열기]/[실패한 자료 검토] CTA를 표시한다. 운영자는 incident id/reason_code로 dead_letter job을 retry/requeue할 수 있어야 하며, requeue 성공 후 changed_since/full_refresh로 UI가 caught_up으로 돌아온다"
+    source: user-request
+    tests: []
+
+  - id: ERR-015
+    type: ui_interaction
+    description: "person action worker backlog 또는 degraded 상태가 장시간 지속되어도 무한 spinner, 반복 modal, 배너 피로, 복구 불가 상태로 남으면 안 된다"
+    screen: "PersonsScreen | ScheduleScreen | CommitmentActionInboxScreen"
+    interaction: "PersonActionFeedResponse.capacity_state.state='backlog'|'degraded' 또는 backlog_lag_seconds가 SLO를 24시간 이상 초과"
+    precondition: "마지막 backend-computed person_action_item_cache가 있거나 첫 fetch가 실패했고, backend가 capacity_state/recovery_actions/incident_id 중 하나를 반환"
+    expected: "Android는 마지막 action cache를 유지하고 compact stale health row에 마지막 성공 업데이트 시각, 지연 상태, 단일 primary CTA([다시 확인] 또는 [지원 요청])를 표시한다. retry_now/full_refresh는 foreground 1회 후 background backoff로 이동하고 같은 세션에서 반복 modal을 띄우지 않는다. Backend는 capacity_state가 normal로 회복되면 caught_up response로 상태를 자동 해제하고, 24시간 이상 degraded이면 incident_id 또는 contact_support recovery_action을 포함한다"
+    source: user-request
+    tests: []
+
+  - id: ERR-016
+    type: lifecycle
+    description: "앱 process death, background worker exception, remote/JSON parse 실패가 crash loop나 데이터 손실로 이어지면 안 된다"
+    screen: "SplashScreen | PersonsScreen | ScheduleScreen | CommitmentActionInboxScreen | DataRecoveryScreen"
+    interaction: "앱 재시작 / background sync 중 예외 / action delta apply 중 process kill / malformed remote response"
+    precondition: "Room cache/outbox/server_watermark 중 하나 이상이 존재하고 이전 실행이 정상 종료되지 않았거나 remote response parsing이 실패함"
+    expected: "Android는 Splash에서 user-scoped DB와 pending transaction state를 재검증한다. action delta apply 중 죽은 경우 이전 server_watermark로 refetch한다. remote/JSON 실패는 ApiErrorNormalizer가 retry_later/report_issue 상태로 변환한다. FATAL EXCEPTION/ANR/OOM 없이 마지막 cache 또는 DataRecoveryScreen을 표시하고, raw source 원문 없이 sanitized observability event를 남긴다"
+    source: beta-week-readiness
+    tests: []
+
+  - id: ERR-017
+    type: api_contract
+    description: "Railway가 비어 있거나 malformed된 5xx/429/timeout 응답을 주더라도 Android는 crash하지 않고 retriable 상태로 닫는다"
+    screen: "any Railway-backed screen"
+    interaction: "Railway API call returns empty body, malformed JSON, unexpected content-type, timeout, connection reset, 500/502/503/504/429 without full ErrorEnvelope"
+    precondition: "Android repository call is wrapped by SafeRemoteCall/ApiErrorNormalizer"
+    expected: "ApiErrorNormalizer는 error='malformed_error_envelope' 또는 network error code를 가진 ClientRecoverableError를 반환한다. 5xx/429/network는 retryable=true, client_action=retry_later, foreground 1회 retry 후 background backoff로 전환한다. request_id가 없으면 local correlation id를 생성한다. 같은 오류가 반복되면 ERR-007 또는 ERR-015/지원 요청 경로로 승격한다"
+    source: beta-week-readiness
+    tests: []
+
+  - id: ERR-018
+    type: lifecycle
+    description: "Room migration/open 실패 또는 local data integrity sentinel 실패는 자동 DB 삭제나 crash가 아니라 data recovery/support 경로로 닫는다"
+    screen: "DataRecoveryScreen"
+    interaction: "앱 업데이트 후 Room open/migration 실패, user scope mismatch, watermark regression, orphan action cache row, stuck outbox sentinel 감지"
+    precondition: "로컬 사용자 DB 또는 DataStore가 존재하며 migration/readiness verifier가 hard failure를 반환"
+    expected: "앱은 destructive migration을 실행하지 않고 DataRecoveryScreen을 표시한다. 사용자는 [다시 시도], [로그아웃], [지원 요청] 중 하나를 선택할 수 있다. 지원 요청은 build id, schema version, non-PII reason_code, request_id/incident_id만 포함한다. 자동 삭제/초기화는 금지되며, known unsupported downgrade는 ERR-019 upgrade-required 경로로 이동한다"
+    source: beta-week-readiness
+    tests: []
+
+  - id: ERR-019
+    type: ui_interaction
+    description: "remote client_config가 feature disable, maintenance, force upgrade를 반환하면 사용자는 명확한 다음 단계로 이동하고 앱은 빈 화면이나 crash path로 가지 않는다"
+    screen: "SplashScreen | UpdateRequiredScreen | PersonsScreen | ScheduleScreen | CommitmentActionInboxScreen | SettingsScreen"
+    interaction: "GET /v1/client_config returns force_upgrade=true, maintenance_mode=true, action_feed_enabled=false, disabled_sources includes selected source"
+    precondition: "앱이 cold start/login/foreground 중 client_config를 fetch하거나 last-known config를 로드함"
+    expected: "force_upgrade이면 UpdateRequiredScreen을 표시하고 background writes를 중단한다. maintenance이면 마지막 cache를 유지하고 retry_after_seconds 기반 재시도를 예약한다. action_feed_enabled=false이면 마지막 backend action cache를 stale로 표시하고 local action generation은 되살리지 않는다. disabled source는 Settings/SourceDetail에서 disabled-with-reason 상태와 지원/재시도 안내를 표시한다"
+    source: beta-week-readiness
+    tests: []
+
 invariants:
-  - "모든 실패 상태는 사용자가 **복구 경로를 볼 수 있어야** 한다 — 조용한 실패 금지 (quarantine은 배지로, disconnect은 배너로, offline은 badge로 노출)"
-  - "복구 불가능한 실패(output_truncated, 영구 OAuth revoke)는 ObservabilityClient 이벤트로 수집되어 post-MVP에 대응"
+  - "모든 실패 상태는 사용자가 **복구 경로를 볼 수 있어야** 한다 — 조용한 실패 금지 (quarantine은 배지로, disconnect은 배너로, offline은 badge로, action feed degraded는 recovery CTA로 노출)"
+  - "모든 error state는 automatic retry, full refresh, user repair, operator requeue, explicit discard, force upgrade, support report 중 하나로 닫혀야 한다. CTA/자동 재시도/운영자 incident 없이 failed/stale/degraded/pending/backlog/migration_failed 상태가 영구 유지되는 경로는 금지"
+  - "장기 degraded/backlog 상태는 repeated blocking modal이나 endless spinner가 아니라 compact health row와 단일 primary CTA로 표현하며, 같은 root cause의 배너를 같은 세션에서 반복 노출하지 않는다"
+  - "현재 자동 복구가 불가능한 실패(output_truncated, 영구 OAuth revoke)는 사용자 repair/discard CTA와 ObservabilityClient 이벤트를 모두 가져야 한다"
   - "로컬 Room 데이터는 모든 오류 상태에서 정상 렌더링되며 사용자는 읽기·체크 완료 등 read/action 경로를 계속 사용할 수 있다"
   - "권한 revoke은 앱 강제 종료/로그아웃이 아닌 feature-level graceful degrade로 처리한다"
+  - "process death, malformed backend error, migration/open failure는 crash loop 또는 silent data reset으로 처리하지 않는다"

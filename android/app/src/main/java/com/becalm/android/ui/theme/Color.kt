@@ -1,10 +1,9 @@
 /**
- * Light-first warm relationship palette for BeCalm Android.
+ * Ink-mist palette for BeCalm Android.
  *
- * PRODUCT.md defines BeCalm as a person-centered relationship intelligence
- * assistant. DESIGN.md now sets the canonical Android theme as warm, light,
- * restrained, and frosted. This file maps those OKLCH source tokens into
- * Compose ARGB values for Material3.
+ * The current HTML parity target (`becalm-v4-ux-inkmist-soft.html`) defines a
+ * cool white app surface, navy primary actions, muted relationship accents, and
+ * quiet grey borders. This file maps those tokens into Material3 slots.
  */
 package com.becalm.android.ui.theme
 
@@ -15,45 +14,53 @@ import androidx.compose.ui.graphics.Color
 // ─── Material3 ColorScheme — Light (canonical) ───────────────────────────────
 
 /**
- * BeCalm light color scheme. This is the canonical product expression: warm
- * light canvas, dark neutral actions, and a restrained warm accent.
+ * BeCalm light color scheme. Prototype token mapping:
+ * --ink/#1A1F2E, --dark/#1E2A4A, --line/#E5E9F0,
+ * --line2/#F0F3F8, --give/#C0967A, --take/#6589A1.
  */
 internal val BecalmLightColorScheme = lightColorScheme(
-    primary = Color(0xFF342E27),
-    onPrimary = Color(0xFFF4F0E9),
-    primaryContainer = Color(0xFFECE3D5),
-    onPrimaryContainer = Color(0xFF342E27),
+    primary = Color(0xFF1E2A4A),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFE9EDF6),
+    onPrimaryContainer = Color(0xFF1E2A4A),
 
-    secondary = Color(0xFF696158),
-    onSecondary = Color(0xFFF4F0E9),
-    secondaryContainer = Color(0xFFE8E1D7),
-    onSecondaryContainer = Color(0xFF453D35),
+    secondary = Color(0xFF6589A1),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFECF0F4),
+    onSecondaryContainer = Color(0xFF1A1F2E),
 
-    tertiary = Color(0xFFB87623),
-    onTertiary = Color(0xFFF8F1E8),
-    tertiaryContainer = Color(0xFFF1DEC2),
-    onTertiaryContainer = Color(0xFF4C2F0F),
+    tertiary = Color(0xFFC0967A),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFF2EDE7),
+    onTertiaryContainer = Color(0xFF1A1F2E),
 
-    error = Color(0xFFB84A3E),
-    onError = Color(0xFFF8F1E8),
-    errorContainer = Color(0xFFF1D9D5),
-    onErrorContainer = Color(0xFF5A1F19),
+    error = Color(0xFFBC8071),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFF3ECEA),
+    onErrorContainer = Color(0xFF1A1F2E),
 
-    background = Color(0xFFF4F0E9),
-    onBackground = Color(0xFF342E27),
-    surface = Color(0xFFF8F5EF),
-    onSurface = Color(0xFF342E27),
-    surfaceVariant = Color(0xFFEAE2D6),
-    onSurfaceVariant = Color(0xFF696158),
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF1A1F2E),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF1A1F2E),
+    surfaceVariant = Color(0xFFF0F3F8),
+    onSurfaceVariant = Color(0xFF5A6478),
+    surfaceDim = Color(0xFFF0F3F8),
+    surfaceBright = Color(0xFFFFFFFF),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFFFFFFF),
+    surfaceContainer = Color(0xFFFFFFFF),
+    surfaceContainerHigh = Color(0xFFF6F8FB),
+    surfaceContainerHighest = Color(0xFFF0F3F8),
 
-    outline = Color(0xFFB8AC9E),
-    outlineVariant = Color(0xFFD7CEC1),
+    outline = Color(0xFF9AA4BC),
+    outlineVariant = Color(0xFFE5E9F0),
 
-    inverseSurface = Color(0xFF342E27),
-    inverseOnSurface = Color(0xFFF4F0E9),
-    inversePrimary = Color(0xFFECE3D5),
+    inverseSurface = Color(0xFF1E2A4A),
+    inverseOnSurface = Color(0xFFFFFFFF),
+    inversePrimary = Color(0xFFE9EDF6),
 
-    scrim = Color(0xCC19120B),
+    scrim = Color(0x66121214),
 
     surfaceTint = Color.Transparent,
 )
@@ -61,45 +68,52 @@ internal val BecalmLightColorScheme = lightColorScheme(
 // ─── Material3 ColorScheme — Dark (alternate) ────────────────────────────────
 
 /**
- * Dark is an alternate accessibility/user-preference theme. It keeps the same
- * warm neutral family instead of reviving the previous dark-first palette.
+ * Dark is an alternate accessibility/user-preference theme. It keeps the
+ * ink-mist hue relationships while reducing brightness for dark surfaces.
  */
 internal val BecalmDarkColorScheme = darkColorScheme(
-    primary = Color(0xFFF1DEC2),
-    onPrimary = Color(0xFF231D18),
-    primaryContainer = Color(0xFF3C3229),
-    onPrimaryContainer = Color(0xFFF1DEC2),
+    primary = Color(0xFFE9EDF6),
+    onPrimary = Color(0xFF111827),
+    primaryContainer = Color(0xFF2A3447),
+    onPrimaryContainer = Color(0xFFE9EDF6),
 
-    secondary = Color(0xFFC8BAAA),
-    onSecondary = Color(0xFF231D18),
-    secondaryContainer = Color(0xFF352D26),
-    onSecondaryContainer = Color(0xFFE8E1D7),
+    secondary = Color(0xFFB8C0D0),
+    onSecondary = Color(0xFF111827),
+    secondaryContainer = Color(0xFF273244),
+    onSecondaryContainer = Color(0xFFECF0F4),
 
-    tertiary = Color(0xFFD19138),
-    onTertiary = Color(0xFF231D18),
-    tertiaryContainer = Color(0xFF4C2F0F),
-    onTertiaryContainer = Color(0xFFF1DEC2),
+    tertiary = Color(0xFFD5B69F),
+    onTertiary = Color(0xFF111827),
+    tertiaryContainer = Color(0xFF3E332E),
+    onTertiaryContainer = Color(0xFFF2EDE7),
 
-    error = Color(0xFFE08A80),
-    onError = Color(0xFF231D18),
-    errorContainer = Color(0xFF5A1F19),
-    onErrorContainer = Color(0xFFF1D9D5),
+    error = Color(0xFFE0A498),
+    onError = Color(0xFF111827),
+    errorContainer = Color(0xFF4C2B27),
+    onErrorContainer = Color(0xFFF3ECEA),
 
-    background = Color(0xFF17130F),
-    onBackground = Color(0xFFEDE5D8),
-    surface = Color(0xFF1D1813),
-    onSurface = Color(0xFFEDE5D8),
-    surfaceVariant = Color(0xFF2B241D),
-    onSurfaceVariant = Color(0xFFC8BAAA),
+    background = Color(0xFF111827),
+    onBackground = Color(0xFFF6F8FB),
+    surface = Color(0xFF172033),
+    onSurface = Color(0xFFF6F8FB),
+    surfaceVariant = Color(0xFF202A3C),
+    onSurfaceVariant = Color(0xFFB8C0D0),
+    surfaceDim = Color(0xFF111827),
+    surfaceBright = Color(0xFF202A3C),
+    surfaceContainerLowest = Color(0xFF111827),
+    surfaceContainerLow = Color(0xFF172033),
+    surfaceContainer = Color(0xFF172033),
+    surfaceContainerHigh = Color(0xFF202A3C),
+    surfaceContainerHighest = Color(0xFF273244),
 
-    outline = Color(0xFF74695D),
-    outlineVariant = Color(0xFF3F362D),
+    outline = Color(0xFF778299),
+    outlineVariant = Color(0xFF334054),
 
-    inverseSurface = Color(0xFFEDE5D8),
-    inverseOnSurface = Color(0xFF231D18),
-    inversePrimary = Color(0xFF342E27),
+    inverseSurface = Color(0xFFF6F8FB),
+    inverseOnSurface = Color(0xFF111827),
+    inversePrimary = Color(0xFF1E2A4A),
 
-    scrim = Color(0xCC19120B),
+    scrim = Color(0xCC121214),
 
     surfaceTint = Color.Transparent,
 )

@@ -7,7 +7,7 @@ import com.squareup.moshi.Json
  * Shared error envelope returned by all Railway 4xx/5xx responses.
  *
  * Wire format (api-contract.yml, top-level "Error envelope"):
- *   { error: string, message: string, request_id?: string }
+ *   { error: string, message: string, request_id?: string, client_action?: string }
  *
  * Note: the field name is "error" (not "code"). Every Railway endpoint that
  * returns 400/401/404/413/422/429/500/503 uses this shape.
@@ -25,4 +25,16 @@ public data class ErrorEnvelopeDto(
      * Use for support escalation.
      */
     @field:Json(name = "request_id") val requestId: String? = null,
+
+    /** Whether the client can retry without changing local input. */
+    @field:Json(name = "retryable") val retryable: Boolean? = null,
+
+    /** Retry delay hint mirrored from the `Retry-After` header when present. */
+    @field:Json(name = "retry_after_seconds") val retryAfterSeconds: Long? = null,
+
+    /** Stable recovery branch such as `hide_evidence`, `retry_later`, or `fix_input`. */
+    @field:Json(name = "client_action") val clientAction: String? = null,
+
+    /** Optional debug-safe reason code. */
+    @field:Json(name = "reason") val reason: String? = null,
 )

@@ -11,6 +11,7 @@ import com.becalm.android.data.local.db.entity.ScheduleEventLinkStatus
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.actions.PersonActionFeedStatusUi
 import com.becalm.android.ui.actions.toPersonActionItemUi
 import com.becalm.android.ui.components.formatDayBadgeLabel
 import com.becalm.android.ui.components.isGiveDirection
@@ -25,11 +26,12 @@ internal object CommitmentManagementProjector {
         rows: List<CommitmentManagementRow>,
         scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
         actionRows: List<PersonActionItemCacheEntity> = emptyList(),
+        actionFeedStatus: PersonActionFeedStatusUi? = current.actionFeedStatus,
         filter: CommitmentFilter = current.filter,
         loading: Boolean = current.loading,
         now: Instant,
     ): CommitmentUiState {
-        val effectiveFilter = filter.takeUnless { it == CommitmentFilter.SCHEDULE } ?: CommitmentFilter.ALL
+        val effectiveFilter = filter.toActionInboxFilter()
         val commitmentRows = rows.filterNot { it.itemType == CommitmentItemType.SCHEDULE }
         val projectedRows = applyFilter(commitmentRows, scheduleLinks, effectiveFilter, now)
         val activeRows = projectedRows.filterNot(::isTerminalRow)
@@ -39,6 +41,7 @@ internal object CommitmentManagementProjector {
             topActions = actionRows
                 .map { it.toPersonActionItemUi() }
                 .take(COMMITMENT_ACTION_VISIBLE_LIMIT),
+            actionFeedStatus = actionFeedStatus,
             activeItems = activeRows,
             scheduleUpcomingItems = emptyList(),
             schedulePastSection = CommitmentSectionUiState(
@@ -68,16 +71,8 @@ internal object CommitmentManagementProjector {
                 expanded = current.pastSection.expanded,
                 dimmed = true,
             ),
-            completedSection = buildSectionState(
-                rows = projectedRows,
-                targetState = CommitmentState.COMPLETED,
-                expanded = current.completedSection.expanded,
-            ),
-            cancelledSection = buildSectionState(
-                rows = projectedRows,
-                targetState = CommitmentState.CANCELLED,
-                expanded = current.cancelledSection.expanded,
-            ),
+            completedSection = CommitmentSectionUiState(),
+            cancelledSection = CommitmentSectionUiState(),
             loading = loading,
         )
     }
@@ -115,8 +110,17 @@ internal object CommitmentManagementProjector {
                 )
             }
         val filtered = when (filter) {
-            CommitmentFilter.ALL -> rowsWithState.filter {
-                CommitmentDisplayPolicy.isPrimaryFeedItem(it.row.itemType)
+            CommitmentFilter.ALL,
+            CommitmentFilter.SCHEDULE,
+            CommitmentFilter.CLOSED,
+            -> rowsWithState.filter {
+                CommitmentDisplayPolicy.shouldShowOnMainActionSurface(
+                    itemType = it.row.itemType,
+                    status = it.state.wireValue,
+                    title = it.row.title,
+                    sourceTitle = it.row.sourceTitle,
+                    counterpartyDisplayName = it.row.counterpartyDisplayName,
+                )
             }
             CommitmentFilter.GIVE -> rowsWithState.filter {
                 it.row.itemType == CommitmentItemType.ACTION &&
@@ -128,15 +132,19 @@ internal object CommitmentManagementProjector {
                     isTakeDirection(it.row.direction) &&
                     !it.state.isClosed()
             }
-            CommitmentFilter.SCHEDULE -> emptyList()
-            CommitmentFilter.CLOSED -> rowsWithState.filter {
-                it.row.itemType == CommitmentItemType.ACTION && it.state.isClosed()
-            }
         }
         return filtered
             .sortedForDisplay(now)
             .map { row -> row.toUiRow(now) }
     }
+
+    private fun CommitmentFilter.toActionInboxFilter(): CommitmentFilter =
+        when (this) {
+            CommitmentFilter.SCHEDULE,
+            CommitmentFilter.CLOSED,
+            -> CommitmentFilter.ALL
+            else -> this
+        }
 
     private fun ScheduleEventLinkEntity.isAbsorbedScheduleLink(): Boolean {
         if (commitmentId == null || calendarEventId == null) return false
@@ -280,20 +288,6 @@ internal object CommitmentManagementProjector {
 }
 
 private const val COMMITMENT_ACTION_VISIBLE_LIMIT = 3
-
-    fun buildSectionState(
-        rows: List<CommitmentRow>,
-        targetState: CommitmentState,
-        expanded: Boolean,
-    ): CommitmentSectionUiState {
-        val sectionRows = rows.filter { it.actionState == targetState }
-        return CommitmentSectionUiState(
-            count = sectionRows.size,
-            items = sectionRows,
-            expanded = expanded,
-            dimmed = true,
-        )
-    }
 
     fun isTerminalRow(row: CommitmentRow): Boolean =
         row.itemType == CommitmentItemType.ACTION &&
