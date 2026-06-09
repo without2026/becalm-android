@@ -57,45 +57,55 @@ public object EmailSnippetBuilder {
         bodyHtml: String?,
         subject: String?,
     ): SnippetResult {
-        if (!bodyPlain.isNullOrBlank()) {
-            return SnippetResult(
-                snippet = normalize(bodyPlain),
-                sourceKind = SourceKind.PLAIN,
-                parseFailed = false,
-            )
-        }
-
-        if (!bodyHtml.isNullOrBlank()) {
-            val parsed: String? = try {
-                Jsoup.parse(bodyHtml).text()
-            } catch (t: Throwable) {
-                // EMAIL-007: HTML parse failure must not abort the worker. Surface the failure
-                // via parseFailed so the caller writes EmailBody.parse_failed=true, then fall
-                // through to subject. Throwable (not Exception) catches the rare Jsoup
-                // StackOverflowError on deeply nested malformed HTML.
-                null
-            }
-            if (parsed != null) {
-                return SnippetResult(
-                    snippet = normalize(parsed),
-                    sourceKind = SourceKind.HTML_STRIPPED,
-                    parseFailed = false,
-                )
-            }
-            // parse failed: fall through to subject fallback with parseFailed=true
-            return SnippetResult(
-                snippet = normalize(subject.orEmpty()),
-                sourceKind = SourceKind.SUBJECT_FALLBACK,
-                parseFailed = true,
-            )
-        }
-
-        return SnippetResult(
-            snippet = normalize(subject.orEmpty()),
-            sourceKind = SourceKind.SUBJECT_FALLBACK,
-            parseFailed = false,
-        )
+        return bodyPlain
+            ?.takeUnless { it.isBlank() }
+            ?.let { snippetResult(it, SourceKind.PLAIN) }
+            ?: bodyHtml
+                ?.takeUnless { it.isBlank() }
+                ?.let { htmlSnippetOrSubjectFallback(it, subject) }
+            ?: subjectFallback(subject, parseFailed = false)
     }
+
+    private fun htmlSnippetOrSubjectFallback(
+        bodyHtml: String,
+        subject: String?,
+    ): SnippetResult {
+        val parsed = parseHtmlText(bodyHtml)
+        return if (parsed != null) {
+            snippetResult(parsed, SourceKind.HTML_STRIPPED)
+        } else {
+            subjectFallback(subject, parseFailed = true)
+        }
+    }
+
+    private fun parseHtmlText(bodyHtml: String): String? = try {
+        Jsoup.parse(bodyHtml).text()
+    } catch (t: Throwable) {
+        // EMAIL-007: HTML parse failure must not abort the worker. Throwable catches
+        // the rare Jsoup StackOverflowError on deeply nested malformed HTML.
+        null
+    }
+
+    private fun subjectFallback(
+        subject: String?,
+        parseFailed: Boolean,
+    ): SnippetResult =
+        snippetResult(
+            raw = subject.orEmpty(),
+            sourceKind = SourceKind.SUBJECT_FALLBACK,
+            parseFailed = parseFailed,
+        )
+
+    private fun snippetResult(
+        raw: String,
+        sourceKind: SourceKind,
+        parseFailed: Boolean = false,
+    ): SnippetResult =
+        SnippetResult(
+            snippet = normalize(raw),
+            sourceKind = sourceKind,
+            parseFailed = parseFailed,
+        )
 
     /**
      * Collapses every run of whitespace to a single space, trims leading/trailing

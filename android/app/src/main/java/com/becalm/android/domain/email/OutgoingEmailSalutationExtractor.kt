@@ -11,6 +11,8 @@ public object OutgoingEmailSalutationExtractor {
     private const val SENT_FOLDER: String = "SENT"
     private const val MAX_OPENING_LINES: Int = 5
     private const val MAX_NAMES: Int = 4
+    private val WHITESPACE_RUN: Regex = Regex("\\s+")
+    private val helloMarkers = listOf("안녕하세요", "안녕하십니까")
 
     private val quoteMarkers = listOf(
         "-----original message-----",
@@ -53,8 +55,35 @@ public object OutgoingEmailSalutationExtractor {
         folder: String?,
         bodyText: String?,
     ): List<String> {
-        if (!folder.equals(SENT_FOLDER, ignoreCase = true)) return emptyList()
-        val openingLines = bodyText
+        if (!isSentFolder(folder)) return emptyList()
+        val openingLines = openingLines(bodyText)
+        if (openingLines.isEmpty()) return emptyList()
+
+        return openingLines
+            .asSequence()
+            .mapNotNull(::salutationNameSegment)
+            .flatMap(::namesFromSegment)
+            .distinct()
+            .take(MAX_NAMES)
+            .toList()
+    }
+
+    private fun salutationNameSegment(line: String): String? {
+        val helloIndex = firstHelloMarkerIndex(line)
+        if (helloIndex >= 0) {
+            return segmentAroundHello(line, helloIndex)
+                .takeIf { it.containsHonorificName() }
+        }
+        return line
+            .takeIf { startsWithNameSalutation.containsMatchIn(it) }
+            ?.takeBeforeSentenceBreak()
+    }
+
+    private fun isSentFolder(folder: String?): Boolean =
+        folder.equals(SENT_FOLDER, ignoreCase = true)
+
+    private fun openingLines(bodyText: String?): List<String> =
+        bodyText
             ?.lineSequence()
             ?.map { it.trim() }
             ?.filter { it.isNotBlank() }
@@ -62,39 +91,35 @@ public object OutgoingEmailSalutationExtractor {
             ?.take(MAX_OPENING_LINES)
             ?.toList()
             .orEmpty()
-        if (openingLines.isEmpty()) return emptyList()
 
-        return openingLines
-            .mapNotNull(::salutationNameSegment)
-            .flatMap { segment ->
-                nameWithHonorific.findAll(segment)
-                    .map { it.groupValues[1].trim() }
-                    .map { it.replace(Regex("\\s+"), " ").trim() }
-                    .filter { it.isUsableName() }
-                    .toList()
-            }
-            .distinct()
-            .take(MAX_NAMES)
-    }
+    private fun namesFromSegment(segment: String): Sequence<String> =
+        nameWithHonorific.findAll(segment)
+            .map { match -> match.groupValues[1].normalizeName() }
+            .filter { it.isUsableName() }
 
-    private fun salutationNameSegment(line: String): String? {
-        val helloIndex = listOf("안녕하세요", "안녕하십니까")
+    private fun firstHelloMarkerIndex(line: String): Int =
+        helloMarkers
             .map { marker -> line.indexOf(marker) }
             .filter { it >= 0 }
             .minOrNull()
             ?: -1
-        if (helloIndex >= 0) {
-            return if (helloIndex == 0) {
-                line.substringAfter("안녕하세요", line.substringAfter("안녕하십니까", line))
-                    .takeBeforeSentenceBreak()
-            } else {
-                line.substring(0, helloIndex)
-            }.takeIf { startsWithNameSalutation.containsMatchIn(it) || nameWithHonorific.containsMatchIn(it) }
+
+    private fun segmentAroundHello(
+        line: String,
+        helloIndex: Int,
+    ): String =
+        if (helloIndex == 0) {
+            line.substringAfter("안녕하세요", line.substringAfter("안녕하십니까", line))
+                .takeBeforeSentenceBreak()
+        } else {
+            line.substring(0, helloIndex)
         }
-        return line
-            .takeIf { startsWithNameSalutation.containsMatchIn(it) }
-            ?.takeBeforeSentenceBreak()
-    }
+
+    private fun String.containsHonorificName(): Boolean =
+        startsWithNameSalutation.containsMatchIn(this) || nameWithHonorific.containsMatchIn(this)
+
+    private fun String.normalizeName(): String =
+        trim().replace(WHITESPACE_RUN, " ").trim()
 
     private fun String.isUsableName(): Boolean =
         length in 2..10 && this !in genericNames
