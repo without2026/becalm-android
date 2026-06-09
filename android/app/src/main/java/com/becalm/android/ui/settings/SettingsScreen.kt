@@ -185,6 +185,7 @@ public fun SettingsScreen(
                 (onWipeLocalData ?: { settingsViewModel?.onWipeLocalData(); Unit })()
             },
             onDismiss = { showWipeDialog = false },
+            confirmVariant = BecalmButtonVariant.Destructive,
         ) {
             Text(stringResource(R.string.settings_wipe_confirm_message))
         }
@@ -587,6 +588,11 @@ private fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     primaryConfirm: Boolean = false,
+    confirmVariant: BecalmButtonVariant = if (primaryConfirm) {
+        BecalmButtonVariant.Primary
+    } else {
+        BecalmButtonVariant.Secondary
+    },
     content: @Composable () -> Unit,
 ) {
     AlertDialog(
@@ -597,14 +603,14 @@ private fun ConfirmDialog(
             BecalmButton(
                 text = confirmText,
                 onClick = onConfirm,
-                variant = if (primaryConfirm) BecalmButtonVariant.Primary else BecalmButtonVariant.Text,
+                variant = confirmVariant,
             )
         },
         dismissButton = {
             BecalmButton(
                 text = dismissText,
                 onClick = onDismiss,
-                variant = BecalmButtonVariant.Text,
+                variant = BecalmButtonVariant.Tertiary,
             )
         },
     )

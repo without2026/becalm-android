@@ -491,6 +491,17 @@ public interface CommitmentDao {
         """
         SELECT * FROM commitments
         WHERE user_id = :userId
+          AND id IN (:ids)
+          AND deleted_at IS NULL
+        ORDER BY source_event_occurred_at DESC
+        """,
+    )
+    public fun observeLiveByIdsForUser(userId: String, ids: List<String>): Flow<List<CommitmentEntity>>
+
+    @Query(
+        """
+        SELECT * FROM commitments
+        WHERE user_id = :userId
           AND source_type = :sourceType
           AND (
               source_ref IN (:sourceRefs)
@@ -981,20 +992,12 @@ public interface CommitmentDao {
           AND (
               (
                   c.item_type = 'schedule'
-                  AND (
-                      (
-                          c.due_at >= :startOfTodayEpochMs
-                          AND c.due_at <= :endOfTodayEpochMs
-                      )
-                      OR (
-                          c.schedule_status = 'tentative'
-                          AND c.due_at IS NULL
-                      )
-                  )
-	              )
-	          )
-	          AND c.deleted_at IS NULL
-	          AND NOT EXISTS (
+                  AND c.due_at >= :startOfTodayEpochMs
+                  AND c.due_at <= :endOfTodayEpochMs
+              )
+          )
+          AND c.deleted_at IS NULL
+          AND NOT EXISTS (
 	              SELECT 1
 	              FROM commitments AS newer
 	              WHERE newer.user_id = c.user_id

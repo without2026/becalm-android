@@ -2,13 +2,11 @@ package com.becalm.android.ui.persons
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,8 +15,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
+import com.becalm.android.ui.components.EMAIL_SOURCE_TYPES
+import com.becalm.android.ui.components.BecalmActionPill
+import com.becalm.android.ui.components.BecalmActionPillVariant
 import com.becalm.android.ui.components.CommitmentsExtractedBadge
 import com.becalm.android.ui.components.EmailAttachmentCountPill
 import com.becalm.android.ui.components.EventSnippetText
@@ -101,9 +103,15 @@ internal fun EmailEventBodySection(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Text(
+            text = stringResource(R.string.raw_event_email_original_title),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary,
+        )
         SourceOriginalBodyBlock(
             archivedOriginal = state.archivedOriginal,
             body = state.emailBody,
+            fallbackText = state.emailSnippetOriginalFallback(),
         )
     }
 }
@@ -111,7 +119,7 @@ internal fun EmailEventBodySection(
 internal fun RawEventDetailUiState.hasEmailBodyDetail(): Boolean {
     if (hasArchivedOriginalDetail()) return true
     val body = emailBody
-    return body?.bodyPlain != null || body?.bodyHtml != null
+    return body?.bodyPlain != null || body?.bodyHtml != null || emailSnippetOriginalFallback() != null
 }
 
 internal fun RawEventDetailUiState.hasArchivedOriginalDetail(): Boolean {
@@ -145,6 +153,7 @@ private const val BODY_COLLAPSED_CHAR_LIMIT: Int = 500
 internal fun SourceOriginalBodyBlock(
     archivedOriginal: ArchivedOriginalUi?,
     body: EmailBodyUi?,
+    fallbackText: String? = null,
 ) {
     if (archivedOriginal?.bodyText != null) {
         ExpandableBodyText(bodyPlain = archivedOriginal.bodyText)
@@ -157,15 +166,21 @@ internal fun SourceOriginalBodyBlock(
         ArchivedOriginalDeletedRow()
         return
     }
-    if (body == null) return
-    val bodyPlain = body.bodyPlain
-    val bodyHtml = body.bodyHtml
+    val bodyPlain = body?.bodyPlain
+    val bodyHtml = body?.bodyHtml
 
     when {
         bodyPlain != null -> ExpandableBodyText(bodyPlain = bodyPlain)
         bodyHtml != null -> HtmlOnlyDegradeRow()
+        fallbackText != null -> ExpandableBodyText(bodyPlain = fallbackText)
         else -> Unit
     }
+}
+
+private fun RawEventDetailUiState.emailSnippetOriginalFallback(): String? {
+    if (sourceType !in EMAIL_SOURCE_TYPES) return null
+    if (emailBody?.bodyPlain != null || emailBody?.bodyHtml != null || hasArchivedOriginalDetail()) return null
+    return snippet?.trim()?.takeIf { it.isNotEmpty() }
 }
 
 @Composable
@@ -204,18 +219,17 @@ private fun ExpandableBodyText(bodyPlain: String) {
         )
         if (isLong) {
             Spacer(modifier = Modifier.height(4.dp))
-            TextButton(
+            BecalmActionPill(
+                text = stringResource(
+                    if (expanded) R.string.raw_event_body_collapse
+                    else R.string.raw_event_body_expand,
+                ),
                 onClick = { expanded = !expanded },
-                contentPadding = PaddingValues(all = 0.dp),
+                expanded = expanded,
+                trailingChevron = true,
+                variant = BecalmActionPillVariant.Neutral,
                 modifier = Modifier.testTag("raw-event-body-toggle"),
-            ) {
-                Text(
-                    text = stringResource(
-                        if (expanded) R.string.raw_event_body_collapse
-                        else R.string.raw_event_body_expand,
-                    ),
-                )
-            }
+            )
         }
     }
 }

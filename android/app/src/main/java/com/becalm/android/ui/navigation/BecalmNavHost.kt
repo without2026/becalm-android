@@ -234,6 +234,18 @@ public fun BecalmNavHost(
             }
         }
 
+        composable(route = BecalmRoute.OnboardingSetupReadyToStart.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetupReadyToStart.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(
+                    navController = navController,
+                    setupRoutePath = BecalmRoute.OnboardingSetupReadyToStart.path,
+                )
+            }
+        }
+
         composable(route = BecalmRoute.OnboardingSetupGmailPreview.path) { backStackEntry ->
             val override = routeOverrides[BecalmRoute.OnboardingSetupGmailPreview.path]
             if (override != null) {

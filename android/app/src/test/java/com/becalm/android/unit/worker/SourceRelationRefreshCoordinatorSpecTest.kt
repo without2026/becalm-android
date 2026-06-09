@@ -7,6 +7,8 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
@@ -34,6 +36,7 @@ class SourceRelationRefreshCoordinatorSpecTest {
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
     private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk(relaxed = true)
     private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk(relaxed = true)
+    private val personActionRepository: PersonActionRepository = mockk(relaxed = true)
     private val userCorrectionRepository: UserCorrectionRepository = mockk(relaxed = true)
     private val syncCursorStore: SyncCursorStore = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
@@ -64,6 +67,7 @@ class SourceRelationRefreshCoordinatorSpecTest {
         coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince("user-1", null, null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince("user-1", null, null, null, null) }
         coVerify(exactly = 1) { commitmentParticipantRepository.refreshSince("user-1", null, null, null) }
+        coVerify(exactly = 1) { personActionRepository.refresh(userId = "user-1", surface = null) }
         verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
@@ -85,6 +89,7 @@ class SourceRelationRefreshCoordinatorSpecTest {
         coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince("user-1", null, null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince("user-1", null, null, null, null) }
         coVerify(exactly = 0) { commitmentParticipantRepository.refreshSince(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { personActionRepository.refresh(any(), any()) }
         verify(exactly = 0) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
@@ -109,6 +114,26 @@ class SourceRelationRefreshCoordinatorSpecTest {
         assertTrue(result is BecalmResult.Success)
         assertEquals(1, (result as BecalmResult.Success).value.changedCount)
         coVerify(exactly = 1) { scheduleEventLinkRepository.refreshSince("user-1", null, null) }
+        coVerify(exactly = 1) { personActionRepository.refresh(userId = "user-1", surface = null) }
+        verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `refresh keeps source graph success when person action cache refresh fails`() = runTest {
+        stubSourceParticipants(upserted = 0)
+        stubCommitments(upserted = 1)
+        stubCommitmentParticipants(upserted = 0)
+        coEvery { personActionRepository.refresh(userId = "user-1", surface = null) } returns
+            BecalmResult.Failure(BecalmError.Io("person action refresh failed"))
+
+        val result = coordinator().refresh(
+            userId = "user-1",
+            plan = SourceRelationRefreshPlan(sourceType = "gmail"),
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(1, (result as BecalmResult.Success).value.changedCount)
+        coVerify(exactly = 1) { personActionRepository.refresh(userId = "user-1", surface = null) }
         verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
@@ -254,6 +279,7 @@ class SourceRelationRefreshCoordinatorSpecTest {
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
             scheduleEventLinkRepository = scheduleEventLinkRepository,
+            personActionRepository = personActionRepository,
             userCorrectionRepository = userCorrectionRepository,
             syncCursorStore = syncCursorStore,
             workScheduler = workScheduler,
@@ -286,5 +312,7 @@ class SourceRelationRefreshCoordinatorSpecTest {
     private fun stubCommitmentParticipants(upserted: Int) {
         coEvery { commitmentParticipantRepository.refreshSince(any(), any(), any(), any()) } returns
             BecalmResult.Success(CommitmentParticipantRepository.RefreshStats(upserted, upserted, false, null))
+        coEvery { personActionRepository.refresh(any(), any()) } returns
+            BecalmResult.Success(PersonActionRefreshStats(fetched = 0, deleted = 0, serverWatermark = null, recomputeState = null))
     }
 }

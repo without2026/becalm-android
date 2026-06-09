@@ -267,6 +267,7 @@ class UploadWorkerSpecTest {
             commitmentRepository(),
             sourceEventParticipantRepository(),
             commitmentParticipantRepository(),
+            personActionRepository(),
             sourceStatusRepository(),
             workScheduler(),
             processingPauseGate,
@@ -310,6 +311,18 @@ class UploadWorkerSpecTest {
                 else -> unsupported(name, args)
             }
         }
+
+        private fun personActionRepository(): com.becalm.android.data.repository.PersonActionRepository =
+            mockk(relaxed = true) {
+                coEvery { refresh(any(), any()) } returns BecalmResult.Success(
+                    com.becalm.android.data.repository.PersonActionRefreshStats(
+                        fetched = 0,
+                        deleted = 0,
+                        serverWatermark = null,
+                        recomputeState = null,
+                    ),
+                )
+            }
 
         private fun commitmentRepository(): CommitmentRepository = proxy(CommitmentRepository::class.java) { name, args ->
             when (name) {

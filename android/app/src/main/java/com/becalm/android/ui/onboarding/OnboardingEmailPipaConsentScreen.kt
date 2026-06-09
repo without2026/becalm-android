@@ -444,7 +444,7 @@ private fun OnboardingEmailPipaConsentContent(
         BecalmButton(
             text = stringResource(R.string.onb_pipa_email_cta_deny),
             onClick = onDeny,
-            variant = BecalmButtonVariant.Text,
+            variant = BecalmButtonVariant.Tertiary,
             enabled = !agreeLoading,
             modifier = Modifier.testTag("email-pipa-deny"),
         )

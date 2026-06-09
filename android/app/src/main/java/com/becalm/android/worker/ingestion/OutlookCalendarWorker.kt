@@ -13,6 +13,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -37,6 +38,7 @@ public class OutlookCalendarWorker @AssistedInject constructor(
     private val sourceConnectionRepositoryProvider: Provider<SourceConnectionRepository>,
     private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
     private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
+    private val personActionRepositoryProvider: Provider<PersonActionRepository>,
     private val userCorrectionRepositoryProvider: Provider<UserCorrectionRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val syncCursorStore: SyncCursorStore,
@@ -59,6 +61,7 @@ public class OutlookCalendarWorker @AssistedInject constructor(
             sourceConnectionRepository = sourceConnectionRepositoryProvider.get(),
             sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
             commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
+            personActionRepository = personActionRepositoryProvider.get(),
             userCorrectionRepository = userCorrectionRepositoryProvider.get(),
             sourceStatusRepository = sourceStatusRepositoryProvider.get(),
             syncCursorStore = syncCursorStore,

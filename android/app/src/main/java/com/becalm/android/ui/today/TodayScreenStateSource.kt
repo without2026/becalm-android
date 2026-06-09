@@ -108,7 +108,7 @@ internal class TodayScreenStateSource @Inject constructor(
     fun observeUiState(
         userIdFlow: StateFlow<String?>,
         refreshingFlow: Flow<Boolean>,
-        scheduleRangeFilterFlow: Flow<ScheduleRangeFilter> = flowOf(ScheduleRangeFilter.NEXT_7_DAYS),
+        scheduleRangeFilterFlow: Flow<ScheduleRangeFilter> = flowOf(ScheduleRangeFilter.THIS_WEEK),
     ): Flow<TodayUiState> {
         val userDayFlow = combine(userIdFlow, todayFlow(), scheduleRangeFilterFlow) { userId, today, filter ->
             ScheduleQueryScope(userId = userId, today = today, rangeFilter = filter)

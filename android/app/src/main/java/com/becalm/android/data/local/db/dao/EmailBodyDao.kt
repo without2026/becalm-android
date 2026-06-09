@@ -9,11 +9,12 @@ import com.becalm.android.data.local.db.entity.EmailBodyEntity
 /**
  * Room DAO for the `email_body` table.
  *
- * ## Room-only store
- * Every method here operates on data that MUST NOT cross the device boundary
- * (EMAIL-006 / `.spec/email-pipeline.spec.yml:58-64`). Callers that persist rows via
- * [insert] are trusted not to mirror the result into any network DTO; the Repository
- * layer (future `feat/repo/email` PR) enforces this at the boundary.
+ * ## Local canonical store with beta backend body mirror
+ * Most methods here operate on local-only email body data (EMAIL-006 /
+ * `.spec/email-pipeline.spec.yml:58-64`). During the mail-body beta,
+ * `RawIngestionRepository.refreshSince` may insert provider plain text returned by
+ * `source_events.email_body_plain` so raw-event detail can render the original body.
+ * Callers must still never serialize this entity as a whole into a network DTO.
  *
  * ## Cold vs one-shot
  * All methods here are one-shot `suspend` functions — the local IMAP adapters and
@@ -38,7 +39,8 @@ public interface EmailBodyDao {
      * genuine upsert (one row per `raw_event_id`) even though [EmailBodyEntity.id] is
      * a client-generated random UUID that would otherwise never collide on PK.
      *
-     * Used by local IMAP adapters under EMAIL-001..007.
+     * Used by local IMAP adapters under EMAIL-001..007 and by the backend mail-body
+     * beta mirror path.
      *
      * @param entity The body row to persist.
      * @return The SQLite rowid of the inserted row. Identical rowids across

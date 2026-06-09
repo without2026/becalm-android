@@ -19,11 +19,17 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.annotation.StringRes
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -34,8 +40,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -55,6 +64,7 @@ import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.ui.actions.personActionFeedCompactStatusMessage
 import com.becalm.android.ui.actions.shouldOfferReminder
 import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonSize
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTopChrome
@@ -63,13 +73,15 @@ import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EvidenceCard
-import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabCompactSourceAttentionLine
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
+import com.becalm.android.ui.components.formatDayBadgeLabel
 import com.becalm.android.ui.components.hasSourceWarningForCompactLine
+import com.becalm.android.ui.components.isGiveDirection
+import com.becalm.android.ui.components.isTakeDirection
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.evidence.EvidenceImportFloatingActionButton
@@ -84,17 +96,19 @@ import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 
 private val CommitmentListBottomPadding = 144.dp
 
 /**
- * Commitment management screen — full list with filter tabs.
+ * Commitment management screen — open commitments grouped by Give / Take.
  *
- * Filter tabs: 전체 / 액션 / 내가 한 / 상대가 한 / 일정 / 결정.
- * Due-today / overdue indicators surface as per-card DN badges, not top-level filters.
- * Each [CommitmentRow] is rendered via [CommitmentCard].
+ * Give / Take sections are the primary scan path. Filter chips stay as a secondary
+ * control and each [CommitmentRow] is rendered via [CommitmentCard].
  * Error surfaced via [SnackbarHost].
  * Pull-to-refresh (CMT-010) triggers [CommitmentManagementViewModel.onPullRefresh].
  *
@@ -203,11 +217,6 @@ public fun CommitmentManagementScreen(
         onOpenPersonActionEvidence = viewModel::onOpenPersonActionEvidence,
         onDismissPersonActionEvidence = viewModel::onDismissPersonActionEvidence,
         onRemindPersonAction = viewModel::onRemindPersonAction,
-        onToggleConfirmedSection = viewModel::onToggleConfirmedSection,
-        onToggleReviewSection = viewModel::onToggleReviewSection,
-        onTogglePastSection = viewModel::onTogglePastSection,
-        onToggleCompletedSection = viewModel::onToggleCompletedSection,
-        onToggleCancelledSection = viewModel::onToggleCancelledSection,
     )
 }
 
@@ -225,11 +234,6 @@ public fun CommitmentManagementScreenContent(
     onOpenPersonActionEvidence: (String, String?, String?) -> Unit = { _, _, _ -> },
     onDismissPersonActionEvidence: () -> Unit = {},
     onRemindPersonAction: (String) -> Unit = {},
-    onToggleConfirmedSection: () -> Unit = {},
-    onToggleReviewSection: () -> Unit = {},
-    onTogglePastSection: () -> Unit = {},
-    onToggleCompletedSection: () -> Unit = {},
-    onToggleCancelledSection: () -> Unit = {},
     modifier: Modifier = Modifier,
     headerState: MainTabHeaderState = MainTabHeaderState(),
     evidenceImportState: EvidenceImportUiState = EvidenceImportUiState(),
@@ -293,106 +297,118 @@ public fun CommitmentManagementScreenContent(
                     testTag = "commitments-action-feed-statusline",
                 )
             }
-            FilterChipRow(
-                selectedFilter = state.filter,
-                onFilterSelect = onFilterChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-            )
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxWidth()
                     .pullRefresh(pullState),
             ) {
                 when {
                     state.loading -> {
                         CommitmentListSkeleton()
                     }
-                    state.items.isEmpty() && state.topActions.isEmpty() -> {
-                        EmptyState(
-                            title = stringResource(R.string.commitments_empty_title),
-                            message = stringResource(R.string.commitments_empty_message),
+                    else -> {
+                        val rowsForDirection = state.activeItems.ifEmpty { state.items }.distinctByCommitmentId()
+                        val rowsById = rowsForDirection.associateBy { it.id }
+                        val today = state.today
+                            ?: Clock.System.now().toLocalDateTime(KST).date
+                        val giveTag = stringResource(R.string.commitment_direction_give_tag)
+                        val takeTag = stringResource(R.string.commitment_direction_take_tag)
+                        val unknownTag = stringResource(R.string.commitment_direction_unknown_tag)
+                        val tagLabels = mapOf(
+                            CommitmentDirectionBucket.GIVE to giveTag,
+                            CommitmentDirectionBucket.TAKE to takeTag,
+                            CommitmentDirectionBucket.UNKNOWN to unknownTag,
                         )
-	                    }
-	                    else -> {
-                            val deferLegacySections = state.topActions.isNotEmpty()
-                            val confirmedSection = state.confirmedSection.deferWhen(deferLegacySections)
-                            val reviewSection = state.reviewSection.deferWhen(deferLegacySections)
-                            val pastSection = state.pastSection.deferWhen(deferLegacySections)
-	                        val confirmedHeader = stringResource(
-	                            R.string.commitment_section_confirmed_fmt,
-	                            confirmedSection.count,
-	                        )
-	                        val reviewHeader = stringResource(
-	                            R.string.commitment_section_review_fmt,
-	                            reviewSection.count,
-	                        )
-	                        val pastHeader = stringResource(
-	                            R.string.commitment_section_past_fmt,
-	                            pastSection.count,
-	                        )
-	                        LazyColumn(
-	                            contentPadding = PaddingValues(
-	                                start = 16.dp,
-	                                top = 8.dp,
-	                                end = 16.dp,
-	                                bottom = CommitmentListBottomPadding,
-	                            ),
-	                            modifier = Modifier
-	                                .fillMaxSize()
-	                                .testTag("commitment-list"),
-	                        ) {
-                                if (state.topActions.isNotEmpty()) {
-                                    item(key = "commitment-action-panel") {
-                                        CommitmentActionPanel(
-                                            actions = state.topActions,
-                                            loadingEvidenceActionId = state.loadingEvidenceActionId,
-                                            loadingReminderActionId = state.loadingReminderActionId,
-                                            onOpenDetail = onOpenDetail,
-                                            onCompleteAction = onCompletePersonAction,
-                                            onOpenEvidence = onOpenPersonActionEvidence,
-                                            onRemind = onRemindPersonAction,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(bottom = 12.dp),
-                                        )
-                                    }
+                        val filteredActions = state.topActions
+                            .map { action ->
+                                CommitmentListEntry.Action(
+                                    action = action,
+                                    directionBucket = action.directionBucket(rowsById),
+                                )
+                            }
+                            .filter { it.directionBucket.isVisibleForFilter(state.filter) }
+                        val actionCommitmentIds = filteredActions.mapNotNullTo(mutableSetOf()) { it.action.commitmentId }
+                        val filteredRows = rowsForDirection
+                            .map { row ->
+                                CommitmentListEntry.Row(
+                                    row = row,
+                                    directionBucket = row.directionBucket(),
+                                )
+                            }
+                            .filter { it.directionBucket.isVisibleForFilter(state.filter) }
+                            .filterNot { it.row.id in actionCommitmentIds }
+                        val sections = buildCommitmentDueSections(
+                            entries = filteredActions + filteredRows,
+                            today = today,
+                        )
+                        val visibleContentCount = sections.sumOf { it.entries.size }
+                        var pastExpanded by rememberSaveable(state.filter) { mutableStateOf(false) }
+                        var laterExpanded by rememberSaveable(state.filter) { mutableStateOf(false) }
+                        LazyColumn(
+                            contentPadding = PaddingValues(
+                                start = 16.dp,
+                                top = 10.dp,
+                                end = 16.dp,
+                                bottom = CommitmentListBottomPadding,
+                            ),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("commitment-list"),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            item(key = "commitment-direction-intro") {
+                                CommitmentDirectionIntro(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 2.dp),
+                                )
+                            }
+                            item(key = "commitment-filter-row") {
+                                FilterChipRow(
+                                    selectedFilter = state.filter,
+                                    onFilterSelect = onFilterChange,
+                                    contentPadding = PaddingValues(horizontal = 0.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                            sections.forEach { section ->
+                                val expanded = when (section.kind) {
+                                    CommitmentDueSectionKind.PAST -> pastExpanded
+                                    CommitmentDueSectionKind.LATER -> laterExpanded
+                                    else -> true
                                 }
-
-	                            commitmentBucketSection(
-	                                sectionKey = "confirmed",
-	                                title = confirmedHeader,
-	                                section = confirmedSection,
-	                                showWhenEmpty = !deferLegacySections,
-	                                onToggle = onToggleConfirmedSection,
-	                                onReviewRequiredClick = onReviewRequiredClick,
-	                                onOpenDetail = onOpenDetail,
-	                            )
-
-	                            commitmentBucketSection(
-	                                sectionKey = "review",
-	                                title = reviewHeader,
-	                                section = reviewSection,
-	                                showWhenEmpty = !deferLegacySections,
-	                                onToggle = onToggleReviewSection,
-	                                onReviewRequiredClick = onReviewRequiredClick,
-	                                onOpenDetail = onOpenDetail,
-	                            )
-
-	                            commitmentBucketSection(
-	                                sectionKey = "past",
-	                                title = pastHeader,
-	                                section = pastSection,
-	                                showWhenEmpty = !deferLegacySections,
-	                                onToggle = onTogglePastSection,
-	                                onReviewRequiredClick = onReviewRequiredClick,
-	                                onOpenDetail = onOpenDetail,
-	                            )
-
-	                        }
-	                    }
-	                }
+                                commitmentDueSection(
+                                    section = section,
+                                    today = today,
+                                    expanded = expanded,
+                                    onToggleExpanded = {
+                                        when (section.kind) {
+                                            CommitmentDueSectionKind.PAST -> pastExpanded = !pastExpanded
+                                            CommitmentDueSectionKind.LATER -> laterExpanded = !laterExpanded
+                                            else -> Unit
+                                        }
+                                    },
+                                    directionTagLabels = tagLabels,
+                                    loadingEvidenceActionId = state.loadingEvidenceActionId,
+                                    loadingReminderActionId = state.loadingReminderActionId,
+                                    onOpenDetail = onOpenDetail,
+                                    onCompleteAction = onCompletePersonAction,
+                                    onOpenEvidence = onOpenPersonActionEvidence,
+                                    onRemind = onRemindPersonAction,
+                                )
+                            }
+                            if (visibleContentCount == 0) {
+                                item(key = "commitment-direction-empty") {
+                                    EmptyState(
+                                        title = stringResource(R.string.commitments_empty_title),
+                                        message = stringResource(R.string.commitments_empty_message),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
                 PullRefreshIndicator(
                     refreshing = state.refreshing,
@@ -428,9 +444,6 @@ public fun CommitmentManagementScreenContent(
     )
 }
 
-private fun CommitmentSectionUiState.deferWhen(defer: Boolean): CommitmentSectionUiState =
-    if (defer && count > 0) copy(expanded = false) else this
-
 /**
  * CMT-013 undo window. Spec pins it at 5 seconds; Material3's [SnackbarDuration.Long]
  * is the closest built-in (~10 s), so the call-site races it against this timeout.
@@ -438,46 +451,120 @@ private fun CommitmentSectionUiState.deferWhen(defer: Boolean): CommitmentSectio
 private const val UNDO_WINDOW_MS: Long = 5_000L
 
 @Composable
-private fun CommitmentActionPanel(
-    actions: List<PersonActionItemUi>,
+private fun CommitmentDirectionIntro(
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = stringResource(R.string.commitments_header_subtitle),
+        modifier = modifier.testTag("commitment-direction-intro"),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+private fun LazyListScope.commitmentDueSection(
+    section: CommitmentDueSection,
+    today: LocalDate,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    directionTagLabels: Map<CommitmentDirectionBucket, String>,
     loadingEvidenceActionId: String?,
     loadingReminderActionId: String?,
     onOpenDetail: (String) -> Unit,
     onCompleteAction: (String) -> Unit,
     onOpenEvidence: (String, String?, String?) -> Unit,
     onRemind: (String) -> Unit,
+) {
+    if (section.entries.isEmpty() && !section.kind.alwaysVisible) return
+    item(key = "commitment-due-header-${section.kind.key}") {
+        CommitmentDueSectionHeader(
+            title = stringResource(section.kind.titleRes, section.entries.size),
+            expandable = section.kind.expandable && section.entries.isNotEmpty(),
+            expanded = expanded,
+            onToggleExpanded = onToggleExpanded,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+                .testTag("commitment-due-${section.kind.key}"),
+        )
+    }
+    if (section.entries.isEmpty()) {
+        item(key = "commitment-due-${section.kind.key}-empty") {
+            CommitmentDueSectionEmpty(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+            )
+        }
+        return
+    }
+    if (!expanded) return
+    items(
+        items = section.entries,
+        key = { "${section.kind.key}-${it.stableKey}" },
+    ) { entry ->
+        when (entry) {
+            is CommitmentListEntry.Action -> {
+                val action = entry.action
+                EvidenceCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    CommitmentActionRow(
+                        action = action,
+                        directionTag = directionTagLabels.getValue(entry.directionBucket),
+                        dueBadge = entry.dueBadge(today),
+                        loadingEvidence = loadingEvidenceActionId == action.id,
+                        loadingReminder = loadingReminderActionId == action.id,
+                        onOpenDetail = onOpenDetail,
+                        onCompleteAction = onCompleteAction,
+                        onOpenEvidence = onOpenEvidence,
+                        onRemind = onRemind,
+                    )
+                }
+            }
+            is CommitmentListEntry.Row -> {
+                CommitmentRowCard(row = entry.row, onOpenDetail = onOpenDetail)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommitmentDueSectionHeader(
+    title: String,
+    expandable: Boolean,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    EvidenceCard(
-        modifier = modifier.testTag("commitment-action-panel"),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant),
+        )
+        if (expandable) {
+            TextButton(onClick = onToggleExpanded) {
                 Text(
-                    text = stringResource(R.string.commitment_action_feed_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = actions.size.toString(),
+                    text = stringResource(
+                        if (expanded) {
+                            R.string.commitment_due_section_collapse
+                        } else {
+                            R.string.commitment_due_section_expand
+                        },
+                    ),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            actions.forEach { action ->
-                CommitmentActionRow(
-                    action = action,
-                    loadingEvidence = loadingEvidenceActionId == action.id,
-                    loadingReminder = loadingReminderActionId == action.id,
-                    onOpenDetail = onOpenDetail,
-                    onCompleteAction = onCompleteAction,
-                    onOpenEvidence = onOpenEvidence,
-                    onRemind = onRemind,
                 )
             }
         }
@@ -485,8 +572,182 @@ private fun CommitmentActionPanel(
 }
 
 @Composable
+private fun CommitmentDueSectionEmpty(
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = stringResource(R.string.commitment_due_section_empty),
+        modifier = modifier,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+private enum class CommitmentDueSectionKind(
+    val key: String,
+    @StringRes val titleRes: Int,
+    val alwaysVisible: Boolean,
+    val expandable: Boolean = false,
+) {
+    PAST("past", R.string.commitment_due_past_title_fmt, false, expandable = true),
+    TODAY("today", R.string.commitment_due_today_title_fmt, true),
+    THIS_WEEK("this-week", R.string.commitment_due_this_week_title_fmt, true),
+    LATER("later", R.string.commitment_due_later_title_fmt, false, expandable = true),
+}
+
+private data class CommitmentDueSection(
+    val kind: CommitmentDueSectionKind,
+    val entries: List<CommitmentListEntry>,
+)
+
+private sealed interface CommitmentListEntry {
+    val stableKey: String
+    val dueAt: Instant?
+    val dueHint: String?
+    val dueIsApproximate: Boolean
+    val directionBucket: CommitmentDirectionBucket
+
+    data class Action(
+        val action: PersonActionItemUi,
+        override val directionBucket: CommitmentDirectionBucket,
+    ) : CommitmentListEntry {
+        override val stableKey: String = "action-${action.id}"
+        override val dueAt: Instant? = action.dueAt
+        override val dueHint: String? = action.dueHint
+        override val dueIsApproximate: Boolean = false
+    }
+
+    data class Row(
+        val row: CommitmentRow,
+        override val directionBucket: CommitmentDirectionBucket,
+    ) : CommitmentListEntry {
+        override val stableKey: String = "row-${row.id}"
+        override val dueAt: Instant? = row.dueAt
+        override val dueHint: String? = row.dueHint
+        override val dueIsApproximate: Boolean = row.dueIsApproximate
+    }
+}
+
+private fun buildCommitmentDueSections(
+    entries: List<CommitmentListEntry>,
+    today: LocalDate,
+): List<CommitmentDueSection> {
+    val grouped = linkedMapOf(
+        CommitmentDueSectionKind.PAST to mutableListOf<CommitmentListEntry>(),
+        CommitmentDueSectionKind.TODAY to mutableListOf<CommitmentListEntry>(),
+        CommitmentDueSectionKind.THIS_WEEK to mutableListOf<CommitmentListEntry>(),
+        CommitmentDueSectionKind.LATER to mutableListOf<CommitmentListEntry>(),
+    )
+    entries
+        .sortedWith(
+            compareBy<CommitmentListEntry> { it.dayDeltaForSort(today) ?: Int.MAX_VALUE }
+                .thenByDescending { it.secondarySortInstant() },
+        )
+        .forEach { entry ->
+            grouped.getValue(entry.sectionKind(today)).add(entry)
+        }
+    return grouped.map { (kind, sectionEntries) ->
+        CommitmentDueSection(kind = kind, entries = sectionEntries)
+    }
+}
+
+private fun CommitmentListEntry.sectionKind(today: LocalDate): CommitmentDueSectionKind {
+    val dayDelta = dayDeltaForBucket(today)
+    return when {
+        dayDelta != null && dayDelta < 0 -> CommitmentDueSectionKind.PAST
+        dayDelta == 0 -> CommitmentDueSectionKind.TODAY
+        dayDelta != null && dayDelta in 1..7 -> CommitmentDueSectionKind.THIS_WEEK
+        else -> CommitmentDueSectionKind.LATER
+    }
+}
+
+private fun CommitmentListEntry.dayDeltaForSort(today: LocalDate): Int? =
+    dueAtDayDelta(today) ?: dueHintDayDelta()
+
+private fun CommitmentListEntry.dayDeltaForBucket(today: LocalDate): Int? =
+    dueAtDayDelta(today) ?: dueHintDayDelta()
+
+private fun CommitmentListEntry.dueAtDayDelta(today: LocalDate): Int? {
+    val due = dueAt ?: return null
+    val dueDate = due.toLocalDateTime(KST).date
+    return today.daysUntil(dueDate)
+}
+
+private fun CommitmentListEntry.dueHintDayDelta(): Int? {
+    val hint = dueHint?.trim()?.lowercase() ?: return null
+    return when {
+        hint.contains("오늘") || hint.contains("금일") || hint.contains("today") -> 0
+        hint.contains("내일") || hint.contains("tomorrow") -> 1
+        hint.contains("이번 주") || hint.contains("이번주") || hint.contains("금주") ||
+            hint.contains("this week") -> 1
+        else -> null
+    }
+}
+
+private fun CommitmentListEntry.secondarySortInstant(): Instant? =
+    when (this) {
+        is CommitmentListEntry.Action -> action.evidence?.occurredAt
+        is CommitmentListEntry.Row -> row.sourceOccurredAt
+    }
+
+private fun CommitmentListEntry.dueBadge(today: LocalDate): String? {
+    val dayDelta = dueAtDayDelta(today) ?: return null
+    return formatDayBadgeLabel(days = dayDelta, approximate = dueIsApproximate)
+}
+
+private enum class CommitmentDirectionBucket {
+    GIVE,
+    TAKE,
+    UNKNOWN,
+}
+
+private fun CommitmentDirectionBucket.isVisibleForFilter(filter: CommitmentFilter): Boolean =
+    when (filter) {
+        CommitmentFilter.ALL,
+        CommitmentFilter.SCHEDULE,
+        CommitmentFilter.CLOSED,
+        -> true
+        CommitmentFilter.GIVE -> this == CommitmentDirectionBucket.GIVE
+        CommitmentFilter.TAKE -> this == CommitmentDirectionBucket.TAKE
+    }
+
+private fun CommitmentRow.directionBucket(): CommitmentDirectionBucket =
+    when {
+        isGiveDirection(direction) -> CommitmentDirectionBucket.GIVE
+        isTakeDirection(direction) -> CommitmentDirectionBucket.TAKE
+        else -> CommitmentDirectionBucket.UNKNOWN
+    }
+
+private fun PersonActionItemUi.directionBucket(
+    rowsByCommitmentId: Map<String, CommitmentRow>,
+): CommitmentDirectionBucket {
+    val rowBucket = commitmentId?.let { rowsByCommitmentId[it]?.directionBucket() }
+    return when {
+        reasonCodes.any { it.matchesDirectionReason(CommitmentWire.DIRECTION_GIVE) } ->
+            CommitmentDirectionBucket.GIVE
+        reasonCodes.any { it.matchesDirectionReason(CommitmentWire.DIRECTION_TAKE) } ->
+            CommitmentDirectionBucket.TAKE
+        rowBucket != null -> rowBucket
+        else -> CommitmentDirectionBucket.UNKNOWN
+    }
+}
+
+private fun String.matchesDirectionReason(direction: String): Boolean {
+    val normalized = trim().lowercase()
+    val expected = direction.lowercase()
+    return normalized == expected || normalized == "direction:$expected"
+}
+
+private fun List<CommitmentRow>.distinctByCommitmentId(): List<CommitmentRow> {
+    val seen = mutableSetOf<String>()
+    return filter { seen.add(it.id) }
+}
+
+@Composable
 private fun CommitmentActionRow(
     action: PersonActionItemUi,
+    directionTag: String,
+    dueBadge: String?,
     loadingEvidence: Boolean,
     loadingReminder: Boolean,
     onOpenDetail: (String) -> Unit,
@@ -512,6 +773,10 @@ private fun CommitmentActionRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            CommitmentActionMetaPill(text = directionTag, emphasized = true)
+            dueBadge?.let { badge ->
+                CommitmentActionMetaPill(text = badge, emphasized = true)
+            }
             action.personDisplayName?.takeIf { it.isNotBlank() }?.let { displayName ->
                 CommitmentActionMetaPill(text = displayName)
             }
@@ -553,31 +818,34 @@ private fun CommitmentActionRow(
                     text = stringResource(R.string.commitment_action_evidence),
                     onClick = { onOpenEvidence(action.id, evidence.kind, evidence.id) },
                     loading = loadingEvidence,
-                    variant = BecalmButtonVariant.Text,
+                    variant = BecalmButtonVariant.Secondary,
+                    size = BecalmButtonSize.Compact,
                 )
             }
             if (action.shouldOfferReminder()) {
-                BecalmButton(
-                    text = stringResource(R.string.commitment_action_remind),
+                IconButton(
                     onClick = { onRemind(action.id) },
-                    loading = loadingReminder,
-                    variant = BecalmButtonVariant.Text,
-                )
-            }
-            BecalmButton(
-                text = action.primaryVerb,
-                onClick = {
-                    if (commitmentId != null) {
-                        onOpenDetail(commitmentId)
+                    enabled = !loadingReminder,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("commitment-action-reminder-${action.id}"),
+                ) {
+                    if (loadingReminder) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Notifications,
+                            contentDescription = stringResource(R.string.commitment_action_remind),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
                     }
-                },
-                enabled = commitmentId != null,
-                variant = BecalmButtonVariant.Secondary,
-            )
+                }
+            }
             BecalmButton(
                 text = stringResource(R.string.commitment_action_complete),
                 onClick = { onCompleteAction(action.id) },
-                variant = BecalmButtonVariant.Secondary,
+                variant = BecalmButtonVariant.Primary,
+                size = BecalmButtonSize.Compact,
             )
         }
     }
@@ -587,15 +855,26 @@ private fun CommitmentActionRow(
 private fun CommitmentActionMetaPill(
     text: String,
     modifier: Modifier = Modifier,
+    emphasized: Boolean = false,
 ) {
+    val backgroundColor = if (emphasized) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = if (emphasized) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Text(
         text = text,
         modifier = modifier
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(backgroundColor)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = contentColor,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
@@ -654,99 +933,6 @@ private fun CommitmentListSkeleton(modifier: Modifier = Modifier) {
                         SkeletonBlock(modifier = Modifier.width(56.dp).height(16.dp))
                     }
                 }
-            }
-        }
-    }
-}
-
-private fun LazyListScope.commitmentBucketSection(
-    sectionKey: String,
-    title: String,
-    section: CommitmentSectionUiState,
-    showWhenEmpty: Boolean,
-    onToggle: () -> Unit,
-    onReviewRequiredClick: () -> Unit,
-    onOpenDetail: (String) -> Unit,
-) {
-    if (!section.visible && !showWhenEmpty) return
-    item(key = "header-$sectionKey") {
-        ExpandableSectionHeader(
-            title = title,
-            expanded = section.expanded,
-            onToggle = onToggle,
-        )
-    }
-    if (!section.expanded) return
-
-    buildCommitmentPersonGroups(section.items).forEach { group ->
-        item(key = "$sectionKey-group-${group.stableKey}") {
-            CommitmentPersonGroupHeader(
-                group = group,
-                onReviewRequiredClick = onReviewRequiredClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 4.dp),
-            )
-        }
-        items(
-            items = group.items,
-            key = { "$sectionKey-${it.id}" },
-        ) { row ->
-            CommitmentRowCard(
-                row = if (section.dimmed) row.copy(deEmphasized = true) else row,
-                onOpenDetail = onOpenDetail,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CommitmentPersonGroupHeader(
-    group: CommitmentPersonGroup,
-    onReviewRequiredClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val displayName = group.displayName ?: when (group.type) {
-        CommitmentPersonGroupType.SCHEDULE -> stringResource(R.string.commitments_schedule_group_title)
-        CommitmentPersonGroupType.PERSON,
-        CommitmentPersonGroupType.UNKNOWN_PERSON,
-        -> stringResource(R.string.commitment_counterparty_unknown)
-    }
-    Row(
-        modifier = modifier.padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = displayName,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = stringResource(R.string.commitments_person_group_count_fmt, group.count),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (group.type == CommitmentPersonGroupType.UNKNOWN_PERSON) {
-            TextButton(onClick = onReviewRequiredClick) {
-                Text(text = stringResource(R.string.person_matching_required_banner_action))
             }
         }
     }
@@ -814,6 +1000,7 @@ private fun FilterChipRow(
     selectedFilter: CommitmentFilter,
     onFilterSelect: (CommitmentFilter) -> Unit,
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
 ) {
     val filters = listOf(
         CommitmentFilter.ALL to stringResource(R.string.commitments_filter_all),
@@ -822,7 +1009,7 @@ private fun FilterChipRow(
     )
     LazyRow(
         modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 16.dp),
+        contentPadding = contentPadding,
     ) {
         items(filters) { (filter, label) ->
             FilterChip(

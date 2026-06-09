@@ -65,7 +65,32 @@ public class ReminderScheduler @Inject constructor(
             logger.d(TAG, "schedule skipped: dueAt null for %08x".format(commitmentId.hashCode()))
             return
         }
-        val triggerAt = dueAt.minus(REMINDER_LEAD_TIME)
+        scheduleTriggerAt(
+            commitmentId = commitmentId,
+            triggerAt = dueAt.minus(REMINDER_LEAD_TIME),
+            allowUndatedReminder = false,
+        )
+    }
+
+    /**
+     * Schedules a reminder at the exact user-selected notification time.
+     *
+     * This is intentionally separate from [schedule]: the selected value is the time
+     * the phone should notify, not the commitment's due/schedule time.
+     */
+    public suspend fun scheduleAt(commitmentId: String, triggerAt: Instant) {
+        scheduleTriggerAt(
+            commitmentId = commitmentId,
+            triggerAt = triggerAt,
+            allowUndatedReminder = true,
+        )
+    }
+
+    private suspend fun scheduleTriggerAt(
+        commitmentId: String,
+        triggerAt: Instant,
+        allowUndatedReminder: Boolean,
+    ) {
         val now = clock.nowInstant()
         if (triggerAt <= now) {
             logger.d(
@@ -98,7 +123,12 @@ public class ReminderScheduler @Inject constructor(
         }
 
         val requestCode = commitmentIdToRequestCode(commitmentId)
-        val pi = buildPendingIntent(commitmentId, userId, requestCode)
+        val pi = buildPendingIntent(
+            commitmentId = commitmentId,
+            userId = userId,
+            requestCode = requestCode,
+            allowUndatedReminder = allowUndatedReminder,
+        )
         val triggerMs = triggerAt.toEpochMilliseconds()
 
         val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
@@ -136,7 +166,12 @@ public class ReminderScheduler @Inject constructor(
         // For cancel we only need a matching PendingIntent to invalidate; the
         // extras are ignored by AlarmManager's intent-equality rules once the
         // request code + filter match. Pass an empty user id as a sentinel.
-        val pi = buildPendingIntent(commitmentId, userId = "", requestCode = requestCode)
+        val pi = buildPendingIntent(
+            commitmentId = commitmentId,
+            userId = "",
+            requestCode = requestCode,
+            allowUndatedReminder = false,
+        )
         alarmManager.cancel(pi)
         pi.cancel()
         logger.d(TAG, "Alarm cancelled for commitment %08x".format(commitmentId.hashCode()))
@@ -148,10 +183,12 @@ public class ReminderScheduler @Inject constructor(
         commitmentId: String,
         userId: String,
         requestCode: Int,
+        allowUndatedReminder: Boolean,
     ): PendingIntent {
         val intent = Intent(context, ReminderBroadcastReceiver::class.java).apply {
             putExtra(ReminderBroadcastReceiver.EXTRA_COMMITMENT_ID, commitmentId)
             putExtra(ReminderBroadcastReceiver.EXTRA_USER_ID, userId)
+            putExtra(ReminderBroadcastReceiver.EXTRA_ALLOW_UNDATED_REMINDER, allowUndatedReminder)
         }
         return PendingIntent.getBroadcast(
             context,

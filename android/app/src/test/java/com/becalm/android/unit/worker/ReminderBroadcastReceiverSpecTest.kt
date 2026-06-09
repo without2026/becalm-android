@@ -98,6 +98,28 @@ class ReminderBroadcastReceiverSpecTest {
     }
 
     @Test
+    fun `custom reminder can notify no-deadline commitment without changing default drop rule`() = runTest {
+        val context: Context = mockk(relaxed = true)
+        val commitmentDao: CommitmentDao = mockk()
+        val logger: Logger = mockk(relaxed = true)
+        val userPrefsStore: UserPrefsStore = mockk()
+        val receiver = spyk(ReminderBroadcastReceiver())
+        receiver.commitmentDao = commitmentDao
+        receiver.logger = logger
+        receiver.userPrefsStore = userPrefsStore
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(true)
+        every { context.getString(R.string.commitment_alarm_custom_title) } returns "약속 알림"
+        every { context.getString(R.string.commitment_alarm_body_give_fmt, *anyVararg()) } returns "[내가 한] 보고서 전달"
+        every { receiver["postNotification"](context, any<ReminderNotificationSpec>()) } answers { Unit }
+        coEvery { commitmentDao.findByIdForUser("user-1", "custom-no-deadline") } returns
+            entity(id = "custom-no-deadline", actionState = "pending", dueAt = null)
+
+        invokeHandle(receiver, context, "custom-no-deadline", "user-1", allowUndatedReminder = true)
+
+        verify(exactly = 1) { receiver["postNotification"](context, any<ReminderNotificationSpec>()) }
+    }
+
+    @Test
     fun `handle drops when user disabled notifications`() = runTest {
         val context: Context = mockk(relaxed = true)
         val commitmentDao: CommitmentDao = mockk()
@@ -158,6 +180,38 @@ class ReminderBroadcastReceiverSpecTest {
             context,
             commitmentId,
             userId,
+            object : Continuation<Unit> {
+                override val context: CoroutineContext = EmptyCoroutineContext
+
+                override fun resumeWith(result: Result<Unit>) = Unit
+            },
+        )
+    }
+
+    private fun invokeHandle(
+        receiver: ReminderBroadcastReceiver,
+        context: Context,
+        commitmentId: String,
+        userId: String,
+        allowUndatedReminder: Boolean,
+    ) {
+        receiver.javaClass.methods.single {
+            it.name.startsWith("handle\$app_") &&
+                it.parameterTypes.contentEquals(
+                    arrayOf(
+                        Context::class.java,
+                        String::class.java,
+                        String::class.java,
+                        java.lang.Boolean.TYPE,
+                        Continuation::class.java,
+                    ),
+                )
+        }.invoke(
+            receiver,
+            context,
+            commitmentId,
+            userId,
+            allowUndatedReminder,
             object : Continuation<Unit> {
                 override val context: CoroutineContext = EmptyCoroutineContext
 

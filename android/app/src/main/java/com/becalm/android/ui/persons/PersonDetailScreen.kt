@@ -3,9 +3,12 @@ package com.becalm.android.ui.persons
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,8 +20,11 @@ import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -26,7 +32,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,14 +41,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -56,13 +64,12 @@ import com.becalm.android.ui.actions.PersonActionEvidenceDialog
 import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.ui.actions.shouldOfferReminder
 import com.becalm.android.ui.actions.supportedDraftKind
-import com.becalm.android.ui.components.BecalmButton
-import com.becalm.android.ui.components.BecalmButtonVariant
+import com.becalm.android.ui.components.BecalmActionPill
+import com.becalm.android.ui.components.BecalmActionPillVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
-import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.RecommendationPanel
 import com.becalm.android.ui.components.isCallSource
@@ -80,6 +87,7 @@ import com.becalm.android.ui.onboarding.dispatchFirstMemoryFollowUpAction
 import com.becalm.android.ui.onboarding.firstMemoryFollowUpActionsFor
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.LocalKstDayTick
+import com.becalm.android.ui.theme.becalmColors
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.datetime.daysUntil
@@ -121,7 +129,7 @@ public fun PersonDetailScreen(
 
     PersonDetailScreenContent(
         state = state,
-        title = state.displayName ?: stringResource(R.string.persons_unidentified),
+        title = stringResource(R.string.persons_title),
         snackbarHostState = snackbarHostState,
         onBack = {
             if (!navController.popBackStack()) {
@@ -213,7 +221,7 @@ public fun PersonDetailScreenContent(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        val hasAnyInteractions = state.sourceEventCards.isNotEmpty()
+        val hasAnyInteractions = state.timelineItems.isNotEmpty()
         when {
             state.loading -> {
                 BecalmSheetSkeleton(modifier = Modifier.padding(padding))
@@ -300,6 +308,8 @@ private fun PersonDetailEmpty(state: PersonDetailUiState, padding: PaddingValues
                 callInteractionCount = state.callInteractionCount,
                 meetingCount = state.meetingCount,
                 pendingCommitmentCount = state.pendingCommitmentCount,
+                relationshipStartedAt = state.relationshipStartedAt,
+                lastInteractionAt = state.lastInteractionAt,
             )
         }
         item(key = "empty") {
@@ -323,12 +333,13 @@ private fun PersonDetailList(
     onRetryManualMemorySync: () -> Unit,
 ) {
     var selectedFilter by rememberSaveable { mutableStateOf(PersonTimelineFilter.ALL) }
-    val sourceCards = remember(selectedFilter, state.sourceEventCards) {
-        state.sourceEventCards.filter(selectedFilter::matches)
+    var expandedThreadKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val timelineItems = remember(selectedFilter, state.timelineItems) {
+        state.timelineItems.filter(selectedFilter::matches)
     }
     val timelineHeader = stringResource(
         R.string.person_detail_timeline_section_fmt,
-        sourceCards.size,
+        timelineItems.size,
     )
     val kstDayTick = LocalKstDayTick.current
     val recallCue = remember(state.topActions, state.sourceEventCards, kstDayTick) {
@@ -357,6 +368,8 @@ private fun PersonDetailList(
                 callInteractionCount = state.callInteractionCount,
                 meetingCount = state.meetingCount,
                 pendingCommitmentCount = state.pendingCommitmentCount,
+                relationshipStartedAt = state.relationshipStartedAt,
+                lastInteractionAt = state.lastInteractionAt,
             )
         }
         if (state.topActions.isNotEmpty()) {
@@ -400,7 +413,7 @@ private fun PersonDetailList(
                 )
             }
         }
-        val firstMemoryCards = sourceCards.filter { it.firstMemoryOrigin != null }
+        val firstMemoryCards = state.sourceEventCards.filter { it.firstMemoryOrigin != null }
         if (firstMemoryCards.isNotEmpty()) {
             item(key = "first-memory-recommendations") {
                 PersonFirstMemoryRecommendationPanel(
@@ -417,18 +430,38 @@ private fun PersonDetailList(
             )
         }
         item(key = "header-timeline") { SectionHeader(text = timelineHeader) }
-        if (sourceCards.isNotEmpty()) {
+        if (timelineItems.isNotEmpty()) {
             items(
-                items = sourceCards,
-                key = { card -> card.sourceEventKey },
-            ) { card ->
-                SourceEventCardRow(
-                    card = card,
-                    onEventTap = onEventTap,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                )
+                items = timelineItems,
+                key = { item -> item.key },
+            ) { item ->
+                when (item) {
+                    is PersonTimelineItem.SourceEvent -> {
+                        SourceEventCardRow(
+                            card = item.card,
+                            onEventTap = onEventTap,
+                            modifier = Modifier.fillMaxWidth(),
+                            expanded = expandedThreadKey == item.card.sourceEventKey,
+                            onThreadToggle = { key ->
+                                expandedThreadKey = if (expandedThreadKey == key) null else key
+                            },
+                        )
+                    }
+                    is PersonTimelineItem.ScheduleCandidate -> {
+                        ScheduleCandidateTimelineRow(
+                            item = item,
+                            onEventTap = onEventTap,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    is PersonTimelineItem.ConfirmedSchedule -> {
+                        ConfirmedScheduleTimelineRow(
+                            item = item,
+                            onEventTap = onEventTap,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
             }
         } else {
             item(key = "timeline-empty") {
@@ -437,14 +470,19 @@ private fun PersonDetailList(
         }
         if (state.canLoadMoreTimeline) {
             item(key = "load-more-timeline") {
-                TextButton(
-                    onClick = onLoadMoreTimeline,
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .testTag("person-detail-load-more"),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Center,
                 ) {
-                    Text(text = stringResource(R.string.person_detail_load_more))
+                    BecalmActionPill(
+                        text = stringResource(R.string.person_detail_load_more),
+                        onClick = onLoadMoreTimeline,
+                        trailingChevron = true,
+                        variant = BecalmActionPillVariant.Neutral,
+                        modifier = Modifier.testTag("person-detail-load-more"),
+                    )
                 }
             }
         }
@@ -460,6 +498,163 @@ private data class PersonRecallCue(
     val daysSinceLastInteraction: Int,
     val lastCard: SourceEventCardProjection,
 )
+
+@Composable
+private fun CompactInsightPanel(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.76f)),
+        shadowElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun CompactSectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f),
+        )
+    }
+}
+
+private enum class MiniActionStyle {
+    Solid,
+    Outline,
+    Ghost,
+}
+
+private data class MiniActionColors(
+    val container: Color,
+    val content: Color,
+    val border: Color,
+)
+
+@Composable
+private fun MiniActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: MiniActionStyle = MiniActionStyle.Outline,
+    icon: ImageVector? = null,
+    trailingChevron: Boolean = false,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+) {
+    val colors = miniActionColors(style)
+    val interactive = enabled && !loading
+    Surface(
+        modifier = modifier
+            .defaultMinSize(minHeight = 32.dp)
+            .then(if (enabled) Modifier else Modifier.alpha(0.38f))
+            .clickable(enabled = interactive, role = Role.Button, onClick = onClick),
+        shape = MaterialTheme.shapes.extraSmall,
+        color = colors.container,
+        contentColor = colors.content,
+        border = BorderStroke(1.dp, colors.border),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when {
+                loading -> CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    color = colors.content,
+                    strokeWidth = 2.dp,
+                )
+                icon != null -> Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = colors.content,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.content,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (trailingChevron) {
+                Icon(
+                    imageVector = Icons.Outlined.ChevronRight,
+                    contentDescription = null,
+                    tint = colors.content,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun miniActionColors(style: MiniActionStyle): MiniActionColors =
+    when (style) {
+        MiniActionStyle.Solid -> MiniActionColors(
+            container = MaterialTheme.colorScheme.primary,
+            content = MaterialTheme.colorScheme.onPrimary,
+            border = MaterialTheme.colorScheme.primary,
+        )
+        MiniActionStyle.Outline -> MiniActionColors(
+            container = MaterialTheme.colorScheme.surface,
+            content = MaterialTheme.colorScheme.primary,
+            border = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+        )
+        MiniActionStyle.Ghost -> MiniActionColors(
+            container = Color.Transparent,
+            content = MaterialTheme.colorScheme.onSurfaceVariant,
+            border = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f),
+        )
+    }
+
+@Composable
+private fun ActionOrb(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.size(28.dp),
+        shape = MaterialTheme.shapes.extraSmall,
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = "AI",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
+    }
+}
 
 private fun buildPersonRecallCue(
     sourceCards: List<SourceEventCardProjection>,
@@ -494,16 +689,16 @@ private fun PersonRelationshipRecallPanel(
     val lastRecordTitle = cue.lastCard.title
         ?: cue.lastCard.snippet
         ?: stringResource(R.string.person_detail_recall_last_record)
-    RecommendationPanel(
+    CompactInsightPanel(
         modifier = modifier
             .fillMaxWidth()
             .testTag("person-detail-relationship-recall"),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 text = stringResource(R.string.person_detail_recall_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.tertiary,
             )
             Text(
                 text = stringResource(
@@ -511,16 +706,17 @@ private fun PersonRelationshipRecallPanel(
                     cue.daysSinceLastInteraction,
                     lastRecordTitle,
                 ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.86f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             cue.lastCard.rawEventId?.let { rawEventId ->
-                TextButton(
+                MiniActionButton(
+                    text = stringResource(R.string.person_detail_recall_open_last),
                     onClick = { onEventTap(rawEventId) },
+                    style = MiniActionStyle.Outline,
+                    trailingChevron = true,
                     modifier = Modifier.testTag("person-detail-recall-open-last"),
-                ) {
-                    Text(text = stringResource(R.string.person_detail_recall_open_last))
-                }
+                )
             }
         }
     }
@@ -557,21 +753,20 @@ private fun ManualMemorySyncStatusPanel(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.86f),
             )
-            TextButton(
+            BecalmActionPill(
+                text = stringResource(
+                    if (retrying) {
+                        R.string.person_detail_manual_memory_sync_retrying
+                    } else {
+                        R.string.person_detail_manual_memory_sync_retry
+                    },
+                ),
                 onClick = onRetry,
                 enabled = !retrying,
+                loading = retrying,
+                icon = Icons.Outlined.Refresh,
                 modifier = Modifier.testTag("person-detail-manual-memory-sync-retry"),
-            ) {
-                Text(
-                    text = stringResource(
-                        if (retrying) {
-                            R.string.person_detail_manual_memory_sync_retrying
-                        } else {
-                            R.string.person_detail_manual_memory_sync_retry
-                        },
-                    ),
-                )
-            }
+            )
         }
     }
 }
@@ -662,17 +857,14 @@ private fun PersonNextActionsPanel(
     onOpenDraft: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    RecommendationPanel(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .testTag("person-detail-next-action-panel"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = stringResource(R.string.person_detail_next_action_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+        CompactSectionHeader(text = stringResource(R.string.person_detail_next_action_title))
+        CompactInsightPanel {
             val visibleActions = actions.take(PERSON_DETAIL_VISIBLE_ACTION_LIMIT)
             visibleActions.firstOrNull()?.let { action ->
                 PersonActionRecommendationRow(
@@ -696,8 +888,8 @@ private fun PersonNextActionsPanel(
             if (secondaryActions.isNotEmpty()) {
                 Text(
                     text = stringResource(R.string.person_detail_secondary_actions_title_fmt, secondaryActions.size),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag("person-detail-secondary-actions-title"),
                 )
                 Column(
@@ -746,7 +938,8 @@ private fun PersonActionRecommendationRow(
     onOpenDraft: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val canOpenRawEvent = action.resolveRawEventId(sourceCards) != null
+    val rawEventId = action.resolveRawEventId(sourceCards)
+    val canOpenRawEvent = rawEventId != null
     val canOpenEvidence = action.hasEvidenceLookup()
     val loadingEvidence = loadingEvidenceActionId == action.id
     val loadingReminder = loadingReminderActionId == action.id
@@ -758,7 +951,9 @@ private fun PersonActionRecommendationRow(
         val evidence = action.evidence
         val evidenceKind = evidence?.kind
         val evidenceId = evidence?.id
-        if (evidenceKind != null && evidenceId != null) {
+        if (rawEventId != null) {
+            onActionClick(action)
+        } else if (evidenceKind != null && evidenceId != null) {
             onOpenEvidence(action.id, evidenceKind, evidenceId)
         } else {
             onActionClick(action)
@@ -775,19 +970,19 @@ private fun PersonActionRecommendationRow(
             ),
         shape = if (primary) MaterialTheme.shapes.medium else MaterialTheme.shapes.small,
         color = if (primary) {
-            MaterialTheme.colorScheme.surface
+            Color.Transparent
         } else {
             MaterialTheme.colorScheme.surface.copy(alpha = 0.48f)
         },
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (primary) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-            } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
-            },
-        ),
+        border = if (primary) {
+            null
+        } else {
+            BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
+            )
+        },
     ) {
         Column(
             modifier = Modifier
@@ -799,31 +994,43 @@ private fun PersonActionRecommendationRow(
                     },
                 )
                 .padding(
-                    horizontal = if (primary) 14.dp else 12.dp,
-                    vertical = if (primary) 12.dp else 8.dp,
+                    horizontal = if (primary) 0.dp else 12.dp,
+                    vertical = if (primary) 0.dp else 8.dp,
                 ),
-            verticalArrangement = Arrangement.spacedBy(if (primary) 8.dp else 5.dp),
+            verticalArrangement = Arrangement.spacedBy(if (primary) 10.dp else 5.dp),
         ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                action.sourceType?.let { EventSourceBadge(sourceType = it) }
+                if (primary) {
+                    ActionOrb()
+                }
                 Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(
+                            R.string.person_detail_next_action_kind_fmt,
+                            action.primaryVerb.takeIf { it.isNotBlank() } ?: action.actionKind,
+                        ),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         text = action.title,
                         style = if (primary) {
-                            MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                            MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                         } else {
-                            MaterialTheme.typography.bodyMedium
+                            MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                         },
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = action.shortReason,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -840,7 +1047,7 @@ private fun PersonActionRecommendationRow(
             if (primary) {
                 PersonPrimaryActionControls(
                     action = action,
-                    canOpenEvidence = canOpenEvidence,
+                    canOpenEvidence = canOpenEvidence || canOpenRawEvent,
                     loadingEvidence = loadingEvidence,
                     loadingReminder = loadingReminder,
                     loadingComplete = loadingComplete,
@@ -891,49 +1098,75 @@ private fun PersonPrimaryActionControls(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        horizontalAlignment = Alignment.End,
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val draftKind = action.supportedDraftKind()
+            val draftKind = action.supportedDraftKind().takeIf { PERSON_ACTION_DRAFT_CTA_ENABLED }
             if (draftKind != null) {
-                BecalmButton(
+                MiniActionButton(
                     text = stringResource(draftPrimaryActionLabelRes(draftKind)),
                     onClick = { onOpenDraft(action.id) },
                     enabled = !actionBusy,
                     loading = loadingDraft,
-                    variant = BecalmButtonVariant.Primary,
+                    style = MiniActionStyle.Solid,
                     modifier = Modifier.testTag("person-detail-action-draft-${action.id}"),
                 )
             }
             if (canOpenEvidence) {
-                BecalmButton(
+                MiniActionButton(
                     text = stringResource(R.string.person_action_evidence_view),
                     onClick = onOpenEvidence,
-                    enabled = !actionBusy,
+                    enabled = !actionBusy || loadingEvidence,
                     loading = loadingEvidence,
-                    variant = BecalmButtonVariant.Secondary,
-                    modifier = Modifier.testTag("person-detail-action-evidence-${action.id}"),
+                    style = MiniActionStyle.Outline,
+                    trailingChevron = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("person-detail-action-evidence-${action.id}"),
+                )
+            }
+            MiniActionButton(
+                text = stringResource(R.string.commitment_action_complete),
+                onClick = { onComplete(action.id) },
+                enabled = !actionBusy || loadingComplete,
+                loading = loadingComplete,
+                style = MiniActionStyle.Solid,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("person-detail-action-complete-${action.id}"),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MiniActionButton(
+                text = stringResource(R.string.schedule_action_dismiss),
+                onClick = { onDismiss(action.id) },
+                enabled = !actionBusy || loadingDismiss,
+                loading = loadingDismiss,
+                icon = Icons.Outlined.Close,
+                style = MiniActionStyle.Ghost,
+                modifier = Modifier.alpha(if (loadingDismiss) 0.56f else 1f),
+            )
+            if (action.shouldOfferReminder()) {
+                MiniActionButton(
+                    text = stringResource(R.string.commitment_action_remind),
+                    onClick = { onRemind(action.id) },
+                    enabled = !actionBusy || loadingReminder,
+                    loading = loadingReminder,
+                    icon = Icons.Outlined.Notifications,
+                    style = MiniActionStyle.Ghost,
+                    modifier = Modifier.alpha(if (loadingReminder) 0.56f else 1f),
                 )
             }
         }
-        PersonSecondaryActionControls(
-            action = action,
-            loadingReminder = loadingReminder,
-            loadingComplete = loadingComplete,
-            loadingDismiss = loadingDismiss,
-            loadingDraft = loadingDraft,
-            actionBusy = actionBusy,
-            showDraft = false,
-            onComplete = onComplete,
-            onDismiss = onDismiss,
-            onRemind = onRemind,
-            onOpenDraft = onOpenDraft,
-        )
     }
 }
 
@@ -957,40 +1190,45 @@ private fun PersonSecondaryActionControls(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(
+        MiniActionButton(
+            text = stringResource(R.string.schedule_action_dismiss),
             onClick = { onDismiss(action.id) },
             enabled = !actionBusy,
+            loading = loadingDismiss,
+            icon = Icons.Outlined.Close,
+            style = MiniActionStyle.Ghost,
             modifier = Modifier.alpha(if (loadingDismiss) 0.56f else 1f),
-        ) {
-            Text(text = stringResource(R.string.schedule_action_dismiss))
-        }
+        )
         if (action.shouldOfferReminder()) {
-            TextButton(
+            MiniActionButton(
+                text = stringResource(R.string.commitment_action_remind),
                 onClick = { onRemind(action.id) },
                 enabled = !actionBusy,
+                loading = loadingReminder,
+                icon = Icons.Outlined.Notifications,
+                style = MiniActionStyle.Ghost,
                 modifier = Modifier.alpha(if (loadingReminder) 0.56f else 1f),
-            ) {
-                Text(text = stringResource(R.string.commitment_action_remind))
-            }
+            )
         }
-        if (showDraft && action.supportedDraftKind() != null) {
-            TextButton(
+        if (showDraft && PERSON_ACTION_DRAFT_CTA_ENABLED && action.supportedDraftKind() != null) {
+            MiniActionButton(
+                text = stringResource(R.string.person_action_draft_action),
                 onClick = { onOpenDraft(action.id) },
                 enabled = !actionBusy,
+                trailingChevron = true,
                 modifier = Modifier
                     .alpha(if (loadingDraft) 0.56f else 1f)
                     .testTag("person-detail-action-draft-secondary-${action.id}"),
-            ) {
-                Text(text = stringResource(R.string.person_action_draft_action))
-            }
+            )
         }
-        TextButton(
+        MiniActionButton(
+            text = stringResource(R.string.commitment_action_complete),
             onClick = { onComplete(action.id) },
-            enabled = !actionBusy,
-            modifier = Modifier.alpha(if (loadingComplete) 0.56f else 1f),
-        ) {
-            Text(text = stringResource(R.string.commitment_action_complete))
-        }
+            enabled = !actionBusy || loadingComplete,
+            loading = loadingComplete,
+            style = MiniActionStyle.Outline,
+            modifier = Modifier.testTag("person-detail-action-complete-secondary-${action.id}"),
+        )
     }
 }
 
@@ -1001,6 +1239,8 @@ private fun draftPrimaryActionLabelRes(draftKind: String): Int =
         "reconnect_person" -> R.string.person_action_draft_primary_reconnect
         else -> R.string.person_action_draft_primary_follow_up
     }
+
+private const val PERSON_ACTION_DRAFT_CTA_ENABLED = false
 
 private fun PersonActionItemUi.resolveRawEventId(
     sourceCards: List<SourceEventCardProjection>,
@@ -1016,12 +1256,22 @@ private fun PersonActionItemUi.resolveRawEventId(
         evidence?.sourceRef.cleanId(),
         evidence?.id.takeIf { evidence?.kind == "source_event" }.cleanId(),
     )
-    return sourceCards.firstOrNull { card ->
+    val rawKeyCandidates = directCandidates.map { "raw:$it" }
+    val typedRefCandidates = refs.map { ref -> "${sourceType.orEmpty()}:$ref" }
+    val matchingCard = sourceCards.firstOrNull { card ->
         card.rawEventId in directCandidates ||
             card.sourceEventKey in refs ||
-            card.sourceEventKey in directCandidates.map { "raw:$it" } ||
-            card.sourceEventKey in refs.map { ref -> "${sourceType.orEmpty()}:$ref" }
-    }?.rawEventId
+            card.sourceEventKey in rawKeyCandidates ||
+            card.sourceEventKey in typedRefCandidates ||
+            card.relatedSourceEventKeys.any { key ->
+                key in refs || key in rawKeyCandidates || key in typedRefCandidates
+            }
+    }
+    return directCandidates.firstOrNull { candidate ->
+        matchingCard?.rawEventId == candidate ||
+            matchingCard?.relatedSourceEventKeys?.contains("raw:$candidate") == true
+    }
+        ?: matchingCard?.rawEventId
         ?: directCandidates.firstOrNull()
 }
 
@@ -1053,8 +1303,8 @@ private fun TimelineFilterRow(
 ) {
     val filters = listOf(
         PersonTimelineFilter.ALL to stringResource(R.string.person_detail_filter_all),
-        PersonTimelineFilter.EMAIL to stringResource(R.string.person_detail_filter_email),
         PersonTimelineFilter.CALL to stringResource(R.string.person_detail_filter_call),
+        PersonTimelineFilter.EMAIL to stringResource(R.string.person_detail_filter_email),
         PersonTimelineFilter.MEETING to stringResource(R.string.person_detail_filter_meeting),
     )
     LazyRow(
@@ -1065,36 +1315,58 @@ private fun TimelineFilterRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(filters) { (filter, label) ->
-            FilterChip(
-                selected = selectedFilter == filter,
-                onClick = { onFilterSelect(filter) },
-                label = {
-                    Text(text = label, style = MaterialTheme.typography.labelMedium)
-                },
+            val selected = selectedFilter == filter
+            Surface(
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 30.dp)
+                    .testTag("person-detail-filter-${filter.name.lowercase()}")
+                    .clickable(role = Role.Button) { onFilterSelect(filter) },
                 shape = MaterialTheme.shapes.extraSmall,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.58f),
-                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                contentColor = if (selected) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
                 ),
-                modifier = Modifier.testTag("person-detail-filter-${filter.name.lowercase()}"),
-            )
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
         }
     }
 }
 
-private fun PersonTimelineFilter.matches(card: SourceEventCardProjection): Boolean = when (this) {
+private fun PersonTimelineFilter.matches(item: PersonTimelineItem): Boolean = when (this) {
     PersonTimelineFilter.ALL -> true
-    PersonTimelineFilter.EMAIL -> card.sourceType.isEmailSource()
-    PersonTimelineFilter.CALL -> card.sourceType.isCallSource()
-    PersonTimelineFilter.MEETING -> card.sourceType.isMeetingTimelineSource()
+    PersonTimelineFilter.EMAIL -> item is PersonTimelineItem.SourceEvent && item.card.sourceType.isEmailSource()
+    PersonTimelineFilter.CALL -> item is PersonTimelineItem.SourceEvent && item.card.sourceType.isCallSource()
+    PersonTimelineFilter.MEETING -> when (item) {
+        is PersonTimelineItem.SourceEvent -> item.card.sourceType.isMeetingTimelineSource()
+        is PersonTimelineItem.ScheduleCandidate -> true
+        is PersonTimelineItem.ConfirmedSchedule -> true
+    }
 }
 
 @Composable
 private fun SectionHeader(text: String) {
-    Text(
+    CompactSectionHeader(
         text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
     )
 }

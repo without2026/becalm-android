@@ -94,6 +94,13 @@ class RawIngestionRepositoryLocalIntegrationTest {
     @Test
     // spec: ING-006
     fun `refreshSince mirrors backend raw mail rows as synced local events`() = runTest {
+        val emailBodyRepository = RecordingEmailBodyRepository()
+        val emailAwareRepository = RawIngestionRepositoryImpl(
+            dao = db.rawIngestionEventDao(),
+            apiProvider = Provider { api },
+            emailBodyRepositoryProvider = Provider { emailBodyRepository },
+            logger = RecordingLogger(),
+        )
         coEvery {
             api.getRawIngestionEvents(
                 cursor = null,
@@ -106,35 +113,140 @@ class RawIngestionRepositoryLocalIntegrationTest {
                 data = listOf(
                     RawIngestionEventDto(
                         id = "server-raw-1",
-	                        clientEventId = "gmail-client-1",
-	                        sourceType = SourceType.GMAIL,
-	                        providerEventId = "gmail-message-1",
-	                        counterpartyRef = "customer@example.com",
-	                        sourceEventTitle = "제안서 요청",
-	                        sourceEventSnippet = "내일까지 제안서 보내주세요.",
-	                        folder = "inbox",
-	                        extractedCount = 1,
-	                        timestamp = Instant.parse("2026-04-28T01:00:00Z"),
-	                    ),
-	                ),
+                        clientEventId = "gmail-client-1",
+                        sourceType = SourceType.GMAIL,
+                        providerEventId = "gmail-message-1",
+                        counterpartyRef = "customer@example.com",
+                        sourceEventTitle = "제안서 요청",
+                        sourceEventSnippet = "내일까지 제안서 보내주세요.",
+                        emailBodyPlain = "안녕하세요.\n내일까지 제안서 보내주세요.\n감사합니다.",
+                        folder = "inbox",
+                        extractedCount = 1,
+                        timestamp = Instant.parse("2026-04-28T01:00:00Z"),
+                    ),
+                ),
                 cursor = "cursor-1",
                 hasMore = false,
             ),
         )
 
-        val result = repository.refreshSince(userId = USER_ID, sourceType = SourceType.GMAIL, since = null)
+        val result = emailAwareRepository.refreshSince(userId = USER_ID, sourceType = SourceType.GMAIL, since = null)
 
         assertTrue(result is BecalmResult.Success)
         val row = db.rawIngestionEventDao().findByClientEventId(USER_ID, "gmail-client-1")
         requireNotNull(row)
-	        assertEquals("server-raw-1", row.id)
-	        assertEquals("synced", row.syncStatus)
-	        assertEquals("gmail-message-1", row.sourceRef)
-	        assertEquals("제안서 요청", row.eventTitle)
-	        assertEquals("내일까지 제안서 보내주세요.", row.eventSnippet)
-	        assertEquals("customer@example.com", row.counterpartyRef)
-	        assertEquals(1, row.commitmentsExtractedCount)
-	    }
+        assertEquals("server-raw-1", row.id)
+        assertEquals("synced", row.syncStatus)
+        assertEquals("gmail-message-1", row.sourceRef)
+        assertEquals("제안서 요청", row.eventTitle)
+        assertEquals("내일까지 제안서 보내주세요.", row.eventSnippet)
+        assertEquals("customer@example.com", row.counterpartyRef)
+        assertEquals(1, row.commitmentsExtractedCount)
+        val mirroredBody = emailBodyRepository.inserted.single()
+        assertEquals("server-raw-1", mirroredBody.rawEventId)
+        assertEquals("gmail-message-1", mirroredBody.providerMessageId)
+        assertEquals("inbox", mirroredBody.folder)
+        assertEquals("제안서 요청", mirroredBody.subject)
+        assertEquals("안녕하세요.\n내일까지 제안서 보내주세요.\n감사합니다.", mirroredBody.bodyPlain)
+    }
+
+    @Test
+    fun `refreshSince keeps raw mirror success when backend email body mirror insert fails`() = runTest {
+        val emailBodyRepository = RecordingEmailBodyRepository(failInsert = true)
+        val emailAwareRepository = RawIngestionRepositoryImpl(
+            dao = db.rawIngestionEventDao(),
+            apiProvider = Provider { api },
+            emailBodyRepositoryProvider = Provider { emailBodyRepository },
+            logger = RecordingLogger(),
+        )
+        coEvery {
+            api.getRawIngestionEvents(
+                cursor = null,
+                limit = any(),
+                since = null,
+                sourceType = SourceType.GMAIL,
+            )
+        } returns Response.success(
+            RawIngestionEventsResponse(
+                data = listOf(
+                    RawIngestionEventDto(
+                        id = "server-raw-body-fail",
+                        clientEventId = "gmail-client-body-fail",
+                        sourceType = SourceType.GMAIL,
+                        providerEventId = "gmail-message-body-fail",
+                        sourceEventTitle = "본문 저장 실패",
+                        sourceEventSnippet = "요약은 남아야 합니다.",
+                        emailBodyPlain = "저장 실패해도 raw row refresh는 성공해야 합니다.",
+                        folder = "inbox",
+                        extractedCount = 0,
+                        timestamp = Instant.parse("2026-04-28T02:00:00Z"),
+                    ),
+                ),
+                cursor = "cursor-body-fail",
+                hasMore = false,
+            ),
+        )
+
+        val result = emailAwareRepository.refreshSince(userId = USER_ID, sourceType = SourceType.GMAIL, since = null)
+
+        assertTrue(result is BecalmResult.Success)
+        val row = db.rawIngestionEventDao().findByClientEventId(USER_ID, "gmail-client-body-fail")
+        requireNotNull(row)
+        assertEquals("server-raw-body-fail", row.id)
+        assertEquals("요약은 남아야 합니다.", row.eventSnippet)
+        assertTrue(emailBodyRepository.inserted.isEmpty())
+    }
+
+    @Test
+    fun `refreshSince skips backend email body mirror for blank body and non mail rows`() = runTest {
+        val emailBodyRepository = RecordingEmailBodyRepository()
+        val emailAwareRepository = RawIngestionRepositoryImpl(
+            dao = db.rawIngestionEventDao(),
+            apiProvider = Provider { api },
+            emailBodyRepositoryProvider = Provider { emailBodyRepository },
+            logger = RecordingLogger(),
+        )
+        coEvery {
+            api.getRawIngestionEvents(
+                cursor = null,
+                limit = any(),
+                since = null,
+                sourceType = null,
+            )
+        } returns Response.success(
+            RawIngestionEventsResponse(
+                data = listOf(
+                    RawIngestionEventDto(
+                        id = "server-raw-blank-body",
+                        clientEventId = "gmail-client-blank-body",
+                        sourceType = SourceType.GMAIL,
+                        providerEventId = "gmail-message-blank-body",
+                        sourceEventTitle = "빈 본문",
+                        sourceEventSnippet = "요약",
+                        emailBodyPlain = "   ",
+                        timestamp = Instant.parse("2026-04-28T03:00:00Z"),
+                    ),
+                    RawIngestionEventDto(
+                        id = "server-raw-calendar-body",
+                        clientEventId = "calendar-client-body",
+                        sourceType = SourceType.GOOGLE_CALENDAR,
+                        providerEventId = "calendar-event-1",
+                        sourceEventTitle = "캘린더",
+                        sourceEventSnippet = "캘린더 요약",
+                        emailBodyPlain = "메일이 아닌 source는 mirror하지 않습니다.",
+                        timestamp = Instant.parse("2026-04-28T04:00:00Z"),
+                    ),
+                ),
+                cursor = "cursor-edge",
+                hasMore = false,
+            ),
+        )
+
+        val result = emailAwareRepository.refreshSince(userId = USER_ID, sourceType = null, since = null)
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(0, emailBodyRepository.inserted.size)
+    }
 
     @Test
     // spec: P0-2 keyset resume after WorkManager/process restart
@@ -178,7 +290,7 @@ class RawIngestionRepositoryLocalIntegrationTest {
         assertTrue(firstResult.value.hasMore)
         assertEquals(
             "ks1:page-5",
-            cursorStore.observeCursor("raw_ingestion_events:v4_user:user-1:source_event_anchor:gmail").first(),
+            cursorStore.observeCursor("raw_ingestion_events:v6_user:user-1:source_event_anchor:email_body:gmail").first(),
         )
         val resumedResult = resumedRepository.refreshSince(USER_ID, SourceType.GMAIL, since = null)
 
@@ -186,7 +298,7 @@ class RawIngestionRepositoryLocalIntegrationTest {
         assertEquals(1, (resumedResult as BecalmResult.Success).value.fetched)
         assertEquals(
             "ks1:page-6",
-            cursorStore.observeCursor("raw_ingestion_events:v4_user:user-1:source_event_anchor:gmail").first(),
+            cursorStore.observeCursor("raw_ingestion_events:v6_user:user-1:source_event_anchor:email_body:gmail").first(),
         )
         coVerify(exactly = 1) {
             api.getRawIngestionEvents(
@@ -209,7 +321,7 @@ class RawIngestionRepositoryLocalIntegrationTest {
         val cursorStore = SyncCursorStoreImpl(
             dataStore = LocalIntegrationSupport.prefsDataStore("raw-mirror-empty-cursor-reset"),
         )
-        cursorStore.setCursor("raw_ingestion_events:v4_user:user-1:source_event_anchor:gmail", "ks1:stale")
+        cursorStore.setCursor("raw_ingestion_events:v6_user:user-1:source_event_anchor:email_body:gmail", "ks1:stale")
         val cursorBackedRepository = cursorBackedRepository(cursorStore)
         coEvery {
             api.getRawIngestionEvents(
@@ -224,7 +336,7 @@ class RawIngestionRepositoryLocalIntegrationTest {
 
         assertTrue(result is BecalmResult.Success)
         assertEquals(1, (result as BecalmResult.Success).value.fetched)
-        assertEquals("ks1:page-1", cursorStore.observeCursor("raw_ingestion_events:v4_user:user-1:source_event_anchor:gmail").first())
+        assertEquals("ks1:page-1", cursorStore.observeCursor("raw_ingestion_events:v6_user:user-1:source_event_anchor:email_body:gmail").first())
         coVerify(exactly = 1) {
             api.getRawIngestionEvents(
                 cursor = null,
@@ -451,6 +563,32 @@ class RawIngestionRepositoryLocalIntegrationTest {
                 hasMore = hasMore,
             ),
         )
+
+    private class RecordingEmailBodyRepository(
+        private val failInsert: Boolean = false,
+    ) : EmailBodyRepository {
+        val inserted = mutableListOf<EmailBodyEntity>()
+
+        override suspend fun insert(entity: EmailBodyEntity) {
+            if (failInsert) error("email body insert failed")
+            inserted += entity
+        }
+
+        override suspend fun getByRawEventId(rawEventId: String): EmailBodyEntity? =
+            inserted.lastOrNull { it.rawEventId == rawEventId }
+
+        override suspend fun findByProviderMessage(
+            userId: String,
+            sourceType: String,
+            folder: String,
+            providerMessageId: String,
+        ): EmailBodyEntity? =
+            inserted.lastOrNull {
+                it.folder == folder && it.providerMessageId == providerMessageId
+            }
+
+        override suspend fun markParseFailed(id: String) = Unit
+    }
 
     private val noopEmailBodyRepository = object : EmailBodyRepository {
         override suspend fun insert(entity: EmailBodyEntity) = Unit

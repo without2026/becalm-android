@@ -7,11 +7,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -33,7 +35,9 @@ class PersonsScreenTest {
 
     @Test
     // spec: ERR-001
-    fun persons_screen_shows_offline_badge_and_unassigned_section_when_state_requires_them() {
+    fun persons_screen_shows_offline_badge_and_matching_summary_when_state_requires_them() {
+        var matchingClicks = 0
+
         composeTestRule.setContent {
             BecalmTheme {
                 PersonsScreenContent(
@@ -61,14 +65,24 @@ class PersonsScreenTest {
                     snackbarHostState = SnackbarHostState(),
                     onQueryChange = {},
                     onPersonClick = {},
+                    onOpenUnassigned = { matchingClicks += 1 },
                 )
             }
         }
 
-        composeTestRule.onNodeWithText(appString(R.string.persons_unassigned_title)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("미분류 이벤트").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasTestTag("persons-matching-queue-summary"))
+        composeTestRule.onNodeWithTag("persons-matching-queue-summary").assertIsDisplayed()
+        composeTestRule.onNodeWithText(appString(R.string.person_matching_queue_title_fmt, 1)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(appString(R.string.person_matching_queue_action)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("미분류 이벤트").assertCountEquals(0)
         composeTestRule.onNodeWithText(appString(R.string.persons_offline_badge_no_sync), substring = true)
             .assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("persons-matching-queue-summary").performClick()
+        composeTestRule.runOnIdle {
+            assertEquals(1, matchingClicks)
+        }
     }
 
     @Test

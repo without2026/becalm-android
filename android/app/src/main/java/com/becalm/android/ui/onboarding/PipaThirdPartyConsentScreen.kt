@@ -156,7 +156,7 @@ internal fun PipaThirdPartyConsentContent(
             BecalmButton(
                 text = stringResource(R.string.onb_pipa_button_decline),
                 onClick = onDeclinedClick,
-                variant = BecalmButtonVariant.Text,
+                variant = BecalmButtonVariant.Tertiary,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onb-pipa-decline"),

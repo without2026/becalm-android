@@ -26,6 +26,7 @@ import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.FirstMemoryRepository
 import com.becalm.android.data.repository.FirstMemorySaveResult
 import com.becalm.android.data.repository.OnboardingActivationPreview
+import com.becalm.android.data.repository.OnboardingActivationScanSummary
 import com.becalm.android.data.repository.OnboardingActivationProgress
 import com.becalm.android.data.repository.OnboardingActivationPreviewRepository
 import com.becalm.android.data.repository.OnboardingActivationPreviewResult
@@ -50,6 +51,7 @@ import com.becalm.android.ui.onboarding.EmailConnectEvent
 import com.becalm.android.ui.onboarding.EmailOAuthProvider
 import com.becalm.android.ui.onboarding.EmailOAuthResult
 import com.becalm.android.ui.onboarding.GmailActivationPreviewStatus
+import com.becalm.android.ui.onboarding.OnboardingActivationPreviewSourceSet
 import com.becalm.android.ui.onboarding.OnboardingStep
 import com.becalm.android.ui.onboarding.OnboardingSourceProvider
 import com.becalm.android.ui.onboarding.OnboardingSetupDestination
@@ -58,10 +60,10 @@ import com.becalm.android.ui.onboarding.OnboardingSetupStage
 import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.ui.onboarding.PipaConsentEvent
 import com.becalm.android.ui.onboarding.RecordingPathSelection
+import com.becalm.android.ui.onboarding.SourceConnectionState
 import com.becalm.android.ui.onboarding.StepStatus
 import com.becalm.android.ui.onboarding.ONBOARDING_INTRO_PAGE_COUNT
 import com.becalm.android.ui.components.UiMessage
-import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
@@ -112,7 +114,6 @@ class OnboardingViewModelSpecTest {
     private val firstMemoryRepository: FirstMemoryRepository = mockk(relaxed = true)
     private val onboardingActivationPreviewRepository: OnboardingActivationPreviewRepository = mockk(relaxed = true)
     private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
-    private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
 
     @Before
@@ -184,6 +185,13 @@ class OnboardingViewModelSpecTest {
         }
         coEvery { userProfileRepository.markOnboardingCompleted("user-123", any()) } returns
             BecalmResult.Success(userProfile(displayName = "민홍", phone = "+821012345678"))
+        coEvery {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(any(), any(), any(), any())
+        } returns OnboardingActivationPreviewResult.Empty
+        coEvery { onboardingActivationPreviewRepository.refreshCachedPreview(any(), any(), any()) } returns
+            OnboardingActivationPreviewResult.Empty
+        coEvery { onboardingActivationPreviewRepository.loadCachedPreview(any(), any(), any()) } returns
+            OnboardingActivationPreviewResult.Empty
         coEvery {
             selfIdentityRepository.upsertLocalAnchor(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
         } answers {
@@ -629,8 +637,6 @@ class OnboardingViewModelSpecTest {
         val activity = mockk<android.app.Activity>(relaxed = true)
         coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
         coEvery { emailOAuthConnector.startSignIn(EmailOAuthProvider.GMAIL, activity, null) } returns EmailOAuthResult.Connected
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
-            OnboardingActivationPreviewResult.Empty
         val viewModel = buildViewModel()
 
         viewModel.onConnectEmailProvider(EmailPipaProvider.GMAIL, activity)
@@ -655,8 +661,6 @@ class OnboardingViewModelSpecTest {
     fun `ONB gmail status refresh success emits connected event for browser callback return`() = runTest {
         coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
         coEvery { emailOAuthConnector.refreshConnectionStatus(EmailOAuthProvider.GMAIL) } returns EmailOAuthResult.Connected
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
-            OnboardingActivationPreviewResult.Empty
         val viewModel = buildViewModel()
 
         viewModel.emailConnectEvents.test {
@@ -678,59 +682,84 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `ONB gmail browser callback routes to activation preview when sync returns first aha state`() = runTest {
+    fun `ONB gmail browser callback syncs activation preview without navigating to aha route`() = runTest {
         coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
         coEvery { emailOAuthConnector.refreshConnectionStatus(EmailOAuthProvider.GMAIL) } returns EmailOAuthResult.Connected
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
-            OnboardingActivationPreviewResult.Ready(listOf(activationPreview()))
         val viewModel = buildViewModel()
 
         viewModel.setupEffects.test {
             viewModel.refreshEmailProviderConnection(EmailPipaProvider.GMAIL)
             advanceUntilIdle()
 
-            assertEquals(
-                OnboardingSetupEffect.NavigateToSetupRoute(OnboardingSetupDestination.GmailPreview.routePath),
-                awaitItem(),
-            )
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
 
-        assertEquals(OnboardingSetupStage.GMAIL_PREVIEW, viewModel.uiState.value.setupStage)
+        assertEquals(OnboardingSetupStage.INTRO, viewModel.uiState.value.setupStage)
         assertEquals(
-            GmailActivationPreviewStatus.Ready,
+            StepStatus.COMPLETE,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
+        )
+        assertEquals(
+            GmailActivationPreviewStatus.Empty,
             viewModel.uiState.value.gmailActivationPreview.status,
         )
+        coVerify(exactly = 1) {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = false,
+                onProgress = any(),
+            )
+        }
     }
 
     @Test
-    fun `ONB gmail browser callback routes retryable activation failure to preview fallback`() = runTest {
+    fun `ONB gmail browser callback leaves aha scan for ready start action`() = runTest {
         coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
         coEvery { emailOAuthConnector.refreshConnectionStatus(EmailOAuthProvider.GMAIL) } returns EmailOAuthResult.Connected
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
-            OnboardingActivationPreviewResult.Failed(retryable = true)
+        coEvery {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = false,
+                onProgress = any(),
+            )
+        } returns OnboardingActivationPreviewResult.Empty
         val viewModel = buildViewModel()
 
         viewModel.setupEffects.test {
             viewModel.refreshEmailProviderConnection(EmailPipaProvider.GMAIL)
             advanceUntilIdle()
 
-            assertEquals(
-                OnboardingSetupEffect.NavigateToSetupRoute(OnboardingSetupDestination.GmailPreview.routePath),
-                awaitItem(),
-            )
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
 
-        assertEquals(OnboardingSetupStage.GMAIL_PREVIEW, viewModel.uiState.value.setupStage)
-        assertEquals(
-            GmailActivationPreviewStatus.FailedRetryable,
-            viewModel.uiState.value.gmailActivationPreview.status,
-        )
-        assertEquals(
-            StepStatus.NOT_STARTED,
-            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
-        )
+        viewModel.setupEffects.test {
+            viewModel.onStartBeCalmSetup()
+            advanceUntilIdle()
+
+            assertEquals(OnboardingSetupEffect.NavigateToPeople, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
+        coVerify(exactly = 1) {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = false,
+                onProgress = any(),
+            )
+        }
+        coVerify(exactly = 1) {
+            onboardingActivationPreviewRepository.loadCachedPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = false,
+            )
+        }
     }
 
     @Test
@@ -815,23 +844,21 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `ONB outlook status refresh success triggers immediate backend sync`() = runTest {
+    fun `ONB outlook status refresh success persists backend managed connection`() = runTest {
         coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL) } returns flowOf(true)
         coEvery { emailOAuthConnector.refreshConnectionStatus(EmailOAuthProvider.OUTLOOK_MAIL) } returns
             EmailOAuthResult.Connected
-        coEvery { sourceSyncPort.requestManualSync(SourceType.OUTLOOK_MAIL) } returns BecalmResult.Success(Unit)
         val viewModel = buildViewModel()
 
         viewModel.emailConnectEvents.test {
             viewModel.refreshEmailProviderConnection(EmailPipaProvider.OUTLOOK_MAIL)
             advanceUntilIdle()
 
-            assertEquals(EmailConnectEvent.Syncing(EmailPipaProvider.OUTLOOK_MAIL), awaitItem())
             assertEquals(EmailConnectEvent.Connected(EmailPipaProvider.OUTLOOK_MAIL), awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
 
-        coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.OUTLOOK_MAIL) }
+        coVerify(exactly = 1) { userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.OUTLOOK_MAIL, true) }
         coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.OUTLOOK_MAIL, any()) }
         assertEquals(
             StepStatus.COMPLETE,
@@ -1261,20 +1288,26 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `post intro routes to first memory only when no onboarding source is connected`() = runTest {
+    fun `post intro routes to ready before first memory when no onboarding source is connected`() = runTest {
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
         repeat(ONBOARDING_INTRO_PAGE_COUNT) {
             viewModel.onIntroNext()
         }
+        advanceUntilIdle()
+
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
+
+        viewModel.onStartBeCalmSetup()
+        advanceUntilIdle()
 
         assertEquals(OnboardingSetupStage.FIRST_MEMORY, viewModel.uiState.value.setupStage)
         coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
     }
 
     @Test
-    fun `post intro routes to first memory when only contacts were connected`() = runTest {
+    fun `post intro routes to ready before first memory when only contacts were connected`() = runTest {
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
@@ -1285,21 +1318,59 @@ class OnboardingViewModelSpecTest {
         }
         advanceUntilIdle()
 
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
+
+        viewModel.onStartBeCalmSetup()
+        advanceUntilIdle()
+
         assertEquals(OnboardingSetupStage.FIRST_MEMORY, viewModel.uiState.value.setupStage)
         coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
     }
 
     @Test
-    fun `post intro routes connected Gmail and Calendar through activation preview scan before completion`() = runTest {
+    fun `post intro starts main when only call recording is connected`() = runTest {
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onRecordingPathSelected(SourceType.CALL_RECORDING)
+        advanceUntilIdle()
+
+        repeat(ONBOARDING_INTRO_PAGE_COUNT) {
+            viewModel.onIntroNext()
+        }
+        advanceUntilIdle()
+
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
+        assertEquals(SourceConnectionState.Connected, viewModel.uiState.value.callRecordingConnectionState)
+
+        viewModel.setupEffects.test {
+            viewModel.onStartBeCalmSetup()
+            advanceUntilIdle()
+
+            assertEquals(OnboardingSetupEffect.NavigateToPeople, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(any(), any(), any(), any())
+        }
+        coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
+    }
+
+    @Test
+    fun `post intro waits on ready before showing cached Gmail and Calendar aha`() = runTest {
         coEvery {
-            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+            onboardingActivationPreviewRepository.loadCachedPreview(
                 userId = "user-123",
                 includeGmail = true,
                 includeGoogleCalendar = true,
-                onProgress = any(),
             )
         } returns OnboardingActivationPreviewResult.Ready(
-            listOf(activationPreview(sourceType = SourceType.GOOGLE_CALENDAR)),
+            previews = listOf(activationPreview(sourceType = SourceType.GOOGLE_CALENDAR)),
+            scanSummary = OnboardingActivationScanSummary(
+                gmailCount = 142,
+                calendarCount = 18,
+            ),
         )
         val viewModel = buildViewModel()
         advanceUntilIdle()
@@ -1316,8 +1387,24 @@ class OnboardingViewModelSpecTest {
             val effects = List(ONBOARDING_INTRO_PAGE_COUNT) { awaitItem() }
             assertTrue(
                 effects.contains(
-                    OnboardingSetupEffect.NavigateToSetupRoute(OnboardingSetupDestination.GmailPreview.routePath),
+                    OnboardingSetupEffect.NavigateToSetupRoute(OnboardingSetupDestination.ReadyToStart.routePath),
                 ),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
+        coVerify(exactly = 0) {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(any(), any(), any(), any())
+        }
+
+        viewModel.setupEffects.test {
+            viewModel.onStartBeCalmSetup()
+            advanceUntilIdle()
+
+            assertEquals(
+                OnboardingSetupEffect.NavigateToSetupRoute(OnboardingSetupDestination.GmailPreview.routePath),
+                awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -1325,30 +1412,104 @@ class OnboardingViewModelSpecTest {
         assertEquals(OnboardingSetupStage.GMAIL_PREVIEW, viewModel.uiState.value.setupStage)
         assertEquals(GmailActivationPreviewStatus.Ready, viewModel.uiState.value.gmailActivationPreview.status)
         assertEquals(
+            OnboardingActivationPreviewSourceSet.GmailAndGoogleCalendar,
+            viewModel.uiState.value.gmailActivationPreview.sourceSet,
+        )
+        assertEquals(
             SourceType.GOOGLE_CALENDAR,
             viewModel.uiState.value.gmailActivationPreview.previews.single().sourceType,
         )
+        assertEquals(142, viewModel.uiState.value.gmailActivationPreview.scanSummary.gmailCount)
+        assertEquals(18, viewModel.uiState.value.gmailActivationPreview.scanSummary.calendarCount)
         coVerify(exactly = 1) {
-            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+            onboardingActivationPreviewRepository.loadCachedPreview(
                 userId = "user-123",
                 includeGmail = true,
                 includeGoogleCalendar = true,
-                onProgress = any(),
             )
+        }
+        coVerify(exactly = 0) {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(any(), any(), any(), any())
         }
         coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
     }
 
     @Test
-    fun `activation preview fallback start after connected source scan completes onboarding without rescanning`() = runTest {
+    fun `gmail preview route reloads when final aha source set adds calendar`() = runTest {
         coEvery {
-            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+            onboardingActivationPreviewRepository.loadCachedPreview(
                 userId = "user-123",
-                includeGmail = false,
-                includeGoogleCalendar = true,
-                onProgress = any(),
+                includeGmail = true,
+                includeGoogleCalendar = false,
             )
-        } returns OnboardingActivationPreviewResult.Pending()
+        } returns OnboardingActivationPreviewResult.Ready(
+            previews = listOf(
+                activationPreview(
+                    sourceType = SourceType.GMAIL,
+                ),
+            ),
+        )
+        coEvery {
+            onboardingActivationPreviewRepository.loadCachedPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = true,
+            )
+        } returns OnboardingActivationPreviewResult.Ready(
+            previews = listOf(
+                activationPreview(
+                    actionItemId = null,
+                    actionKind = null,
+                    reasonCodes = emptyList(),
+                    sourceType = SourceType.GMAIL,
+                    title = "베타 테스터 참여 제안을 거절함",
+                    sourceTitle = "Re: [BeCalm] 오랜만에 인사드립니다, 민송님!",
+                ),
+            ),
+            scanSummary = OnboardingActivationScanSummary(
+                gmailCount = 142,
+                calendarCount = 18,
+            ),
+        )
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onMarkStepStatus(OnboardingStep.LINK_GMAIL, StepStatus.COMPLETE)
+        viewModel.onStartBeCalmSetup()
+        advanceUntilIdle()
+
+        assertEquals(OnboardingActivationPreviewSourceSet.Gmail, viewModel.uiState.value.gmailActivationPreview.sourceSet)
+        assertEquals("금요일까지 제안서 초안 보내기", viewModel.uiState.value.gmailActivationPreview.previews.single().title)
+
+        viewModel.onMarkStepStatus(OnboardingStep.LINK_GOOGLE_CALENDAR, StepStatus.COMPLETE)
+        viewModel.onSetupRouteVisible(OnboardingSetupDestination.GmailPreview.routePath)
+        advanceUntilIdle()
+
+        assertEquals(
+            OnboardingActivationPreviewSourceSet.GmailAndGoogleCalendar,
+            viewModel.uiState.value.gmailActivationPreview.sourceSet,
+        )
+        assertEquals("베타 테스터 참여 제안을 거절함", viewModel.uiState.value.gmailActivationPreview.previews.single().title)
+        assertEquals(142, viewModel.uiState.value.gmailActivationPreview.scanSummary.gmailCount)
+        assertEquals(18, viewModel.uiState.value.gmailActivationPreview.scanSummary.calendarCount)
+        coVerify(exactly = 1) {
+            onboardingActivationPreviewRepository.loadCachedPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = false,
+            )
+        }
+        coVerify(exactly = 1) {
+            onboardingActivationPreviewRepository.loadCachedPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = true,
+            )
+        }
+    }
+
+    @Test
+    fun `empty cached connected source preview completes onboarding without showing aha route`() = runTest {
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
@@ -1362,27 +1523,36 @@ class OnboardingViewModelSpecTest {
             val effects = List(ONBOARDING_INTRO_PAGE_COUNT) { awaitItem() }
             assertTrue(
                 effects.contains(
-                    OnboardingSetupEffect.NavigateToSetupRoute(OnboardingSetupDestination.GmailPreview.routePath),
+                    OnboardingSetupEffect.NavigateToSetupRoute(OnboardingSetupDestination.ReadyToStart.routePath),
                 ),
             )
             cancelAndIgnoreRemainingEvents()
         }
 
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
+
         viewModel.setupEffects.test {
-            viewModel.onStartWithoutGmailActivationPreview()
+            viewModel.onStartBeCalmSetup()
             advanceUntilIdle()
 
-            assertEquals(OnboardingSetupEffect.NavigateToCompletion(), awaitItem())
+            assertEquals(OnboardingSetupEffect.NavigateToPeople, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
+        assertEquals(
+            OnboardingActivationPreviewSourceSet.GoogleCalendar,
+            viewModel.uiState.value.gmailActivationPreview.sourceSet,
+        )
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
 
         coVerify(exactly = 1) {
-            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+            onboardingActivationPreviewRepository.loadCachedPreview(
                 userId = "user-123",
                 includeGmail = false,
                 includeGoogleCalendar = true,
-                onProgress = any(),
             )
+        }
+        coVerify(exactly = 0) {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(any(), any(), any(), any())
         }
         coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
     }
@@ -1410,7 +1580,7 @@ class OnboardingViewModelSpecTest {
         viewModel.onSetupBackRequested()
         viewModel.onDiscardFirstMemoryDraft()
 
-        assertEquals(OnboardingSetupStage.INTRO, viewModel.uiState.value.setupStage)
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
         assertFalse(viewModel.uiState.value.firstMemoryExitPromptVisible)
         assertEquals(null, viewModel.uiState.value.firstMemory.origin)
         assertEquals("", viewModel.uiState.value.firstMemory.personName)
@@ -1459,23 +1629,24 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `gmail activation preview uses extracted commitment to complete onboarding`() = runTest {
+    fun `gmail activation preview uses extracted commitment and starts main`() = runTest {
         val viewModel = buildViewModel()
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
+        stubGmailActivationPreview(
             OnboardingActivationPreviewResult.Ready(
                 listOf(activationPreview()),
-            )
+            ),
+        )
 
-        viewModel.onGmailConnectedForActivation()
+        startGmailActivationPreview(viewModel)
         advanceUntilIdle()
 
-        assertEquals(OnboardingSetupStage.INTRO, viewModel.uiState.value.setupStage)
+        assertEquals(OnboardingSetupStage.GMAIL_PREVIEW, viewModel.uiState.value.setupStage)
         assertEquals("금요일까지 제안서 초안 보내기", viewModel.uiState.value.gmailActivationPreview.previews.firstOrNull()?.title)
 
         viewModel.setupEffects.test {
             viewModel.onUseGmailActivationPreview()
             advanceUntilIdle()
-            assertEquals(OnboardingSetupEffect.NavigateToCompletion("person-minji"), awaitItem())
+            assertEquals(OnboardingSetupEffect.NavigateToPeople, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -1485,7 +1656,7 @@ class OnboardingViewModelSpecTest {
     @Test
     fun `gmail activation preview accept records useful feedback and removes action from first aha list`() = runTest {
         val viewModel = buildViewModel()
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
+        stubGmailActivationPreview(
             OnboardingActivationPreviewResult.Ready(
                 listOf(
                     activationPreview(
@@ -1494,7 +1665,8 @@ class OnboardingViewModelSpecTest {
                         reasonCodes = listOf("onboarding:confirm_candidate"),
                     ),
                 ),
-            )
+            ),
+        )
         coEvery {
             onboardingActivationPreviewRepository.acceptPreviewAction(
                 userId = "user-123",
@@ -1502,7 +1674,7 @@ class OnboardingViewModelSpecTest {
             )
         } returns BecalmResult.Success(personActionMutationStats())
 
-        viewModel.onGmailConnectedForActivation()
+        startGmailActivationPreview(viewModel)
         advanceUntilIdle()
 
         viewModel.onAcceptGmailActivationPreview("pa-confirm-1")
@@ -1522,12 +1694,13 @@ class OnboardingViewModelSpecTest {
     @Test
     fun `gmail activation preview dismiss hides action from onboarding list`() = runTest {
         val viewModel = buildViewModel()
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
+        stubGmailActivationPreview(
             OnboardingActivationPreviewResult.Ready(
                 listOf(
                     activationPreview(actionItemId = "pa-dismiss-1"),
                 ),
-            )
+            ),
+        )
         coEvery {
             onboardingActivationPreviewRepository.dismissPreviewAction(
                 userId = "user-123",
@@ -1535,7 +1708,7 @@ class OnboardingViewModelSpecTest {
             )
         } returns BecalmResult.Success(personActionMutationStats())
 
-        viewModel.onGmailConnectedForActivation()
+        startGmailActivationPreview(viewModel)
         advanceUntilIdle()
 
         viewModel.onDismissGmailActivationPreview("pa-dismiss-1")
@@ -1553,89 +1726,65 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `gmail activation preview stays on gmail surface when sync is pending`() = runTest {
+    fun `cached activation preview completes onboarding when no preview is available`() = runTest {
         val viewModel = buildViewModel()
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
-            OnboardingActivationPreviewResult.Pending()
+        stubGmailActivationPreview(OnboardingActivationPreviewResult.Pending())
 
-        viewModel.onGmailConnectedForActivation()
-        advanceUntilIdle()
+        viewModel.setupEffects.test {
+            startGmailActivationPreview(viewModel)
+            advanceUntilIdle()
 
-        assertEquals(OnboardingSetupStage.INTRO, viewModel.uiState.value.setupStage)
+            assertEquals(OnboardingSetupEffect.NavigateToPeople, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(OnboardingSetupStage.READY_TO_START, viewModel.uiState.value.setupStage)
         assertEquals(null, viewModel.uiState.value.gmailActivationPreview.preview)
-        assertEquals(
-            GmailActivationPreviewStatus.StillProcessing,
-            viewModel.uiState.value.gmailActivationPreview.status,
-        )
-        assertEquals(null, viewModel.uiState.value.notice)
-        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
+        coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
     }
 
     @Test
-    fun `gmail activation preview pending state stays inline on current setup route`() = runTest {
-        val viewModel = buildViewModel()
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
-            OnboardingActivationPreviewResult.Pending()
-
-        viewModel.onGmailConnectedForActivation()
-        advanceUntilIdle()
-
-        assertEquals(OnboardingSetupStage.INTRO, viewModel.uiState.value.setupStage)
-        assertEquals(
-            GmailActivationPreviewStatus.StillProcessing,
-            viewModel.uiState.value.gmailActivationPreview.status,
-        )
-    }
-
-    @Test
-    fun `gmail activation preview surfaces progress message while waiting`() = runTest {
+    fun `gmail oauth activation preview keeps progress state when scan is pending`() = runTest {
         val progress = OnboardingActivationProgress(
             stage = "extracting",
             progress = 0.55,
             message = "메일 속 약속 후보를 확인하고 있습니다",
         )
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } coAnswers {
-            val onProgress = secondArg<suspend (OnboardingActivationProgress) -> Unit>()
+        coEvery {
+            onboardingActivationPreviewRepository.syncConnectedSourcesAndLoadPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = false,
+                onProgress = any(),
+            )
+        } coAnswers {
+            val onProgress = arg<suspend (OnboardingActivationProgress) -> Unit>(3)
             onProgress(progress)
             OnboardingActivationPreviewResult.Pending(progress)
         }
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
+        coEvery { emailOAuthConnector.refreshConnectionStatus(EmailOAuthProvider.GMAIL) } returns EmailOAuthResult.Connected
         val viewModel = buildViewModel()
 
-        viewModel.onGmailConnectedForActivation()
-        advanceUntilIdle()
+        viewModel.emailConnectEvents.test {
+            viewModel.refreshEmailProviderConnection(EmailPipaProvider.GMAIL)
+            advanceUntilIdle()
+
+            assertEquals(EmailConnectEvent.Syncing(EmailPipaProvider.GMAIL), awaitItem())
+            assertEquals(EmailConnectEvent.Connected(EmailPipaProvider.GMAIL), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
 
         assertEquals(
-            GmailActivationPreviewStatus.StillProcessing,
+            GmailActivationPreviewStatus.Loading,
             viewModel.uiState.value.gmailActivationPreview.status,
         )
+        assertTrue(viewModel.uiState.value.gmailActivationPreview.loading)
         assertEquals(0.55f, viewModel.uiState.value.gmailActivationPreview.progress)
         assertEquals(
             "메일 속 약속 후보를 확인하고 있습니다",
             viewModel.uiState.value.gmailActivationPreview.progressMessage,
         )
-    }
-
-    @Test
-    fun `gmail activation preview can start BeCalm without manual memory when still processing`() = runTest {
-        val viewModel = buildViewModel()
-        coEvery { onboardingActivationPreviewRepository.syncGmailAndLoadPreview("user-123", any()) } returns
-            OnboardingActivationPreviewResult.Pending()
-
-        viewModel.onGmailConnectedForActivation()
-        advanceUntilIdle()
-
-        viewModel.setupEffects.test {
-            viewModel.onStartWithoutGmailActivationPreview()
-            advanceUntilIdle()
-
-            assertEquals(
-                OnboardingSetupEffect.NavigateToSetupRoute(OnboardingSetupDestination.FirstMemory.routePath),
-                awaitItem(),
-            )
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
     }
 
     @Test
@@ -2055,15 +2204,31 @@ class OnboardingViewModelSpecTest {
         firstMemoryRepository = firstMemoryRepository,
         onboardingActivationPreviewRepository = onboardingActivationPreviewRepository,
         rawIngestionRepository = rawIngestionRepository,
-        sourceSyncPort = sourceSyncPort,
         workScheduler = workScheduler,
     )
+
+    private fun stubGmailActivationPreview(result: OnboardingActivationPreviewResult) {
+        coEvery {
+            onboardingActivationPreviewRepository.loadCachedPreview(
+                userId = "user-123",
+                includeGmail = true,
+                includeGoogleCalendar = false,
+            )
+        } returns result
+    }
+
+    private fun startGmailActivationPreview(viewModel: OnboardingViewModel) {
+        viewModel.onMarkStepStatus(OnboardingStep.LINK_GMAIL, StepStatus.COMPLETE)
+        viewModel.onStartBeCalmSetup()
+    }
 
     private fun activationPreview(
         actionItemId: String? = "pa-onboarding-1",
         actionKind: String? = "follow_up",
         reasonCodes: List<String> = listOf("onboarding:high_confidence_7d"),
         sourceType: String = SourceType.GMAIL,
+        title: String = "금요일까지 제안서 초안 보내기",
+        sourceTitle: String? = "Re: BeCalm 사업 소개서 공유",
     ): OnboardingActivationPreview =
         OnboardingActivationPreview(
             commitmentId = "commitment-1",
@@ -2074,7 +2239,7 @@ class OnboardingViewModelSpecTest {
             participantEmail = "minji@example.com",
             participantPhone = null,
             contactMatched = true,
-            title = "금요일까지 제안서 초안 보내기",
+            title = title,
             itemType = "action",
             direction = "give",
             scheduleStatus = null,
@@ -2082,7 +2247,7 @@ class OnboardingViewModelSpecTest {
             dueAt = null,
             dueHint = "금요일",
             sourceType = sourceType,
-            sourceTitle = "Re: BeCalm 사업 소개서 공유",
+            sourceTitle = sourceTitle,
             sourceEventOccurredAt = Instant.parse("2026-05-26T00:00:00Z"),
             confidence = 0.9,
             actionItemId = actionItemId,

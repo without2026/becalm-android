@@ -28,6 +28,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -252,6 +253,46 @@ class TodayScreenStateSourceLocalIntegrationTest {
 
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `today timeline excludes tentative schedules without due date`() = runTest {
+        db.commitmentDao().insert(
+            commitment(
+                id = "schedule-tentative-no-due",
+                userId = userId,
+                itemType = CommitmentItemType.SCHEDULE,
+                direction = null,
+                scheduleStatus = CommitmentScheduleStatus.TENTATIVE,
+                counterpartyRef = "+821012345678",
+                counterpartyRaw = "01012345678",
+                title = "시간 미확정 일정",
+                dueAt = null,
+                sourceEventOccurredAt = Instant.parse("2026-04-23T01:00:00Z"),
+            ),
+        )
+        db.commitmentDao().insert(
+            commitment(
+                id = "schedule-confirmed-today",
+                userId = userId,
+                itemType = CommitmentItemType.SCHEDULE,
+                direction = null,
+                scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                counterpartyRef = "+821012345678",
+                counterpartyRaw = "01012345678",
+                title = "오늘 확정 일정",
+                dueAt = Instant.parse("2026-04-23T08:00:00Z"),
+                sourceEventOccurredAt = Instant.parse("2026-04-23T01:30:00Z"),
+            ),
+        )
+
+        val rows = db.commitmentDao().observeTimelineForToday(
+            userId = userId,
+            startOfTodayEpochMs = Instant.parse("2026-04-22T15:00:00Z").toEpochMilliseconds(),
+            endOfTodayEpochMs = Instant.parse("2026-04-23T14:59:59Z").toEpochMilliseconds(),
+        ).first()
+
+        assertEquals(listOf("오늘 확정 일정"), rows.map { it.title })
     }
 
     @Test

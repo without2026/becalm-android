@@ -13,12 +13,15 @@ import javax.inject.Singleton
 /**
  * Repository facade over [EmailBodyDao] for the on-device-only `email_body` store.
  *
- * ## PIPA invariant — not backend-mirrored (EMAIL-006)
+ * ## PIPA invariant with beta backend body mirror (EMAIL-006)
  * `EmailBody` remains the canonical on-device store for email bodies. The backend
  * does not persist a mirrored `email_body` table. `RawIngestionRepository.uploadBatch`
  * may read bounded `body_plain` as transient Vertex Gemini extraction context for
- * the current request, while `body_html`, `attachments_meta`, `raw_headers`,
- * `from_address`, and `to_addresses` stay local-only.
+ * the current request. During the mail-body beta, backend-managed source
+ * refresh may also return nullable `email_body_plain` from `source_events`, and
+ * Android mirrors it back into this local table so raw-event detail can render the
+ * original body. `body_html`, `attachments_meta`, `raw_headers`, `from_address`,
+ * and `to_addresses` stay local-only.
  *
  * ## Lifecycle ownership
  * Insert and parse-failure transitions go through this Repository so that future
@@ -80,9 +83,8 @@ public interface EmailBodyRepository {
  * Production implementation of [EmailBodyRepository].
  *
  * All DAO calls are dispatched on [IoDispatcher] so that callers running on the
-     * Main dispatcher (test / future UI consumers) never block on Room. The backend-mirror
-     * invariant is preserved because this class exposes only DAO operations; upload DTO
-     * shaping stays in [RawIngestionRepository].
+ * Main dispatcher (test / future UI consumers) never block on Room. Backend beta
+ * body mirroring and upload DTO shaping stay in [RawIngestionRepository].
  */
 @Singleton
 public class EmailBodyRepositoryImpl @Inject constructor(

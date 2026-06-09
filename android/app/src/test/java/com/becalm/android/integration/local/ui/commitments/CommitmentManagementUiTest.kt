@@ -28,12 +28,12 @@ import com.becalm.android.ui.commitments.CommitmentActionEvidenceDetailUi
 import com.becalm.android.ui.commitments.CommitmentFilter
 import com.becalm.android.ui.commitments.CommitmentManagementScreenContent
 import com.becalm.android.ui.commitments.CommitmentRow
-import com.becalm.android.ui.commitments.CommitmentSectionUiState
 import com.becalm.android.ui.commitments.CommitmentUiState
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -57,6 +57,7 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         items = emptyList(),
                     ),
                     snackbarHostState = SnackbarHostState(),
@@ -65,8 +66,6 @@ class CommitmentManagementUiTest {
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
@@ -86,6 +85,7 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         actionFeedStatus = PersonActionFeedStatusUi(
                             kind = PersonActionFeedStatusKind.DEGRADED,
                             backlogLagSeconds = 180,
@@ -98,8 +98,6 @@ class CommitmentManagementUiTest {
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                     headerState = MainTabHeaderState(
                         sourceStatus = mapOf(
                             SourceType.GMAIL to SourceStatusUi(
@@ -139,6 +137,7 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         actionFeedStatus = PersonActionFeedStatusUi(
                             kind = PersonActionFeedStatusKind.DEGRADED,
                             backlogLagSeconds = 180,
@@ -152,8 +151,6 @@ class CommitmentManagementUiTest {
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
                     onStatusDetailsClick = { statusClicks += 1 },
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
@@ -179,6 +176,7 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         actionFeedStatus = PersonActionFeedStatusUi(
                             kind = PersonActionFeedStatusKind.QUOTA_DELAY,
                             backlogLagSeconds = 600,
@@ -194,8 +192,6 @@ class CommitmentManagementUiTest {
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                     headerState = MainTabHeaderState(
                         sourceStatus = mapOf(
                             SourceType.GMAIL to SourceStatusUi(
@@ -244,26 +240,9 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         items = listOf(active, schedule),
                         activeItems = listOf(active, schedule),
-                        confirmedSection = CommitmentSectionUiState(
-                            expanded = true,
-                            count = 2,
-                            items = listOf(
-                                active,
-                                schedule,
-                            ),
-                        ),
-                        completedSection = CommitmentSectionUiState(
-                            expanded = false,
-                            count = 1,
-                            items = listOf(activeRow("completed-1", "완료 약속")),
-                        ),
-                        cancelledSection = CommitmentSectionUiState(
-                            expanded = false,
-                            count = 1,
-                            items = listOf(activeRow("cancelled-1", "취소 약속")),
-                        ),
                         filter = CommitmentFilter.ALL,
                     ),
                     snackbarHostState = SnackbarHostState(),
@@ -272,15 +251,15 @@ class CommitmentManagementUiTest {
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
                     onOpenDetail = { openedDetailId = it },
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
 
         composeRule.onNodeWithText(string(R.string.commitments_filter_all)).assertIsDisplayed()
         composeRule.onAllNodesWithText(string(R.string.commitments_filter_closed)).assertCountEquals(0)
-        composeRule.onAllNodesWithText("김철수").assertCountEquals(2)
+        composeRule.onNodeWithTag("commitment-filter-give").performClick()
+        composeRule.onNodeWithTag("commitment-due-today").assertIsDisplayed()
+        composeRule.onAllNodesWithText("김철수").assertCountEquals(1)
         composeRule.onNodeWithTag("commitment-list").performScrollToNode(hasText("일정 변경"))
         composeRule.onNodeWithText("일정 변경").assertIsDisplayed()
         composeRule.onAllNodesWithText("완료 약속").assertCountEquals(0)
@@ -290,7 +269,6 @@ class CommitmentManagementUiTest {
         composeRule.onNodeWithTag("evidence-import-fab").performClick()
         composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
         composeRule.onAllNodesWithTag("commitment-filter-schedule").assertCountEquals(0)
-        composeRule.onNodeWithTag("commitment-filter-give").performClick()
 
         composeRule.runOnIdle {
             assertEquals("active-1", openedDetailId)
@@ -299,13 +277,14 @@ class CommitmentManagementUiTest {
     }
 
     @Test
-    fun `commitment action panel renders without legacy commitment rows`() {
+    fun `commitment give section renders action-only rows without empty state`() {
         composeRule.setContent {
             BecalmTheme {
                 val pullState = rememberPullRefreshState(refreshing = false, onRefresh = {})
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         items = emptyList(),
                         topActions = listOf(personAction("pa-only")),
                         filter = CommitmentFilter.ALL,
@@ -316,19 +295,17 @@ class CommitmentManagementUiTest {
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
 
         composeRule.onAllNodesWithText(string(R.string.commitments_empty_title)).assertCountEquals(0)
-        composeRule.onNodeWithTag("commitment-action-panel").assertIsDisplayed()
+        composeRule.onNodeWithTag("commitment-due-today").assertIsDisplayed()
         composeRule.onNodeWithText("Backend follow-up").assertIsDisplayed()
     }
 
     @Test
-    fun `commitment action panel defers legacy sections below urgent actions`() {
+    fun `commitment give section merges actions and existing rows without legacy bucket`() {
         composeRule.setContent {
             BecalmTheme {
                 val pullState = rememberPullRefreshState(refreshing = false, onRefresh = {})
@@ -336,12 +313,52 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         items = listOf(legacy),
                         topActions = listOf(personAction("pa-1")),
-                        confirmedSection = CommitmentSectionUiState(
-                            expanded = true,
-                            count = 1,
-                            items = listOf(legacy),
+                        filter = CommitmentFilter.ALL,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    pullState = pullState,
+                    onFilterChange = {},
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    onOpenDetail = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("commitment-due-today").assertIsDisplayed()
+        composeRule.onNodeWithText("Backend follow-up").assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.commitment_section_confirmed_fmt, 1)).assertCountEquals(0)
+        composeRule.onNodeWithText("Legacy confirmed row").assertIsDisplayed()
+    }
+
+    @Test
+    fun `commitment due sections keep urgent visible and collapse later rows`() {
+        composeRule.setContent {
+            BecalmTheme {
+                val pullState = rememberPullRefreshState(refreshing = false, onRefresh = {})
+                CommitmentManagementScreenContent(
+                    state = CommitmentUiState(
+                        loading = false,
+                        today = LocalDate(2026, 6, 9),
+                        topActions = listOf(
+                            personAction(
+                                id = "pa-overdue",
+                                title = "오래 지난 회신",
+                                dueAt = Instant.parse("2026-05-30T00:00:00Z"),
+                            ),
+                            personAction(
+                                id = "pa-week",
+                                title = "이번 주 회신",
+                                dueAt = Instant.parse("2026-06-12T00:00:00Z"),
+                            ),
+                            personAction(
+                                id = "pa-later",
+                                title = "나중에 볼 회신",
+                                dueAt = Instant.parse("2026-07-01T00:00:00Z"),
+                            ),
                         ),
                         filter = CommitmentFilter.ALL,
                     ),
@@ -351,16 +368,28 @@ class CommitmentManagementUiTest {
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
 
-        composeRule.onNodeWithTag("commitment-action-panel").assertIsDisplayed()
-        composeRule.onNodeWithText("Backend follow-up").assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.commitment_section_confirmed_fmt, 1)).assertIsDisplayed()
-        composeRule.onAllNodesWithText("Legacy confirmed row").assertCountEquals(0)
+        composeRule.onNodeWithTag("commitment-due-past").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.commitment_due_past_title_fmt, 1)).assertIsDisplayed()
+        composeRule.onAllNodesWithText("오래 지난 회신").assertCountEquals(0)
+        composeRule.onNodeWithText(string(R.string.commitment_due_section_expand)).performClick()
+        composeRule.onNodeWithText("오래 지난 회신").assertIsDisplayed()
+        composeRule.onNodeWithText("D+10").assertIsDisplayed()
+        composeRule.onNodeWithTag("commitment-due-today").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.commitment_due_today_title_fmt, 0)).assertIsDisplayed()
+        composeRule.onNodeWithTag("commitment-list")
+            .performScrollToNode(hasText(string(R.string.commitment_due_this_week_title_fmt, 1)))
+        composeRule.onNodeWithTag("commitment-due-this-week").assertIsDisplayed()
+        composeRule.onNodeWithText("이번 주 회신").assertIsDisplayed()
+        composeRule.onNodeWithText("D-3").assertIsDisplayed()
+        composeRule.onNodeWithTag("commitment-list")
+            .performScrollToNode(hasText(string(R.string.commitment_due_later_title_fmt, 1)))
+        composeRule.onAllNodesWithText("나중에 볼 회신").assertCountEquals(0)
+        composeRule.onAllNodesWithText(string(R.string.commitment_due_section_expand)).onFirst().performClick()
+        composeRule.onNodeWithText("나중에 볼 회신").assertIsDisplayed()
     }
 
     @Test
@@ -374,14 +403,10 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         items = listOf(active),
                         topActions = listOf(personAction("pa-1")),
                         activeItems = listOf(active),
-                        reviewSection = CommitmentSectionUiState(
-                            expanded = true,
-                            count = 1,
-                            items = listOf(active),
-                        ),
                         filter = CommitmentFilter.ALL,
                     ),
                     snackbarHostState = SnackbarHostState(),
@@ -391,8 +416,6 @@ class CommitmentManagementUiTest {
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
                     onCompletePersonAction = { completedActionId = it },
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
@@ -422,6 +445,7 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         items = listOf(active),
                         topActions = listOf(
                             personAction(
@@ -437,11 +461,6 @@ class CommitmentManagementUiTest {
                             ),
                         ),
                         activeItems = listOf(active),
-                        reviewSection = CommitmentSectionUiState(
-                            expanded = true,
-                            count = 1,
-                            items = listOf(active),
-                        ),
                         filter = CommitmentFilter.ALL,
                     ),
                     snackbarHostState = SnackbarHostState(),
@@ -455,8 +474,6 @@ class CommitmentManagementUiTest {
                         openedEvidenceKind = evidenceKind
                         openedEvidenceId = evidenceId
                     },
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
@@ -485,6 +502,7 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         items = listOf(active),
                         topActions = listOf(
                             personAction(
@@ -493,11 +511,6 @@ class CommitmentManagementUiTest {
                             ),
                         ),
                         activeItems = listOf(active),
-                        reviewSection = CommitmentSectionUiState(
-                            expanded = true,
-                            count = 1,
-                            items = listOf(active),
-                        ),
                         filter = CommitmentFilter.ALL,
                     ),
                     snackbarHostState = SnackbarHostState(),
@@ -507,17 +520,13 @@ class CommitmentManagementUiTest {
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
                     onRemindPersonAction = { remindedActionId = it },
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
 
         composeRule.onNodeWithTag("commitment-list")
             .performScrollToNode(hasText("Backend follow-up"))
-        composeRule.onAllNodesWithText(string(R.string.commitment_action_remind))
-            .onFirst()
-            .performClick()
+        composeRule.onNodeWithTag("commitment-action-reminder-pa-remind").performClick()
 
         composeRule.runOnIdle {
             assertEquals("pa-remind", remindedActionId)
@@ -534,6 +543,7 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
+                        today = LocalDate(2026, 6, 9),
                         items = emptyList(),
                         evidenceDetail = CommitmentActionEvidenceDetailUi(
                             actionItemId = "pa-dialog",
@@ -552,8 +562,6 @@ class CommitmentManagementUiTest {
                     onMeetingAudioImport = {},
                     onOpenDetail = {},
                     onDismissPersonActionEvidence = { dismissed = true },
-                    onToggleCompletedSection = {},
-                    onToggleCancelledSection = {},
                 )
             }
         }
@@ -579,7 +587,7 @@ class CommitmentManagementUiTest {
         decisionStatus = null,
         derivedStatus = "PENDING",
         actionState = com.becalm.android.domain.commitment.CommitmentState.PENDING,
-        dueAt = Instant.parse("2026-04-24T01:00:00Z"),
+        dueAt = Instant.parse("2026-06-09T01:00:00Z"),
         dueIsApproximate = false,
         dueHint = null,
         counterpartyDisplayName = "김철수",
@@ -595,7 +603,7 @@ class CommitmentManagementUiTest {
         decisionStatus = null,
         derivedStatus = null,
         actionState = com.becalm.android.domain.commitment.CommitmentState.PENDING,
-        dueAt = Instant.parse("2026-04-24T01:00:00Z"),
+        dueAt = Instant.parse("2026-06-09T01:00:00Z"),
         dueIsApproximate = false,
         dueHint = null,
         counterpartyDisplayName = "박과장",
@@ -604,14 +612,16 @@ class CommitmentManagementUiTest {
 
     private fun personAction(
         id: String,
+        title: String = "Backend follow-up",
+        dueAt: Instant? = Instant.parse("2026-06-09T01:00:00Z"),
         evidence: PersonActionEvidenceUi? = null,
-        reasonCodes: List<String> = listOf("commitment:due"),
+        reasonCodes: List<String> = listOf("commitment:due", "direction:give"),
     ): PersonActionItemUi = PersonActionItemUi(
         id = id,
         personId = "person-1",
         personDisplayName = "김철수",
         actionKind = "follow_up",
-        title = "Backend follow-up",
+        title = title,
         primaryVerb = "상세 보기",
         shortReason = "dev backend action",
         commitmentId = "active-1",
@@ -619,7 +629,7 @@ class CommitmentManagementUiTest {
         sourceEventId = null,
         sourceType = "gmail",
         sourceRef = "mail-1",
-        dueAt = Instant.parse("2026-04-24T01:00:00Z"),
+        dueAt = dueAt,
         dueHint = null,
         urgencyScore = 91.0,
         confidence = 0.95,

@@ -19,12 +19,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -33,14 +36,20 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +84,7 @@ import com.becalm.android.ui.actions.PersonActionEvidenceDialog
 import com.becalm.android.ui.actions.PersonActionFeedStatusLine
 import com.becalm.android.ui.actions.PersonActionItemUi
 import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonSize
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTopChrome
@@ -102,8 +112,10 @@ import com.becalm.android.ui.navigation.dispatchTodayEffect
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 
 /**
@@ -193,6 +205,8 @@ public fun TodayTimelineScreen(
         onDismissScheduleActionEvidence = viewModel::onDismissScheduleActionEvidence,
         onCompleteScheduleAction = viewModel::onCompleteScheduleAction,
         onDismissScheduleAction = viewModel::onDismissScheduleAction,
+        onToggleScheduleReminder = viewModel::onToggleScheduleReminder,
+        onSetScheduleReminderAt = viewModel::onSetScheduleReminderAt,
         onRetryCalendarWriteJob = viewModel::onRetryCalendarWriteJob,
         onOpenCommitmentDetail = { commitmentId ->
             navController.navigate(BecalmRoute.CommitmentDetail(commitmentId).path)
@@ -237,6 +251,8 @@ public fun TodayTimelineContent(
     onDismissScheduleActionEvidence: () -> Unit = {},
     onCompleteScheduleAction: (String) -> Unit = {},
     onDismissScheduleAction: (String) -> Unit = {},
+    onToggleScheduleReminder: (String, Boolean) -> Unit = { _, _ -> },
+    onSetScheduleReminderAt: (String, Instant) -> Unit = { _, _ -> },
     onRetryCalendarWriteJob: (String) -> Unit = {},
     onOpenProcessingStatus: () -> Unit = {},
     onRecoverAuth: () -> Unit = onOpenSettings,
@@ -259,6 +275,7 @@ public fun TodayTimelineContent(
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
     var pendingDeleteRef by remember { mutableStateOf<ScheduleRowRef?>(null) }
+    var reminderTimeTarget by remember { mutableStateOf<TimelineItem.Commitment?>(null) }
     var scheduleStatusFilter by remember { mutableStateOf(ScheduleStatusFilter.CANDIDATE) }
     val hasScheduleCandidates = remember(state.timeline, state.scheduleActions) {
         state.timeline.any { item ->
@@ -326,14 +343,6 @@ public fun TodayTimelineContent(
                         )
                     }
                 }
-                TodayProcessingStatusStrip(
-                    status = state.processingStatus,
-                    onOpenProcessingStatus = onOpenProcessingStatus,
-                    onDismiss = onDismissProcessingStatus,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                )
                 ScheduleConflictReviewPanel(
                     items = state.scheduleConflictReviewItems,
                     onResolveScheduleConflict = onResolveScheduleConflict,
@@ -341,14 +350,11 @@ public fun TodayTimelineContent(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                 )
-                ScheduleFilterBar(
-                    selectedStatus = scheduleStatusFilter,
-                    onStatusSelected = { scheduleStatusFilter = it },
-                    selectedRange = state.scheduleRangeFilter,
-                    onRangeSelected = onScheduleRangeChange,
+                ScheduleDiffSummary(
+                    missingCount = state.scheduleActions.size,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
                 )
                 state.scheduleActionFeedStatus?.let { status ->
                     PersonActionFeedStatusLine(
@@ -360,6 +366,15 @@ public fun TodayTimelineContent(
                         testTag = "schedule-action-feed-statusline",
                     )
                 }
+                val actionCandidatesVisible = state.scheduleActions.isNotEmpty()
+                TodayProcessingStatusStrip(
+                    status = state.processingStatus,
+                    onOpenProcessingStatus = onOpenProcessingStatus,
+                    onDismiss = onDismissProcessingStatus,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
                 CalendarWriteJobStatusPanel(
                     jobs = state.calendarWriteJobs,
                     onRetry = onRetryCalendarWriteJob,
@@ -374,18 +389,12 @@ public fun TodayTimelineContent(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                 )
-                val actionCandidatesVisible = scheduleStatusFilter == ScheduleStatusFilter.CANDIDATE &&
-                    state.scheduleActions.isNotEmpty()
-                if (actionCandidatesVisible) {
-                    ScheduleActionPanel(
-                        actions = state.scheduleActions,
-                        loadingEvidenceActionId = state.loadingEvidenceActionId,
-                        loadingScheduleActionId = state.loadingScheduleActionId,
-                        loadingScheduleDismissActionId = state.loadingScheduleDismissActionId,
-                        onOpenCommitmentDetail = onOpenCommitmentDetail,
-                        onOpenEvidence = onOpenScheduleActionEvidence,
-                        onCompleteAction = onCompleteScheduleAction,
-                        onDismissAction = onDismissScheduleAction,
+                if (!actionCandidatesVisible) {
+                    ScheduleFilterBar(
+                        selectedStatus = scheduleStatusFilter,
+                        onStatusSelected = { scheduleStatusFilter = it },
+                        selectedRange = state.scheduleRangeFilter,
+                        onRangeSelected = onScheduleRangeChange,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -393,7 +402,8 @@ public fun TodayTimelineContent(
                 }
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .weight(1f)
+                        .fillMaxWidth()
                         .pullRefresh(pullState),
                 ) {
                     when {
@@ -423,9 +433,19 @@ public fun TodayTimelineContent(
                             )
                         }
                         state.timeline.isEmpty() && !actionCandidatesVisible -> {
-                            EmptyState(
-                                title = stringResource(R.string.today_empty_title),
-                                message = stringResource(R.string.today_empty_message),
+                            TimelineList(
+                                items = emptyList(),
+                                today = state.today,
+                                rangeFilter = state.scheduleRangeFilter,
+                                deletingRows = state.deletingRows,
+                                disabledReminderIds = state.disabledReminderIds,
+                                customReminderIds = state.customReminderIds,
+                                onDeleteScheduleRow = { pendingDeleteRef = it },
+                                onToggleScheduleReminder = onToggleScheduleReminder,
+                                onOpenReminderTimeSetting = { reminderTimeTarget = it },
+                                onOpenCommitmentDetail = onOpenCommitmentDetail,
+                                onAddDueTime = onAddDueTime,
+                                contentPadding = PaddingValues(top = 4.dp, bottom = 160.dp),
                             )
                         }
                         visibleTimeline.isEmpty() && !actionCandidatesVisible -> {
@@ -452,10 +472,35 @@ public fun TodayTimelineContent(
                                 today = state.today,
                                 rangeFilter = state.scheduleRangeFilter,
                                 deletingRows = state.deletingRows,
+                                disabledReminderIds = state.disabledReminderIds,
+                                customReminderIds = state.customReminderIds,
                                 onDeleteScheduleRow = { pendingDeleteRef = it },
+                                onToggleScheduleReminder = onToggleScheduleReminder,
+                                onOpenReminderTimeSetting = { reminderTimeTarget = it },
                                 onOpenCommitmentDetail = onOpenCommitmentDetail,
                                 onAddDueTime = onAddDueTime,
-                                contentPadding = PaddingValues(vertical = 4.dp),
+                                headerContent = if (actionCandidatesVisible) {
+                                    {
+                                        item(key = "schedule-action-panel-header") {
+                                            ScheduleActionPanel(
+                                                actions = state.scheduleActions,
+                                                loadingEvidenceActionId = state.loadingEvidenceActionId,
+                                                loadingScheduleActionId = state.loadingScheduleActionId,
+                                                loadingScheduleDismissActionId = state.loadingScheduleDismissActionId,
+                                                onOpenCommitmentDetail = onOpenCommitmentDetail,
+                                                onOpenEvidence = onOpenScheduleActionEvidence,
+                                                onCompleteAction = onCompleteScheduleAction,
+                                                onDismissAction = onDismissScheduleAction,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    null
+                                },
+                                contentPadding = PaddingValues(top = 4.dp, bottom = 160.dp),
                             )
                         }
                     }
@@ -516,12 +561,209 @@ public fun TodayTimelineContent(
             onDismiss = onDismissScheduleActionEvidence,
         )
     }
+
+    reminderTimeTarget?.let { item ->
+        ScheduleReminderTimeSheet(
+            item = item,
+            onDismiss = { reminderTimeTarget = null },
+            onConfirm = { triggerAt ->
+                reminderTimeTarget = null
+                onSetScheduleReminderAt(item.id, triggerAt)
+            },
+        )
+    }
 }
 
 /** Reading-width cap for the schedule timeline. Below this, content fills the
  *  available width on phones; at or above (tablet, foldable open), the column
  *  centres in the viewport so the single-column calm holds on every device. */
 private val TimelineMaxContentWidth: Dp = 600.dp
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleReminderTimeSheet(
+    item: TimelineItem.Commitment,
+    onDismiss: () -> Unit,
+    onConfirm: (Instant) -> Unit,
+) {
+    val dueAt = item.dueAt ?: return
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var quickSelection by remember(item.id) {
+        mutableStateOf(defaultReminderTimeSelection(dueAt))
+    }
+    var showCustomPicker by remember(item.id) { mutableStateOf(false) }
+    val timePickerState = rememberTimePickerState(
+        initialHour = quickSelection.hour,
+        initialMinute = quickSelection.minute,
+        is24Hour = true,
+    )
+    val effectiveSelection = if (showCustomPicker) {
+        ReminderTimeSelection(timePickerState.hour, timePickerState.minute)
+    } else {
+        quickSelection
+    }
+    val triggerAt = remember(dueAt, effectiveSelection) {
+        combineReminderDateAndKstTime(
+            dateSource = dueAt,
+            selection = effectiveSelection,
+        )
+    }
+    val triggerInPast = triggerAt <= remember(item.id) { kotlinx.datetime.Clock.System.now() }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .testTag("schedule-reminder-time-sheet"),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = stringResource(R.string.schedule_reminder_time_sheet_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.schedule_reminder_time_sheet_context_fmt,
+                        formatKstDate(dueAt),
+                        item.title,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = stringResource(R.string.schedule_reminder_time_sheet_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 0.dp),
+            ) {
+                items(ReminderQuickTimeSelections) { selection ->
+                    ReminderTimeChip(
+                        label = selection.formatLabel(),
+                        selected = !showCustomPicker && quickSelection == selection,
+                        onClick = {
+                            quickSelection = selection
+                            showCustomPicker = false
+                        },
+                        modifier = Modifier.testTag("schedule-reminder-time-chip-${selection.testTagSuffix()}"),
+                    )
+                }
+                item {
+                    ReminderTimeChip(
+                        label = stringResource(R.string.schedule_reminder_time_sheet_custom),
+                        selected = showCustomPicker,
+                        onClick = { showCustomPicker = true },
+                        modifier = Modifier.testTag("schedule-reminder-time-custom"),
+                    )
+                }
+            }
+            if (showCustomPicker) {
+                TimePicker(
+                    state = timePickerState,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .testTag("schedule-reminder-time-picker"),
+                )
+            }
+            if (triggerInPast) {
+                Text(
+                    text = stringResource(R.string.schedule_reminder_time_sheet_past_error),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            BecalmButton(
+                text = stringResource(R.string.schedule_reminder_time_sheet_save),
+                onClick = { onConfirm(triggerAt) },
+                enabled = !triggerInPast,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("schedule-reminder-time-save"),
+                variant = BecalmButtonVariant.Primary,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun ReminderTimeChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        shape = CircleShape,
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        contentColor = if (selected) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+}
+
+private data class ReminderTimeSelection(
+    val hour: Int,
+    val minute: Int,
+) {
+    fun formatLabel(): String =
+        "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}"
+
+    fun testTagSuffix(): String =
+        "${hour.toString().padStart(2, '0')}-${minute.toString().padStart(2, '0')}"
+}
+
+private val ReminderQuickTimeSelections = listOf(
+    ReminderTimeSelection(hour = 9, minute = 0),
+    ReminderTimeSelection(hour = 13, minute = 0),
+    ReminderTimeSelection(hour = 18, minute = 0),
+)
+
+private fun defaultReminderTimeSelection(dueAt: Instant): ReminderTimeSelection {
+    val now = kotlinx.datetime.Clock.System.now()
+    return ReminderQuickTimeSelections.firstOrNull { selection ->
+        combineReminderDateAndKstTime(dueAt, selection) > now
+    } ?: ReminderQuickTimeSelections.first()
+}
+
+private fun combineReminderDateAndKstTime(
+    dateSource: Instant,
+    selection: ReminderTimeSelection,
+): Instant {
+    val date = dateSource.toLocalDateTime(KST_ZONE).date
+    return LocalDateTime(
+        year = date.year,
+        monthNumber = date.monthNumber,
+        dayOfMonth = date.dayOfMonth,
+        hour = selection.hour,
+        minute = selection.minute,
+    ).toInstant(KST_ZONE)
+}
 
 /**
  * Static skeleton placeholder rows shown during the cold-start no-data window.
@@ -763,6 +1005,53 @@ private val calendarWriteRetryableStatuses: Set<CalendarWriteJobStatusKind> = se
 )
 
 @Composable
+private fun ScheduleDiffSummary(
+    missingCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.testTag("schedule-diffbar"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.schedule_header_subtitle),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.small,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = missingCount.toString(),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.schedule_diff_missing_count_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Text(
+                        text = stringResource(R.string.schedule_diff_recent_sources),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ScheduleActionPanel(
     actions: List<PersonActionItemUi>,
     loadingEvidenceActionId: String?,
@@ -774,28 +1063,19 @@ private fun ScheduleActionPanel(
     onDismissAction: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    EvidenceCard(
+    Column(
         modifier = modifier.testTag("schedule-action-panel"),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
+        ScheduleEyebrowHeader(
+            title = stringResource(R.string.schedule_action_missing_section),
+            count = actions.size,
+        )
+        actions.forEach { action ->
+            EvidenceCard(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             ) {
-                Text(
-                    text = stringResource(R.string.schedule_action_missing_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = actions.size.toString(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            actions.take(3).forEach { action ->
                 ScheduleActionRow(
                     action = action,
                     loadingEvidence = loadingEvidenceActionId == action.id,
@@ -812,6 +1092,36 @@ private fun ScheduleActionPanel(
 }
 
 @Composable
+private fun ScheduleEyebrowHeader(
+    title: String,
+    count: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant),
+        )
+    }
+}
+
+@Composable
 private fun ScheduleActionRow(
     action: PersonActionItemUi,
     loadingEvidence: Boolean,
@@ -823,6 +1133,7 @@ private fun ScheduleActionRow(
     onDismissAction: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val dueBadge = scheduleActionDateBadge(action)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -834,10 +1145,14 @@ private fun ScheduleActionRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ScheduleMetaPill(text = stringResource(R.string.today_type_schedule_candidate), emphasized = true)
-            action.sourceType?.let { sourceType ->
-                ScheduleMetaPill(text = stringResource(sourceTypeLabelRes(sourceType)))
-            }
+            ScheduleMetaPill(text = stringResource(R.string.schedule_action_missing_tag), emphasized = true)
+            dueBadge?.let { ScheduleMetaPill(text = it) }
+            Spacer(modifier = Modifier.weight(1f))
+            ScheduleDismissIconButton(
+                loading = loadingDismiss,
+                enabled = !loadingComplete,
+                onClick = { onDismissAction(action.id) },
+            )
         }
         Text(
             text = action.title,
@@ -867,95 +1182,102 @@ private fun ScheduleActionRow(
         val evidence = action.evidence
         val evidenceKind = evidence?.kind
         val evidenceId = evidence?.id
+        val canOpenEvidence = action.hasScheduleEvidenceTarget()
         if (calendarWriteReady) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                BecalmButton(
+                    text = stringResource(R.string.schedule_action_add_to_calendar),
+                    onClick = { onCompleteAction(action.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loadingDismiss,
+                    loading = loadingComplete,
+                    variant = BecalmButtonVariant.Primary,
+                )
+                if (canOpenEvidence) {
+                    Row(
+                        modifier = Modifier.align(Alignment.End),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BecalmButton(
+                            text = stringResource(R.string.commitment_action_evidence),
+                            onClick = { onOpenEvidence(action.id, evidenceKind, evidenceId) },
+                            enabled = !loadingComplete && !loadingDismiss,
+                            loading = loadingEvidence,
+                            variant = BecalmButtonVariant.Secondary,
+                            size = BecalmButtonSize.Compact,
+                        )
+                    }
+                }
+            }
+            return@Column
+        }
+        if (canOpenEvidence || (commitmentId != null && action.actionKind != "add_to_calendar")) {
             Row(
                 modifier = Modifier.align(Alignment.End),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                BecalmButton(
-                    text = stringResource(R.string.schedule_action_add_to_calendar),
-                    onClick = { onCompleteAction(action.id) },
-                    enabled = !loadingDismiss,
-                    loading = loadingComplete,
-                    variant = BecalmButtonVariant.Primary,
-                )
-                if (evidenceKind != null && evidenceId != null) {
+                if (canOpenEvidence) {
                     BecalmButton(
                         text = stringResource(R.string.commitment_action_evidence),
                         onClick = { onOpenEvidence(action.id, evidenceKind, evidenceId) },
                         enabled = !loadingComplete && !loadingDismiss,
                         loading = loadingEvidence,
                         variant = BecalmButtonVariant.Secondary,
+                        size = BecalmButtonSize.Compact,
                     )
                 }
-                BecalmButton(
-                    text = stringResource(R.string.schedule_action_dismiss),
-                    onClick = { onDismissAction(action.id) },
-                    enabled = !loadingComplete,
-                    loading = loadingDismiss,
-                    variant = BecalmButtonVariant.Text,
-                )
-            }
-            return@Column
-        }
-        Column(
-            modifier = Modifier.align(Alignment.End),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            horizontalAlignment = Alignment.End,
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (evidenceKind != null && evidenceId != null) {
+                if (commitmentId != null && action.actionKind != "add_to_calendar") {
                     BecalmButton(
-                        text = stringResource(R.string.commitment_action_evidence),
-                        onClick = { onOpenEvidence(action.id, evidenceKind, evidenceId) },
+                        text = stringResource(R.string.schedule_action_open_detail),
+                        onClick = {
+                            onOpenCommitmentDetail(commitmentId)
+                        },
                         enabled = !loadingComplete && !loadingDismiss,
-                        loading = loadingEvidence,
-                        variant = BecalmButtonVariant.Text,
+                        variant = BecalmButtonVariant.Secondary,
+                        size = BecalmButtonSize.Compact,
                     )
                 }
-                BecalmButton(
-                    text = stringResource(R.string.schedule_action_dismiss),
-                    onClick = { onDismissAction(action.id) },
-                    enabled = !loadingComplete,
-                    loading = loadingDismiss,
-                    variant = BecalmButtonVariant.Text,
-                )
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BecalmButton(
-                    text = action.primaryVerb,
-                    onClick = {
-                        if (commitmentId != null) {
-                            onOpenCommitmentDetail(commitmentId)
-                        }
-                    },
-                    enabled = commitmentId != null && !loadingComplete && !loadingDismiss,
-                    variant = BecalmButtonVariant.Secondary,
-                )
-                BecalmButton(
-                    text = stringResource(
-                        if (calendarWriteReady) {
-                            R.string.schedule_action_add_to_calendar
-                        } else {
-                            R.string.commitment_action_complete
-                        },
-                    ),
-                    onClick = { onCompleteAction(action.id) },
-                    enabled = !loadingDismiss,
-                    loading = loadingComplete,
-                    variant = BecalmButtonVariant.Secondary,
-                )
             }
         }
     }
 }
+
+@Composable
+private fun ScheduleDismissIconButton(
+    loading: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled && !loading,
+        modifier = Modifier
+            .size(36.dp)
+            .testTag("schedule-action-dismiss-icon"),
+    ) {
+        if (loading) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp))
+        } else {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = stringResource(R.string.schedule_action_dismiss),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun scheduleActionDateBadge(action: PersonActionItemUi): String? =
+    action.dueHint?.takeIf { it.isNotBlank() }
+        ?: action.dueAt?.let(::formatKstDate)
+
+private fun PersonActionItemUi.hasScheduleEvidenceTarget(): Boolean =
+    (evidence?.kind?.isNotBlank() == true && evidence.id?.isNotBlank() == true) ||
+        evidence?.quote?.isNotBlank() == true ||
+        sourceEventId?.isNotBlank() == true ||
+        sourceRef?.isNotBlank() == true
 
 private enum class ScheduleStatusFilter {
     CANDIDATE,
@@ -1292,9 +1614,14 @@ private fun TimelineList(
     today: LocalDate?,
     rangeFilter: ScheduleRangeFilter,
     deletingRows: Set<ScheduleRowRef>,
+    disabledReminderIds: Set<String>,
+    customReminderIds: Set<String>,
     onDeleteScheduleRow: (ScheduleRowRef) -> Unit,
+    onToggleScheduleReminder: (String, Boolean) -> Unit,
+    onOpenReminderTimeSetting: (TimelineItem.Commitment) -> Unit,
     onOpenCommitmentDetail: (String) -> Unit,
     onAddDueTime: (String) -> Unit,
+    headerContent: (LazyListScope.() -> Unit)? = null,
     contentPadding: PaddingValues,
 ) {
     val todayDate = today ?: remember { kotlinx.datetime.Clock.System.now().toLocalDateTime(KST_ZONE).date }
@@ -1307,14 +1634,25 @@ private fun TimelineList(
     }
     LazyColumn(
         contentPadding = contentPadding,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("schedule-timeline-list"),
     ) {
+        headerContent?.invoke(this)
         sections.forEach { section ->
             item(key = "schedule-section-${section.key}") {
                 TimelineSectionHeader(
                     text = stringResource(section.titleRes),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
+            }
+            if (section.items.isEmpty()) {
+                item(key = "schedule-section-${section.key}-empty") {
+                    TimelineSectionEmptyRow(
+                        text = stringResource(section.emptyRes),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                    )
+                }
             }
             items(
                 items = section.items,
@@ -1330,7 +1668,11 @@ private fun TimelineList(
                     item = item,
                     today = todayDate,
                     isDeleting = item.toScheduleRowRef() in deletingRows,
+                    reminderEnabled = item is TimelineItem.Commitment && item.id !in disabledReminderIds,
+                    customReminderEnabled = item is TimelineItem.Commitment && item.id in customReminderIds,
                     onDeleteScheduleRow = { onDeleteScheduleRow(item.toScheduleRowRef()) },
+                    onToggleScheduleReminder = onToggleScheduleReminder,
+                    onOpenReminderTimeSetting = onOpenReminderTimeSetting,
                     onOpenCommitmentDetail = onOpenCommitmentDetail,
                     onAddDueTime = onAddDueTime,
                     modifier = Modifier
@@ -1342,9 +1684,23 @@ private fun TimelineList(
     }
 }
 
+@Composable
+private fun TimelineSectionEmptyRow(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        modifier = modifier.fillMaxWidth(),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
 private data class ScheduleTimelineSection(
     val key: String,
     @StringRes val titleRes: Int,
+    @StringRes val emptyRes: Int,
     val items: List<TimelineItem>,
 )
 
@@ -1375,11 +1731,11 @@ private fun buildScheduleTimelineSections(
         ScheduleRangeFilter.TODAY -> listOf("today")
         ScheduleRangeFilter.THIS_WEEK -> listOf("today", "week")
         ScheduleRangeFilter.NEXT_7_DAYS -> listOf("today", "week", "upcoming")
-        ScheduleRangeFilter.ALL -> listOf("today", "week", "upcoming", "past")
+        ScheduleRangeFilter.ALL -> listOf("past", "today", "week", "upcoming")
     }
     return order.mapNotNull { key ->
         val sectionItems = grouped.getValue(key)
-        if (sectionItems.isEmpty()) return@mapNotNull null
+        if (sectionItems.isEmpty() && key !in AlwaysVisibleScheduleSectionKeys) return@mapNotNull null
         ScheduleTimelineSection(
             key = key,
             titleRes = when (key) {
@@ -1388,10 +1744,13 @@ private fun buildScheduleTimelineSections(
                 "upcoming" -> R.string.schedule_section_upcoming
                 else -> R.string.schedule_section_past
             },
+            emptyRes = R.string.schedule_section_empty,
             items = sectionItems,
         )
     }
 }
+
+private val AlwaysVisibleScheduleSectionKeys = setOf("today", "week")
 
 private fun TimelineItem.isVisibleForRange(daysFromToday: Int, rangeFilter: ScheduleRangeFilter): Boolean =
     when (rangeFilter) {
@@ -1527,7 +1886,11 @@ private fun TimelineItemRow(
     item: TimelineItem,
     today: LocalDate,
     isDeleting: Boolean,
+    reminderEnabled: Boolean,
+    customReminderEnabled: Boolean,
     onDeleteScheduleRow: () -> Unit,
+    onToggleScheduleReminder: (String, Boolean) -> Unit,
+    onOpenReminderTimeSetting: (TimelineItem.Commitment) -> Unit,
     onOpenCommitmentDetail: (String) -> Unit,
     onAddDueTime: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -1539,7 +1902,11 @@ private fun TimelineItemRow(
         TimelineCard(
             item = item,
             isDeleting = isDeleting,
+            reminderEnabled = reminderEnabled,
+            customReminderEnabled = customReminderEnabled,
             onDeleteScheduleRow = onDeleteScheduleRow,
+            onToggleScheduleReminder = onToggleScheduleReminder,
+            onOpenReminderTimeSetting = onOpenReminderTimeSetting,
             onOpenCommitmentDetail = onOpenCommitmentDetail,
             onAddDueTime = onAddDueTime,
             modifier = Modifier.weight(1f),
@@ -1608,7 +1975,11 @@ private fun TimelineRail(modifier: Modifier = Modifier) {
 private fun TimelineCard(
     item: TimelineItem,
     isDeleting: Boolean,
+    reminderEnabled: Boolean,
+    customReminderEnabled: Boolean,
     onDeleteScheduleRow: () -> Unit,
+    onToggleScheduleReminder: (String, Boolean) -> Unit,
+    onOpenReminderTimeSetting: (TimelineItem.Commitment) -> Unit,
     onOpenCommitmentDetail: (String) -> Unit,
     onAddDueTime: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -1625,6 +1996,7 @@ private fun TimelineCard(
         null
     }
     val cardDescription = listOfNotNull(typeLabel, item.title, counterpartyLabel).joinToString(", ")
+    val reminderAction = (item as? TimelineItem.Commitment)?.scheduleReminderAction()
     val clickModifier = if (item is TimelineItem.Commitment) {
         Modifier
             .semantics {
@@ -1661,6 +2033,49 @@ private fun TimelineCard(
                 ScheduleMetaPill(text = scheduleLabel(item.scheduleStatus), emphasized = true)
             }
             Spacer(modifier = Modifier.weight(1f))
+            if (item is TimelineItem.Commitment && reminderAction != null) {
+                val iconEnabled = when (reminderAction) {
+                    ScheduleReminderAction.Toggle -> reminderEnabled
+                    ScheduleReminderAction.SetTime -> customReminderEnabled
+                }
+                IconButton(
+                    onClick = {
+                        when {
+                            reminderAction == ScheduleReminderAction.Toggle ->
+                                onToggleScheduleReminder(item.id, !reminderEnabled)
+                            customReminderEnabled ->
+                                onToggleScheduleReminder(item.id, false)
+                            else ->
+                                onOpenReminderTimeSetting(item)
+                        }
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("schedule-row-reminder-${item.id}"),
+                ) {
+                    Icon(
+                        imageVector = if (iconEnabled) {
+                            Icons.Filled.Notifications
+                        } else {
+                            Icons.Filled.NotificationsOff
+                        },
+                        contentDescription = stringResource(
+                            if (iconEnabled) {
+                                R.string.schedule_row_reminder_on_action
+                            } else if (reminderAction == ScheduleReminderAction.SetTime) {
+                                R.string.schedule_row_reminder_time_action
+                            } else {
+                                R.string.schedule_row_reminder_off_action
+                            },
+                        ),
+                        tint = if (iconEnabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
             IconButton(
                 onClick = onDeleteScheduleRow,
                 enabled = !isDeleting,
@@ -1748,7 +2163,7 @@ private fun TimelineCard(
                     )
                 }
             }
-            if (!item.isTimed) {
+            if (!item.isTimed && item.dueAt == null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 BecalmButton(
                     text = stringResource(R.string.today_add_due_time),
@@ -1762,6 +2177,34 @@ private fun TimelineCard(
         }
     }
 }
+
+private enum class ScheduleReminderAction {
+    Toggle,
+    SetTime,
+}
+
+private fun TimelineItem.Commitment.scheduleReminderAction(): ScheduleReminderAction? {
+    if (itemType != CommitmentItemType.SCHEDULE) return null
+    if (dueAt == null) return null
+    if (scheduleStatus in ReminderExcludedScheduleStatuses) return null
+    return if (!dueIsApproximate && isTimed) {
+        ScheduleReminderAction.Toggle
+    } else {
+        ScheduleReminderAction.SetTime
+    }
+}
+
+private fun TimelineItem.isScheduleReminderEligible(): Boolean =
+    this is TimelineItem.Commitment &&
+        scheduleReminderAction() == ScheduleReminderAction.Toggle &&
+        dueAt != null &&
+        !dueIsApproximate
+
+private val ReminderExcludedScheduleStatuses = setOf(
+    CommitmentScheduleStatus.TENTATIVE,
+    CommitmentScheduleStatus.CANCELLED,
+    CommitmentScheduleStatus.POSTPONED,
+)
 
 @Composable
 private fun ScheduleMetaPill(text: String, emphasized: Boolean = false) {

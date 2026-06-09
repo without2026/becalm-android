@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -38,12 +39,14 @@ import com.becalm.android.ui.persons.PersonDetailUiState
 import com.becalm.android.ui.persons.RawEventCommitmentSummary
 import com.becalm.android.ui.persons.RawEventDetailContent
 import com.becalm.android.ui.persons.RawEventDetailUiState
+import com.becalm.android.ui.persons.RawEventThreadMessageUi
 import com.becalm.android.ui.persons.SourceEventCardProjection
 import com.becalm.android.ui.persons.UnassignedEventSummary
 import com.becalm.android.ui.persons.UnassignedEventsContent
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -95,9 +98,10 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
-    fun `P2-GAP-002 primary action promotes draft and evidence without hiding mutations`() {
+    fun `P2-GAP-002 primary action hides beta draft while keeping evidence and mutations`() {
         var openedDraftActionId: String? = null
         var openedEvidenceActionId: String? = null
+        var openedRawEventId: String? = null
         var dismissedActionId: String? = null
         var completedActionId: String? = null
 
@@ -114,7 +118,7 @@ class PersonDetailSupplementUiTest {
                     title = "김도현",
                     snackbarHostState = SnackbarHostState(),
                     onBack = {},
-                    onEventTap = {},
+                    onEventTap = { openedRawEventId = it },
                     onOpenPersonActionDraft = { openedDraftActionId = it },
                     onOpenPersonActionEvidence = { actionId, _, _ -> openedEvidenceActionId = actionId },
                     onDismissPersonAction = { dismissedActionId = it },
@@ -123,16 +127,19 @@ class PersonDetailSupplementUiTest {
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.person_action_draft_primary_follow_up)).assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.person_action_draft_primary_follow_up))
+            .assertCountEquals(0)
         composeRule.onNodeWithText(string(R.string.person_action_evidence_view)).assertIsDisplayed()
-        composeRule.onNodeWithTag("person-detail-action-draft-pa-primary").performClick()
+        composeRule.onAllNodesWithTag("person-detail-action-draft-pa-primary")
+            .assertCountEquals(0)
         composeRule.onNodeWithTag("person-detail-action-evidence-pa-primary").performClick()
         composeRule.onNodeWithText(string(R.string.schedule_action_dismiss)).performClick()
         composeRule.onNodeWithText(string(R.string.commitment_action_complete)).performClick()
 
         composeRule.runOnIdle {
-            assertEquals("pa-primary", openedDraftActionId)
-            assertEquals("pa-primary", openedEvidenceActionId)
+            assertNull(openedDraftActionId)
+            assertEquals("event-7", openedRawEventId)
+            assertNull(openedEvidenceActionId)
             assertEquals("pa-primary", dismissedActionId)
             assertEquals("pa-primary", completedActionId)
         }
@@ -507,7 +514,7 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
-    fun `unassigned events self action routes selected event`() {
+    fun `unassigned events do not show self match action`() {
         var selfMatchedEventId: String? = null
 
         composeRule.setContent {
@@ -529,12 +536,10 @@ class PersonDetailSupplementUiTest {
             }
         }
 
-        composeRule.onNodeWithTag("unassigned-match-self-event-self")
-            .performScrollTo()
-            .performClick()
+        composeRule.onAllNodesWithTag("unassigned-match-self-event-self").assertCountEquals(0)
 
         composeRule.runOnIdle {
-            assertEquals("event-self", selfMatchedEventId)
+            assertNull(selfMatchedEventId)
         }
     }
 
@@ -796,6 +801,54 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
+    fun `raw event detail thread messages are individually clickable`() {
+        var tappedRawEventId: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                RawEventDetailContent(
+                    state = RawEventDetailUiState(
+                        eventId = "raw-mail-2",
+                        sourceType = SourceType.GMAIL,
+                        eventTitle = "Re: 계약서 확인",
+                        timestamp = Instant.parse("2026-04-24T02:00:00Z"),
+                        snippet = "두 번째 메일",
+                        threadMessages = listOf(
+                            RawEventThreadMessageUi(
+                                rawEventId = "raw-mail-1",
+                                title = "계약서 확인",
+                                snippet = "첫 번째 메일",
+                                timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                                isCurrent = false,
+                            ),
+                            RawEventThreadMessageUi(
+                                rawEventId = "raw-mail-2",
+                                title = "Re: 계약서 확인",
+                                snippet = "두 번째 메일",
+                                timestamp = Instant.parse("2026-04-24T02:00:00Z"),
+                                isCurrent = true,
+                            ),
+                        ),
+                        emailBody = EmailBodyUi(
+                            bodyPlain = "본문",
+                            bodyHtml = null,
+                        ),
+                        loading = false,
+                    ),
+                    onThreadMessageClick = { tappedRawEventId = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("raw-event-detail-list")
+            .performScrollToNode(hasTestTag("raw-event-thread-message-raw-mail-1"))
+        composeRule.onNodeWithTag("raw-event-thread-message-raw-mail-1").performClick()
+        assertEquals("raw-mail-1", tappedRawEventId)
+        composeRule.onNodeWithTag("raw-event-thread-message-raw-mail-2").performClick()
+        assertEquals("raw-mail-2", tappedRawEventId)
+    }
+
+    @Test
     fun `raw event detail content shows email sections badges and expandable body`() {
         val longBody = buildString {
             append("A".repeat(520))
@@ -826,6 +879,7 @@ class PersonDetailSupplementUiTest {
         composeRule.onNodeWithText("제안서").assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.raw_event_attachments_count, 2)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 3)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.raw_event_email_original_title)).assertIsDisplayed()
         composeRule.onNodeWithTag("raw-event-body").assertTextContains("AAAA", substring = true)
         composeRule.onNodeWithText(string(R.string.raw_event_body_expand)).performClick()
         composeRule.onNodeWithTag("raw-event-body").assertTextContains("TAIL", substring = true)
@@ -834,7 +888,7 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
-    fun `raw event detail content shows extracted commitments before long body and keeps body toggle reachable`() {
+    fun `raw event detail content shows original before action context and keeps sections reachable`() {
         val longBody = buildString {
             append("A".repeat(900))
             append("TAIL")
@@ -873,9 +927,12 @@ class PersonDetailSupplementUiTest {
 
         composeRule.onNodeWithTag("raw-event-detail-list").assertIsDisplayed()
         composeRule.onNodeWithTag("raw-event-detail-list")
+            .performScrollToNode(hasTestTag("raw-event-body-toggle"))
+        composeRule.onNodeWithText(string(R.string.raw_event_email_original_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.raw_event_body_expand)).assertIsDisplayed()
+        composeRule.onNodeWithTag("raw-event-detail-list")
             .performScrollToNode(hasTestTag("raw-event-why-action"))
-        composeRule.onNodeWithText(string(R.string.commitment_action_evidence_why))
-            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.commitment_action_evidence_why)).assertIsDisplayed()
         composeRule.onNodeWithText(
             string(R.string.raw_event_action_reason_single_fmt, string(R.string.commitments_filter_give), "하단 약속"),
         ).assertIsDisplayed()
@@ -884,8 +941,42 @@ class PersonDetailSupplementUiTest {
         composeRule.onNodeWithText(string(R.string.raw_event_extracted_commitments_title))
             .assertIsDisplayed()
         composeRule.onNodeWithTag("raw-event-extracted-commitments").assertIsDisplayed()
+    }
+
+    @Test
+    fun `raw event detail content uses email snippet as original fallback when body row is missing`() {
+        composeRule.setContent {
+            BecalmTheme {
+                RawEventDetailContent(
+                    state = RawEventDetailUiState(
+                        eventId = "event-1",
+                        sourceType = SourceType.GMAIL,
+                        eventTitle = "Re: 미팅 일정",
+                        timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        snippet = "다음 주 수요일에 시간이 괜찮을 것 같습니다.",
+                        extractedCommitments = listOf(
+                            RawEventCommitmentSummary(
+                                id = "commitment-1",
+                                title = "수요일 일정 확인",
+                                itemType = "schedule",
+                                direction = null,
+                                status = "tentative",
+                                quote = "다음 주 수요일",
+                            ),
+                        ),
+                        loading = false,
+                    ),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.raw_event_email_original_title)).assertIsDisplayed()
+        composeRule.onNodeWithTag("raw-event-body")
+            .assertTextContains("다음 주 수요일에 시간이 괜찮을 것 같습니다.", substring = true)
+        composeRule.onNodeWithText(string(R.string.commitment_action_evidence_why)).assertIsDisplayed()
         composeRule.onNodeWithTag("raw-event-detail-list")
-            .performScrollToNode(hasTestTag("raw-event-body-toggle"))
+            .performScrollToNode(hasText(string(R.string.raw_event_extracted_commitments_title)))
+        composeRule.onNodeWithText(string(R.string.raw_event_extracted_commitments_title)).assertIsDisplayed()
     }
 
     @Test

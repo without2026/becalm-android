@@ -32,6 +32,11 @@ internal enum class OnboardingSetupDestination(
         introPageIndex = 4,
         setupStage = OnboardingSetupStage.INTRO,
     ),
+    ReadyToStart(
+        routePath = BecalmRoute.OnboardingSetupReadyToStart.path,
+        introPageIndex = null,
+        setupStage = OnboardingSetupStage.READY_TO_START,
+    ),
     GmailPreview(
         routePath = BecalmRoute.OnboardingSetupGmailPreview.path,
         introPageIndex = null,
@@ -64,6 +69,7 @@ internal enum class OnboardingSetupDestination(
         fun fromState(state: OnboardingUiState): OnboardingSetupDestination =
             when (state.setupStage) {
                 OnboardingSetupStage.INTRO -> fromIntroPageIndex(state.introPageIndex)
+                OnboardingSetupStage.READY_TO_START -> ReadyToStart
                 OnboardingSetupStage.GMAIL_PREVIEW -> GmailPreview
                 OnboardingSetupStage.FIRST_MEMORY -> FirstMemory
             }

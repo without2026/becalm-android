@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,16 +21,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,11 +38,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -223,15 +216,16 @@ public fun PersonsScreenContent(
         state.people.isNotEmpty() ||
         hasUnassignedEvents ||
         state.query.isNotBlank()
-    val showActionFirstHeader = !state.loading &&
-        (state.people.isNotEmpty() || state.query.isNotBlank())
     val hasActionRows = state.people.any { it.topAction != null }
-    val showCompactMatchingRequired = !state.loading && hasUnassignedEvents && hasActionRows
     val showEvidenceImportFab = !state.loading &&
-        (!hasActionRows || state.query.isNotBlank() || (hasUnassignedEvents && !showCompactMatchingRequired))
+        (state.query.isNotBlank() || (!hasActionRows && !hasUnassignedEvents))
     val hasSourceWarning = headerState.hasSourceWarningForCompactLine()
     val actionFeedStatus = state.actionFeedStatus
     val actionFeedStatusMessage = actionFeedStatus?.let { personActionFeedCompactStatusMessage(it) }
+    val showActionFirstHeader = !state.loading &&
+        (state.people.isNotEmpty() || state.query.isNotBlank()) &&
+        !hasSourceWarning &&
+        actionFeedStatus == null
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.persons_title),
@@ -256,12 +250,6 @@ public fun PersonsScreenContent(
         ) {
             if (state.showOfflineBadge) {
                 OfflineBadge(lastSyncAt = state.offlineLastSyncAt)
-            }
-            if (hasUnassignedEvents && !showCompactMatchingRequired) {
-                MatchingRequiredBanner(
-                    count = state.unassignedEvents.size,
-                    onClick = onOpenUnassigned,
-                )
             }
             if (showActionFirstHeader) {
                 PersonsActionFirstHeader()
@@ -292,12 +280,6 @@ public fun PersonsScreenContent(
                         .fillMaxWidth()
                         .testTag("persons-search-input")
                         .padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-            if (showCompactMatchingRequired) {
-                MatchingRequiredStatusLine(
-                    count = state.unassignedEvents.size,
-                    onClick = onOpenUnassigned,
                 )
             }
             if (hasSourceWarning) {
@@ -340,6 +322,7 @@ public fun PersonsScreenContent(
                         PersonList(
                             state = state,
                             onPersonClick = onPersonClick,
+                            onOpenUnassigned = onOpenUnassigned,
                         )
                     } else {
                         LazyColumn(
@@ -368,6 +351,7 @@ public fun PersonsScreenContent(
                     PersonList(
                         state = state,
                         onPersonClick = onPersonClick,
+                        onOpenUnassigned = onOpenUnassigned,
                     )
                 }
             }
@@ -390,103 +374,6 @@ public fun PersonsScreenContent(
         onStatusDetailsClick = onOpenProcessingStatus,
         onConsentRequiredClick = onConsentRequiredClick,
     )
-}
-
-@Composable
-private fun MatchingRequiredStatusLine(
-    count: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .background(InkMistLine2, RoundedCornerShape(12.dp))
-            .border(1.dp, InkMistLine, RoundedCornerShape(12.dp))
-            .padding(horizontal = 10.dp, vertical = 7.dp)
-            .testTag("persons-matching-required-statusline"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(InkMistWarn),
-        )
-        Text(
-            text = buildAnnotatedString {
-                withStyle(
-                    SpanStyle(
-                        color = InkMistInk,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                ) {
-                    append(stringResource(R.string.person_matching_required_status_prefix_fmt, count))
-                }
-                append(stringResource(R.string.person_matching_required_status_suffix))
-            },
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.labelMedium,
-            color = InkMistGray,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            lineHeight = MaterialTheme.typography.labelMedium.lineHeight,
-        )
-        TextButton(
-            onClick = onClick,
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-            modifier = Modifier
-                .heightIn(min = 32.dp)
-                .testTag("persons-matching-required-status-action"),
-        ) {
-            Text(
-                text = stringResource(R.string.person_matching_required_banner_action),
-                color = InkMistTake,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-            )
-        }
-    }
-}
-
-@Composable
-private fun MatchingRequiredBanner(
-    count: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    EvidenceCard(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clickable(onClick = onClick),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Filled.Warning,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(28.dp),
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.person_matching_required_banner_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = stringResource(R.string.person_matching_required_banner_body, count),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = onClick) {
-                Text(text = stringResource(R.string.person_matching_required_banner_action))
-            }
-        }
-    }
 }
 
 @Composable
@@ -570,6 +457,7 @@ private fun PersonListSkeleton(modifier: Modifier = Modifier) {
 private fun PersonList(
     state: PersonsUiState,
     onPersonClick: (String) -> Unit,
+    onOpenUnassigned: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -583,24 +471,18 @@ private fun PersonList(
                 key = section.kind.key,
                 titleRes = section.kind.titleRes,
                 people = section.people,
+                showWhenEmpty = section.kind.shouldShowWhenEmpty,
                 onPersonClick = onPersonClick,
             )
         }
         if (state.unassignedEvents.isNotEmpty()) {
-            item(key = "unassigned-spacer") {
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-        }
-        if (state.unassignedEvents.isNotEmpty()) {
-            item(key = "unassigned-header") {
-                PersonListSectionHeader(text = stringResource(R.string.persons_unassigned_title))
-            }
-            items(items = state.unassignedEvents, key = { it.id }) { event ->
-                UnassignedEventRow(
-                    event = event,
+            item(key = "matching-queue-summary") {
+                PersonMatchingQueueSummaryCard(
+                    events = state.unassignedEvents,
+                    onClick = onOpenUnassigned,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp),
+                        .padding(vertical = 10.dp),
                 )
             }
         }
@@ -621,15 +503,31 @@ private val PersonSectionKind.titleRes: Int
         PersonSectionKind.RECENT_CONTACTS -> R.string.persons_section_recent_contacts
     }
 
+private val PersonSectionKind.shouldShowWhenEmpty: Boolean
+    get() = this == PersonSectionKind.PENDING_COMMITMENTS ||
+        this == PersonSectionKind.THIS_WEEK_ACTIONS
+
 private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
     key: String,
     titleRes: Int,
     people: List<PersonRow>,
+    showWhenEmpty: Boolean,
     onPersonClick: (String) -> Unit,
 ) {
-    if (people.isEmpty()) return
+    if (people.isEmpty() && !showWhenEmpty) return
     item(key = "$key-header") {
         PersonListSectionHeader(text = stringResource(titleRes))
+    }
+    if (people.isEmpty()) {
+        item(key = "$key-empty") {
+            SectionEmptyLine(
+                text = stringResource(R.string.persons_section_empty),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+            )
+        }
+        return
     }
     items(items = people, key = { "$key-${it.personId}" }) { person ->
         PersonRowItem(
@@ -640,6 +538,22 @@ private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
                 .padding(vertical = 4.dp),
         )
     }
+}
+
+@Composable
+private fun SectionEmptyLine(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        ),
+        color = InkMistGray2,
+    )
 }
 
 @Composable
@@ -918,35 +832,126 @@ private fun PersonActionSummary.urgencyDotColor(): Color = when {
 }
 
 @Composable
-private fun UnassignedEventRow(
-    event: UnassignedEventSummary,
+private fun PersonMatchingQueueSummaryCard(
+    events: List<UnassignedEventSummary>,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    EvidenceCard(
+    val totalCount = events.size
+    val topCandidate = events
+        .flatMap { event -> event.candidates.filter { it.recommended && !it.isSelfSuggestion } }
+        .mapNotNull { it.displayName.safeQueueCandidateName() }
+        .groupingBy { it }
+        .eachCount()
+        .maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+    val sourceCounts = events
+        .groupingBy(UnassignedEventSummary::sourceType)
+        .eachCount()
+        .entries
+        .sortedByDescending { it.value }
+    val sourceSummaryParts = mutableListOf<String>()
+    for ((sourceType, count) in sourceCounts) {
+        sourceSummaryParts += "${stringResource(sourcePresentationFor(sourceType).labelRes)} $count"
+    }
+    val sourceSummary = sourceSummaryParts.joinToString(" · ")
+    val recommendedCount = events.count { event ->
+        event.candidates.any { it.recommended && !it.isSelfSuggestion }
+    }
+    val title = if (topCandidate != null) {
+        stringResource(
+            R.string.person_matching_queue_title_candidate_fmt,
+            topCandidate.key,
+            topCandidate.value,
+        )
+    } else {
+        stringResource(R.string.person_matching_queue_title_fmt, totalCount)
+    }
+    val body = when {
+        recommendedCount > 0 && sourceSummary.isNotBlank() -> stringResource(
+            R.string.person_matching_queue_body_recommended_fmt,
+            recommendedCount,
+            sourceSummary,
+        )
+        sourceSummary.isNotBlank() -> stringResource(
+            R.string.person_matching_queue_body_sources_fmt,
+            sourceSummary,
+        )
+        else -> stringResource(R.string.person_matching_queue_body_plain)
+    }
+
+    Column(
         modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .background(InkMistLine2, RoundedCornerShape(14.dp))
+            .border(1.dp, InkMistLine, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 13.dp)
+            .testTag("persons-matching-queue-summary"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Filled.Person,
-                contentDescription = null,
-                modifier = Modifier.size(36.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(InkMistTake),
             )
-            Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = event.title ?: stringResource(R.string.raw_event_detail_no_title),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = stringResource(R.string.person_matching_queue_label),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = InkMistTake,
                 )
                 Text(
-                    text = stringResource(sourcePresentationFor(event.sourceType).labelRes),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = InkMistInk,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
+            Text(
+                text = stringResource(R.string.person_matching_queue_action),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = InkMistTake,
+                modifier = Modifier.testTag("persons-matching-queue-action"),
+            )
+            Text(
+                text = "›",
+                style = MaterialTheme.typography.titleMedium,
+                color = InkMistTake,
+            )
         }
+        Text(
+            text = body,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            ),
+            color = InkMistGray,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
+}
+
+private fun String?.safeQueueCandidateName(): String? {
+    val value = this?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    if (value.contains("@") || value.startsWith("+")) return null
+    return value
 }
 
 @Composable

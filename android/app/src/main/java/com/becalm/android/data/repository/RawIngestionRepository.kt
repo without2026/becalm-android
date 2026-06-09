@@ -9,6 +9,7 @@ import com.becalm.android.data.local.datastore.NoopSyncCursorStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.dao.NoopSourceEventAnchorDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.dao.SourceEventAnchorDao
 import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
@@ -18,6 +19,7 @@ import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.RawIngestionAcknowledgementDto
+import com.becalm.android.data.remote.dto.RawIngestionEventDto
 import com.becalm.android.data.remote.dto.SourceType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -521,6 +523,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             val entities = body.data.map { it.toRawIngestionEventEntity(userId) }
             dao.upsertSyncedFromServer(entities)
             sourceEventAnchorDao.upsertAll(entities.map { it.toSourceEventAnchorEntity() })
+            mirrorBackendEmailBodies(userId = userId, events = body.data)
 
             totalFetched += body.data.size
             totalUpserted += entities.size
@@ -541,6 +544,20 @@ public class RawIngestionRepositoryImpl @Inject constructor(
                 nextCursor = lastCursor,
             ),
         )
+    }
+
+    private suspend fun mirrorBackendEmailBodies(
+        userId: String,
+        events: List<RawIngestionEventDto>,
+    ) {
+        val emailBodies = events.mapNotNull { dto -> dto.toMirroredEmailBody(userId) }
+        if (emailBodies.isEmpty()) return
+        runCatching {
+            val repository = emailBodyRepositoryProvider.get()
+            emailBodies.forEach { repository.insert(it) }
+        }.onFailure { error ->
+            logger.w(TAG, "refreshSince email body mirror skipped count=${emailBodies.size}: ${error::class.simpleName}")
+        }
     }
 
     private suspend fun localMirrorRowCount(userId: String, sourceType: String?): Int =
@@ -678,16 +695,42 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 }
 
 private object NoopEmailBodyRepository : EmailBodyRepository {
-    override suspend fun insert(entity: com.becalm.android.data.local.db.entity.EmailBodyEntity) = Unit
+    override suspend fun insert(entity: EmailBodyEntity) = Unit
 
-    override suspend fun getByRawEventId(rawEventId: String): com.becalm.android.data.local.db.entity.EmailBodyEntity? = null
+    override suspend fun getByRawEventId(rawEventId: String): EmailBodyEntity? = null
 
     override suspend fun findByProviderMessage(
         userId: String,
         sourceType: String,
         folder: String,
         providerMessageId: String,
-    ): com.becalm.android.data.local.db.entity.EmailBodyEntity? = null
+    ): EmailBodyEntity? = null
 
     override suspend fun markParseFailed(id: String) = Unit
+}
+
+private val MIRRORED_EMAIL_SOURCE_TYPES = setOf(
+    SourceType.GMAIL,
+    SourceType.OUTLOOK_MAIL,
+    SourceType.NAVER_IMAP,
+    SourceType.DAUM_IMAP,
+)
+
+private fun RawIngestionEventDto.toMirroredEmailBody(userId: String): EmailBodyEntity? {
+    val body = emailBodyPlain?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    if (sourceType !in MIRRORED_EMAIL_SOURCE_TYPES) return null
+    val rawEventId = id?.trim()?.takeIf { it.isNotEmpty() }
+        ?: UUID.nameUUIDFromBytes("$userId:$sourceType:$clientEventId".toByteArray()).toString()
+    val providerMessageId = listOf(providerEventId, sourceRef, clientEventId)
+        .firstNotNullOfOrNull { it?.trim()?.takeIf(String::isNotEmpty) }
+        ?: rawEventId
+    return EmailBodyEntity(
+        id = UUID.nameUUIDFromBytes("$userId:$rawEventId:backend-email-body".toByteArray()).toString(),
+        rawEventId = rawEventId,
+        providerMessageId = providerMessageId,
+        folder = folder?.trim()?.takeIf { it.isNotEmpty() } ?: "backend",
+        subject = eventTitle ?: sourceEventTitle,
+        bodyPlain = body,
+        receivedAt = timestamp,
+    )
 }

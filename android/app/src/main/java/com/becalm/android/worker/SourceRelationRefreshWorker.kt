@@ -13,6 +13,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
@@ -32,6 +33,7 @@ public class SourceRelationRefreshWorker @AssistedInject constructor(
     private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
     private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
     private val scheduleEventLinkRepositoryProvider: Provider<ScheduleEventLinkRepository>,
+    private val personActionRepositoryProvider: Provider<PersonActionRepository>,
     private val userCorrectionRepositoryProvider: Provider<UserCorrectionRepository>,
     private val syncCursorStore: SyncCursorStore,
     private val workSchedulerProvider: Provider<WorkScheduler>,
@@ -58,6 +60,7 @@ public class SourceRelationRefreshWorker @AssistedInject constructor(
                 sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
                 commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
                 scheduleEventLinkRepository = scheduleEventLinkRepositoryProvider.get(),
+                personActionRepository = personActionRepositoryProvider.get(),
                 userCorrectionRepository = userCorrectionRepositoryProvider.get(),
                 syncCursorStore = syncCursorStore,
                 workScheduler = workSchedulerProvider.get(),

@@ -17,6 +17,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -70,6 +71,7 @@ public class DefaultSourceSyncPort @Inject constructor(
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val rawIngestionRepository: RawIngestionRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    private val personActionRepository: PersonActionRepository,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val sourceConnectionRepository: SourceConnectionRepository,
     private val syncCursorStore: SyncCursorStore,
@@ -292,6 +294,7 @@ public class DefaultSourceSyncPort @Inject constructor(
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
             scheduleEventLinkRepository = scheduleEventLinkRepository,
+            personActionRepository = personActionRepository,
             userCorrectionRepository = userCorrectionRepository,
             syncCursorStore = syncCursorStore,
             workScheduler = workScheduler,

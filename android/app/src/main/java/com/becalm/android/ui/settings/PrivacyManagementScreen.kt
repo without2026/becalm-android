@@ -186,7 +186,7 @@ public fun PrivacyManagementScreen(
                 BecalmButton(
                     text = stringResource(R.string.action_cancel),
                     onClick = { showExportConfirm = false },
-                    variant = BecalmButtonVariant.Text,
+                    variant = BecalmButtonVariant.Tertiary,
                 )
             },
         )
@@ -222,14 +222,14 @@ public fun PrivacyManagementScreen(
                             archiveCutoffDate,
                         )
                     },
-                    variant = BecalmButtonVariant.Secondary,
+                    variant = BecalmButtonVariant.Destructive,
                 )
             },
             dismissButton = {
                 BecalmButton(
                     text = stringResource(R.string.action_cancel),
                     onClick = { showArchiveDeleteConfirm = false },
-                    variant = BecalmButtonVariant.Text,
+                    variant = BecalmButtonVariant.Tertiary,
                 )
             },
         )
@@ -559,7 +559,7 @@ internal fun ProcessingPauseContent(
                 BecalmButton(
                     text = stringResource(R.string.action_cancel),
                     onClick = { showPauseConfirm = false },
-                    variant = BecalmButtonVariant.Text,
+                    variant = BecalmButtonVariant.Tertiary,
                 )
             },
         )

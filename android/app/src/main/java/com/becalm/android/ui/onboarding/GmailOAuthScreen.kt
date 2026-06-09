@@ -135,7 +135,7 @@ public fun GmailOAuthScreen(
                         launchPendingIntent(IntentSenderRequest.Builder(event.pendingIntent).build())
                     }
                     is EmailConnectEvent.Syncing -> {
-                        pendingOAuthResumeRefresh = false
+                        pendingOAuthResumeRefresh = true
                     }
                     is EmailConnectEvent.NotConnected -> {
                         pendingOAuthResumeRefresh = false
@@ -247,7 +247,7 @@ internal fun OAuthPlaceholderContent(
         BecalmButton(
             text = stringResource(R.string.action_skip),
             onClick = onSkip,
-            variant = BecalmButtonVariant.Text,
+            variant = BecalmButtonVariant.Tertiary,
             enabled = !connectLoading,
             modifier = Modifier.testTag("oauth-skip"),
         )

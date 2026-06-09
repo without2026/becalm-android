@@ -9,6 +9,7 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -62,6 +63,7 @@ internal class ServerBackedSourceSyncRunner(
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    private val personActionRepository: PersonActionRepository? = null,
     private val userCorrectionRepository: UserCorrectionRepository? = null,
     private val syncCursorStore: SyncCursorStore? = null,
     private val sourceStatusRepository: SourceStatusRepository,
@@ -134,6 +136,7 @@ internal class ServerBackedSourceSyncRunner(
                 sourceEventParticipantRepository = sourceEventParticipantRepository,
                 commitmentParticipantRepository = commitmentParticipantRepository,
                 scheduleEventLinkRepository = scheduleEventLinkRepository,
+                personActionRepository = personActionRepository,
                 userCorrectionRepository = userCorrectionRepository,
                 syncCursorStore = syncCursorStore,
                 workScheduler = workScheduler,

@@ -65,8 +65,8 @@ public fun PersonActionItemCacheEntity.toPersonActionItemUi(): PersonActionItemU
         personId = personId,
         personDisplayName = personDisplayName,
         actionKind = actionKind,
-        title = title,
-        primaryVerb = primaryVerb,
+        title = title.toDisplayActionTitle(actionKind = actionKind, primaryVerb = primaryVerb),
+        primaryVerb = primaryVerb.toDisplayPrimaryVerb(actionKind = actionKind),
         shortReason = shortReason,
         commitmentId = commitmentId,
         calendarEventId = calendarEventId,
@@ -107,6 +107,25 @@ public fun PersonActionItemCacheEntity.toPersonActionItemUi(): PersonActionItemU
             )
         },
     )
+
+private fun String.toDisplayActionTitle(actionKind: String, primaryVerb: String): String {
+    val normalizedTitle = trim()
+    val normalizedVerb = primaryVerb.trim()
+    if (actionKind == "add_to_calendar" && normalizedVerb == "후보 확인") {
+        return normalizedTitle
+            .removeSuffix(" $normalizedVerb")
+            .trim()
+            .ifBlank { normalizedTitle }
+    }
+    return this
+}
+
+private fun String.toDisplayPrimaryVerb(actionKind: String): String =
+    if (actionKind == "add_to_calendar" && trim() == "후보 확인") {
+        "캘린더에 추가"
+    } else {
+        this
+    }
 
 public fun PersonActionItemUi.supportedDraftKind(): String? =
     actionKind.takeIf { it in DRAFT_ACTION_KINDS }

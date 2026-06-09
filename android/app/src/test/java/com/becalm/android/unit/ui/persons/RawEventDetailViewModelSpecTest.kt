@@ -2,6 +2,8 @@ package com.becalm.android.unit.ui.persons
 
 import androidx.lifecycle.SavedStateHandle
 import com.becalm.android.R
+import com.becalm.android.core.result.BecalmError
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
@@ -61,6 +63,7 @@ class RawEventDetailViewModelSpecTest {
         coEvery { projectionPort.loadCommitmentQuotes(any(), any()) } returns emptyList()
         coEvery { projectionPort.loadCommitmentSummaries(any(), any()) } returns emptyList()
         coEvery { projectionPort.loadCalendarAttendeesRaw(any(), any()) } returns null
+        coEvery { projectionPort.loadThreadMessages(any(), any()) } returns emptyList()
         coEvery { projectionPort.loadParticipantCorrections(any(), any()) } returns emptyList()
         coEvery { projectionPort.loadParticipantCorrectionChoices(any()) } returns emptyList()
         coEvery { sourceArtifactRepository.findMarkdownOriginal(any(), any()) } returns null
@@ -175,6 +178,88 @@ class RawEventDetailViewModelSpecTest {
         coVerify(exactly = 1) { projectionPort.loadCommitmentQuotes("user-1", any()) }
         coVerify(exactly = 1) { projectionPort.loadCommitmentSummaries("user-1", any()) }
         coVerify(exactly = 0) { emailBodyRepository.getByRawEventId(any()) }
+    }
+
+    @Test
+    fun `SRC-004 backend mail detail refreshes body mirror when local original is missing`() = runTest {
+        coEvery { rawIngestionRepository.findById("evt-gmail-refresh", "user-1") } returns
+            rawEvent(
+                id = "evt-gmail-refresh",
+                sourceType = SourceType.GMAIL,
+                eventTitle = "Backend Gmail",
+                snippet = "snippet fallback",
+                timestamp = Instant.fromEpochMilliseconds(5_000),
+            )
+        coEvery { emailBodyRepository.getByRawEventId("evt-gmail-refresh") } returnsMany listOf(
+            null,
+            emailBody(
+                rawEventId = "evt-gmail-refresh",
+                attachmentsMeta = null,
+                bodyPlain = "full provider body after mirror refresh",
+                bodyHtml = null,
+            ),
+        )
+        coEvery {
+            rawIngestionRepository.refreshSince(
+                userId = "user-1",
+                sourceType = SourceType.GMAIL,
+                since = Instant.fromEpochMilliseconds(5_000),
+            )
+        } returns BecalmResult.Success(
+            RawIngestionRepository.RefreshStats(
+                fetched = 1,
+                upserted = 1,
+                hasMore = false,
+                nextCursor = "ks1:body",
+            ),
+        )
+
+        val viewModel = buildViewModel(eventId = "evt-gmail-refresh")
+        advanceUntilIdle()
+
+        assertEquals("full provider body after mirror refresh", viewModel.uiState.value.emailBody?.bodyPlain)
+        coVerify(exactly = 1) {
+            rawIngestionRepository.refreshSince(
+                userId = "user-1",
+                sourceType = SourceType.GMAIL,
+                since = Instant.fromEpochMilliseconds(5_000),
+            )
+        }
+        coVerify(exactly = 2) { emailBodyRepository.getByRawEventId("evt-gmail-refresh") }
+    }
+
+    @Test
+    fun `SRC-004 backend mail detail falls back to snippet when body mirror refresh fails`() = runTest {
+        coEvery { rawIngestionRepository.findById("evt-gmail-refresh-fail", "user-1") } returns
+            rawEvent(
+                id = "evt-gmail-refresh-fail",
+                sourceType = SourceType.GMAIL,
+                eventTitle = "Backend Gmail",
+                snippet = "snippet fallback",
+                timestamp = Instant.fromEpochMilliseconds(5_000),
+            )
+        coEvery { emailBodyRepository.getByRawEventId("evt-gmail-refresh-fail") } returns null
+        coEvery {
+            rawIngestionRepository.refreshSince(
+                userId = "user-1",
+                sourceType = SourceType.GMAIL,
+                since = Instant.fromEpochMilliseconds(5_000),
+            )
+        } returns BecalmResult.Failure(BecalmError.Network(0, "offline"))
+
+        val viewModel = buildViewModel(eventId = "evt-gmail-refresh-fail")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertNull(state.emailBody)
+        assertEquals("snippet fallback", state.snippet)
+        coVerify(exactly = 1) {
+            rawIngestionRepository.refreshSince(
+                userId = "user-1",
+                sourceType = SourceType.GMAIL,
+                since = Instant.fromEpochMilliseconds(5_000),
+            )
+        }
     }
 
     @Test

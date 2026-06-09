@@ -23,17 +23,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -54,8 +53,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.domain.person.PersonIdentityResolver
+import com.becalm.android.ui.components.BecalmActionPill
+import com.becalm.android.ui.components.BecalmActionPillVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonSize
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.BecalmTextField
@@ -299,11 +301,6 @@ internal fun UnassignedEventsContent(
                                     filter = MatchQueueFilter.RECOMMENDED
                                 }
                             },
-                            onSelf = {
-                                onSelfMatch(event)
-                                laterIds = laterIds - event.id
-                                selectedMatchEventIds = selectedMatchEventIds - event.id
-                            },
                             onNotSelf = {
                                 onNotSelfMatch(event)
                             },
@@ -466,17 +463,18 @@ private fun MatchBulkActionPanel(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            TextButton(onClick = if (selectedCount == confirmableCount) onClear else onSelectAll) {
-                Text(
-                    text = stringResource(
-                        if (selectedCount == confirmableCount) {
-                            R.string.person_match_bulk_clear
-                        } else {
-                            R.string.person_match_bulk_select_all
-                        },
-                    ),
-                )
-            }
+            BecalmActionPill(
+                text = stringResource(
+                    if (selectedCount == confirmableCount) {
+                        R.string.person_match_bulk_clear
+                    } else {
+                        R.string.person_match_bulk_select_all
+                    },
+                ),
+                onClick = if (selectedCount == confirmableCount) onClear else onSelectAll,
+                icon = if (selectedCount == confirmableCount) Icons.Outlined.Close else null,
+                variant = BecalmActionPillVariant.Neutral,
+            )
             Spacer(modifier = Modifier.weight(1f))
             BecalmButton(
                 text = stringResource(R.string.person_match_bulk_confirm, selectedCount),
@@ -510,8 +508,11 @@ private fun MatchBulkBottomBar(
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onClear) {
-                Text(text = stringResource(R.string.person_match_bulk_clear))
+            IconButton(onClick = onClear) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = stringResource(R.string.person_match_bulk_clear),
+                )
             }
             BecalmButton(
                 text = stringResource(R.string.person_match_bulk_confirm, selectedCount),
@@ -551,7 +552,6 @@ private fun PersonMatchReviewCard(
     onSelectedChange: (Boolean) -> Unit,
     onConfirm: (String, String) -> Unit,
     onLater: () -> Unit,
-    onSelf: () -> Unit,
     onNotSelf: () -> Unit,
 ) {
     val candidate = event.bestCandidate()
@@ -650,19 +650,7 @@ private fun PersonMatchReviewCard(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
-            if (isSelfSuggestion) {
-                BecalmButton(
-                    text = stringResource(R.string.person_match_self_action),
-                    onClick = onSelf,
-                    enabled = !saving,
-                    loading = saving,
-                    variant = BecalmButtonVariant.Secondary,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("unassigned-match-self-${event.id}"),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-            } else {
+            if (!isSelfSuggestion) {
                 BecalmButton(
                     text = stringResource(R.string.person_match_confirm_action),
                     modifier = Modifier
@@ -684,21 +672,24 @@ private fun PersonMatchReviewCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.align(Alignment.End),
             ) {
-                TextButton(onClick = onLater, enabled = !saving) {
-                    Text(text = stringResource(R.string.person_match_later_action))
-                }
+                BecalmActionPill(
+                    text = stringResource(R.string.person_match_later_action),
+                    onClick = onLater,
+                    enabled = !saving,
+                    variant = BecalmActionPillVariant.Neutral,
+                )
                 if (!isSelfSuggestion) {
-                    OutlinedButton(
-                        enabled = !saving,
+                    BecalmActionPill(
+                        text = stringResource(R.string.person_match_other_person_action),
                         onClick = {
                             personAnchor = ""
                             selectedNickname = ""
                             manualOpen = true
                         },
+                        enabled = !saving,
+                        trailingChevron = true,
                         modifier = Modifier.testTag("unassigned-match-other-${event.id}"),
-                    ) {
-                        Text(text = stringResource(R.string.person_match_other_person_action))
-                    }
+                    )
                 }
             }
         } else {
@@ -712,7 +703,6 @@ private fun PersonMatchReviewCard(
                 onPersonAnchorChange = { personAnchor = it },
                 onNicknameChange = { nickname = it },
                 onLater = onLater,
-                onSelf = onSelf,
                 saving = saving,
                 onConfirm = { anchor, displayName ->
                     onConfirm(
@@ -807,7 +797,6 @@ private fun ManualMatchPanel(
     onPersonAnchorChange: (String) -> Unit,
     onNicknameChange: (String) -> Unit,
     onLater: () -> Unit,
-    onSelf: () -> Unit,
     saving: Boolean,
     onConfirm: (String, String) -> Unit,
 ) {
@@ -936,26 +925,16 @@ private fun ManualMatchPanel(
             .testTag("unassigned-match-nickname-$eventId"),
     )
     Spacer(modifier = Modifier.height(8.dp))
-    if (!selfRejected) {
-        BecalmButton(
-            text = stringResource(R.string.person_match_self_action),
-            onClick = onSelf,
-            enabled = !saving,
-            loading = saving,
-            variant = BecalmButtonVariant.Secondary,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("unassigned-match-self-$eventId"),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-    }
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        TextButton(onClick = onLater, enabled = !saving) {
-            Text(text = stringResource(R.string.person_match_later_action))
-        }
+        BecalmActionPill(
+            text = stringResource(R.string.person_match_later_action),
+            onClick = onLater,
+            enabled = !saving,
+            variant = BecalmActionPillVariant.Neutral,
+        )
         BecalmButton(
             text = stringResource(
                 if (selectedKnownChoice) {
@@ -968,6 +947,7 @@ private fun ManualMatchPanel(
             loading = saving,
             onClick = { onConfirm(confirmAnchor, confirmDisplayName) },
             variant = BecalmButtonVariant.Primary,
+            size = BecalmButtonSize.Compact,
         )
     }
 }

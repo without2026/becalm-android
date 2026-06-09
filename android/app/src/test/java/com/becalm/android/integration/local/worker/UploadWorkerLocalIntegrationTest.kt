@@ -1,6 +1,7 @@
 package com.becalm.android.integration.local.worker
 
 import com.becalm.android.core.util.RecordingLogger
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.datastore.SyncCursorStoreImpl
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
@@ -179,6 +180,16 @@ class UploadWorkerLocalIntegrationTest {
         commitmentRepository = commitmentRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
+        personActionRepository = mockk(relaxed = true) {
+            coEvery { refresh(any(), any()) } returns BecalmResult.Success(
+                com.becalm.android.data.repository.PersonActionRefreshStats(
+                    fetched = 0,
+                    deleted = 0,
+                    serverWatermark = null,
+                    recomputeState = null,
+                ),
+            )
+        },
         sourceStatusRepository = sourceStatusRepository,
         workScheduler = mockk<WorkScheduler>(relaxed = true),
         processingPauseGate = processingPauseGate,

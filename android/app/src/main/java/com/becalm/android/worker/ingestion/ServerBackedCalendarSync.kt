@@ -13,6 +13,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SOURCE_CONNECTION_STATUS_NEEDS_REAUTH
@@ -42,6 +43,7 @@ internal suspend fun runServerBackedCalendarSync(
     sourceConnectionRepository: SourceConnectionRepository,
     sourceEventParticipantRepository: SourceEventParticipantRepository,
     commitmentParticipantRepository: CommitmentParticipantRepository,
+    personActionRepository: PersonActionRepository,
     userCorrectionRepository: UserCorrectionRepository? = null,
     sourceStatusRepository: SourceStatusRepository,
     syncCursorStore: SyncCursorStore,
@@ -76,6 +78,7 @@ internal suspend fun runServerBackedCalendarSync(
         commitmentRepository = commitmentRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
+        personActionRepository = personActionRepository,
         userCorrectionRepository = userCorrectionRepository,
         sourceStatusRepository = sourceStatusRepository,
         syncCursorStore = syncCursorStore,

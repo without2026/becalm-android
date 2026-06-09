@@ -15,6 +15,8 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRefreshStats
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ProcessingStatusMessages
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -37,6 +39,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
 
@@ -47,6 +50,7 @@ class SourceSyncPortSpecTest {
     private val calendarEventRepository: CalendarEventRepository = mockk(relaxed = true)
     private val commitmentRepository: CommitmentRepository = mockk()
     private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk()
+    private val personActionRepository: PersonActionRepository = mockk(relaxed = true)
     private val rawIngestionRepository: RawIngestionRepository = mockk()
     private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk()
     private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
@@ -58,6 +62,19 @@ class SourceSyncPortSpecTest {
     private val logger: Logger = mockk(relaxed = true)
     private val productAnalytics = RecordingProductAnalyticsClient()
 
+    @Before
+    fun setUp() {
+        coEvery { personActionRepository.refresh(any(), any()) } returns
+            BecalmResult.Success(
+                PersonActionRefreshStats(
+                    fetched = 0,
+                    deleted = 0,
+                    serverWatermark = null,
+                    recomputeState = null,
+                ),
+            )
+    }
+
     private val subject = DefaultSourceSyncPort(
         authRepository = authRepository,
         apiProvider = Provider { api },
@@ -65,6 +82,7 @@ class SourceSyncPortSpecTest {
         commitmentRepository = commitmentRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
         rawIngestionRepository = rawIngestionRepository,
+        personActionRepository = personActionRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         sourceConnectionRepository = sourceConnectionRepository,
         syncCursorStore = syncCursorStore,

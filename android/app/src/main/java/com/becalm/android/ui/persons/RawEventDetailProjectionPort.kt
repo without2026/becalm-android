@@ -3,6 +3,7 @@ package com.becalm.android.ui.persons
 import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.RawEventCommitmentRow
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
@@ -39,6 +40,11 @@ public interface RawEventDetailProjectionPort {
         event: RawIngestionEventEntity,
     ): String?
 
+    public suspend fun loadThreadMessages(
+        userId: String,
+        event: RawIngestionEventEntity,
+    ): List<RawEventThreadMessageUi>
+
     public suspend fun loadParticipantCorrections(
         userId: String,
         event: RawIngestionEventEntity,
@@ -51,6 +57,7 @@ public interface RawEventDetailProjectionPort {
 public class RoomBackedRawEventDetailProjectionPort @Inject constructor(
     private val commitmentDao: CommitmentDao,
     private val calendarEventDao: CalendarEventDao,
+    private val rawIngestionEventDao: RawIngestionEventDao,
     private val personIndexDao: PersonIndexDao,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
 ) : RawEventDetailProjectionPort {
@@ -93,6 +100,28 @@ public class RoomBackedRawEventDetailProjectionPort @Inject constructor(
         )?.attendeesRaw
     }
 
+    override suspend fun loadThreadMessages(
+        userId: String,
+        event: RawIngestionEventEntity,
+    ): List<RawEventThreadMessageUi> {
+        val conversationRef = event.conversationRef?.trim()?.takeIf { it.isNotEmpty() } ?: return emptyList()
+        if (event.sourceType !in EMAIL_SOURCE_TYPES) return emptyList()
+        return rawIngestionEventDao.findByConversationRefForUser(
+            userId = userId,
+            sourceType = event.sourceType,
+            conversationRef = conversationRef,
+            limit = THREAD_MESSAGE_LIMIT,
+        ).map { raw ->
+            RawEventThreadMessageUi(
+                rawEventId = raw.id,
+                title = raw.eventTitle?.trim()?.takeIf { it.isNotEmpty() },
+                snippet = raw.eventSnippet?.trim()?.takeIf { it.isNotEmpty() },
+                timestamp = raw.timestamp,
+                isCurrent = raw.id == event.id,
+            )
+        }
+    }
+
     override suspend fun loadParticipantCorrections(
         userId: String,
         event: RawIngestionEventEntity,
@@ -105,7 +134,7 @@ public class RoomBackedRawEventDetailProjectionPort @Inject constructor(
         )
             .filter { participant ->
                 participant.relationToUser != "self" &&
-                    participant.resolutionStatus != "ignored" &&
+                    participant.resolutionStatus.isReviewableParticipantStatus() &&
                     !participant.isSourceLocalSpeakerLabelOnly()
             }
             .sortedWith(
@@ -234,8 +263,18 @@ public class RoomBackedRawEventDetailProjectionPort @Inject constructor(
 
     private companion object {
         const val UNKNOWN_PARTICIPANT_DISPLAY_NAME: String = "이름 없는 사람"
+        const val THREAD_MESSAGE_LIMIT: Int = 20
+        val EMAIL_SOURCE_TYPES: Set<String> = setOf(
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.NAVER_IMAP,
+            SourceType.DAUM_IMAP,
+        )
     }
 }
+
+private fun String.isReviewableParticipantStatus(): Boolean =
+    this == "unresolved" || this == "suggested_self"
 
 @Module
 @InstallIn(SingletonComponent::class)

@@ -9,6 +9,7 @@ import com.becalm.android.core.analytics.ProductAnalyticsClient
 import com.becalm.android.core.analytics.ProductAnalyticsEvent
 import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.NoopSourceEventAnchorDao
@@ -16,7 +17,9 @@ import com.becalm.android.data.local.db.dao.SourceEventAnchorDao
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceOriginalContext
 import com.becalm.android.data.repository.SourceOriginalResolver
 import com.becalm.android.data.repository.NoopUserCorrectionRepository
 import com.becalm.android.data.repository.UserCorrectionRepository
@@ -73,6 +76,7 @@ public data class RawEventDetailUiState(
     val extractedCommitments: List<RawEventCommitmentSummary> = emptyList(),
     val emailBody: EmailBodyUi? = null,
     val archivedOriginal: ArchivedOriginalUi? = null,
+    val threadMessages: List<RawEventThreadMessageUi> = emptyList(),
     val attachmentCount: Int = 0,
     val commitmentsExtractedCount: Int = 0,
     val syncStatus: String? = null,
@@ -91,6 +95,14 @@ public data class RawEventCommitmentSummary(
     val direction: String?,
     val status: String?,
     val quote: String,
+)
+
+public data class RawEventThreadMessageUi(
+    val rawEventId: String,
+    val title: String?,
+    val snippet: String?,
+    val timestamp: kotlinx.datetime.Instant,
+    val isCurrent: Boolean,
 )
 
 public data class RawEventParticipantCorrectionRow(
@@ -278,9 +290,10 @@ public class RawEventDetailViewModel @Inject constructor(
                 val commitmentQuotes = projectionPort.loadCommitmentQuotes(userId, entity)
                 val extractedCommitments = projectionPort.loadCommitmentSummaries(userId, entity)
                 val attendeesRaw = projectionPort.loadCalendarAttendeesRaw(userId, entity)
+                val threadMessages = projectionPort.loadThreadMessages(userId, entity)
                 val participantCorrections = projectionPort.loadParticipantCorrections(userId, entity)
                 val participantChoices = projectionPort.loadParticipantCorrectionChoices(userId)
-                val sourceOriginal = sourceOriginalResolver.resolve(
+                val sourceOriginal = resolveSourceOriginalWithEmailBodyRefresh(
                     userId = userId,
                     event = entity,
                     fallbackRawEventIds = sourceEventAnchor?.localRawEventId?.let(::listOf).orEmpty(),
@@ -293,6 +306,7 @@ public class RawEventDetailViewModel @Inject constructor(
                     extractedCommitments = extractedCommitments,
                     attendeesRaw = attendeesRaw,
                 ).copy(
+                    threadMessages = threadMessages,
                     participantCorrections = participantCorrections,
                     participantChoices = participantChoices,
                     correctingParticipantIds = _uiState.value.correctingParticipantIds
@@ -303,6 +317,47 @@ public class RawEventDetailViewModel @Inject constructor(
             _uiState.value = loadedState
             trackHistoricalItemViewed(entity)
         }
+    }
+
+    private suspend fun resolveSourceOriginalWithEmailBodyRefresh(
+        userId: String,
+        event: RawIngestionEventEntity,
+        fallbackRawEventIds: List<String>,
+    ): SourceOriginalContext {
+        val initial = sourceOriginalResolver.resolve(
+            userId = userId,
+            event = event,
+            fallbackRawEventIds = fallbackRawEventIds,
+        )
+        if (!event.shouldRefreshBackendEmailBody(initial)) return initial
+
+        when (
+            val refresh = rawIngestionRepository.refreshSince(
+                userId = userId,
+                sourceType = event.sourceType,
+                since = event.timestamp,
+            )
+        ) {
+            is BecalmResult.Success -> logger.d(
+                TAG,
+                "email body refresh source=${event.sourceType} fetched=${refresh.value.fetched} upserted=${refresh.value.upserted}",
+            )
+            is BecalmResult.Failure -> {
+                logger.w(TAG, "email body refresh failed source=${event.sourceType}: ${refresh.error}")
+                return initial
+            }
+        }
+        return sourceOriginalResolver.resolve(
+            userId = userId,
+            event = event,
+            fallbackRawEventIds = fallbackRawEventIds,
+        )
+    }
+
+    private fun RawIngestionEventEntity.shouldRefreshBackendEmailBody(sourceOriginal: SourceOriginalContext): Boolean {
+        if (sourceType !in BACKEND_MANAGED_EMAIL_SOURCE_TYPES) return false
+        if (sourceOriginal.archivedOriginal != null) return false
+        return sourceOriginal.emailBody?.bodyPlain.isNullOrBlank() && sourceOriginal.emailBody?.bodyHtml.isNullOrBlank()
     }
 
     private fun markCorrectionStarted(participantId: String) {
@@ -355,3 +410,8 @@ public class RawEventDetailViewModel @Inject constructor(
     }
 
 }
+
+private val BACKEND_MANAGED_EMAIL_SOURCE_TYPES = setOf(
+    SourceType.GMAIL,
+    SourceType.OUTLOOK_MAIL,
+)

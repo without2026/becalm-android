@@ -83,6 +83,9 @@ public sealed class BecalmRoute(public val path: String) {
     /** First-run setup step: mail connection. */
     public data object OnboardingSetupEmail : BecalmRoute("onboarding/setup/email")
 
+    /** First-run setup step: final review before scanning connected sources. */
+    public data object OnboardingSetupReadyToStart : BecalmRoute("onboarding/setup/ready")
+
     /** First-run setup step: Gmail activation preview. */
     public data object OnboardingSetupGmailPreview : BecalmRoute("onboarding/setup/gmail-preview")
 

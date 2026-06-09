@@ -123,12 +123,9 @@ class PersonsViewModelSpecTest {
         assertEquals(null, primary.lastInteractionSnippet)
 
         val sections = viewModel.uiState.value.personSections.associateBy { it.kind }
+        assertTrue(sections.getValue(PersonSectionKind.PENDING_COMMITMENTS).people.isEmpty())
         assertEquals(
-            listOf("display@example.com"),
-            sections.getValue(PersonSectionKind.PENDING_COMMITMENTS).people.map { it.personId },
-        )
-        assertEquals(
-            listOf("nick@example.com", "+821012345678"),
+            listOf("display@example.com", "nick@example.com", "+821012345678"),
             sections.getValue(PersonSectionKind.RECENT_CONTACTS).people.map { it.personId },
         )
     }
@@ -159,7 +156,21 @@ class PersonsViewModelSpecTest {
                 topAction = action.copy(
                     id = "act-week",
                     title = "분기 미팅 날짜 제안하기",
+                    dueAt = null,
+                    dueHint = "이번 주",
                     urgencyScore = 25.0,
+                ),
+            ),
+            person(
+                ref = "person-reconnect",
+                displayName = "정민송",
+                topAction = action.copy(
+                    id = "act-reconnect",
+                    title = "정민송 · 마지막 대화 복기",
+                    actionKind = "reconnect_person",
+                    dueAt = null,
+                    dueHint = null,
+                    urgencyScore = 62.0,
                 ),
             ),
             person(ref = "person-recent", displayName = "최근 연락처"),
@@ -187,7 +198,7 @@ class PersonsViewModelSpecTest {
                 .map(PersonRow::personId),
         )
         assertEquals(
-            listOf("person-recent"),
+            listOf("person-reconnect", "person-recent"),
             viewModel.uiState.value.personSections
                 .first { it.kind == PersonSectionKind.RECENT_CONTACTS }
                 .people
@@ -467,6 +478,9 @@ class PersonsViewModelSpecTest {
 
         assertTrue(viewModel.uiState.value.savingMatchEventIds.isEmpty())
         assertEquals(setOf("evt-match"), viewModel.uiState.value.resolvedMatchEventIds)
+        coVerify(exactly = 2) {
+            personActionRepository.refresh(userId = "user-1", surface = "person")
+        }
     }
 
     @Test
@@ -533,6 +547,9 @@ class PersonsViewModelSpecTest {
         assertTrue(viewModel.uiState.value.savingMatchEventIds.isEmpty())
         assertEquals(setOf("evt-not-self"), viewModel.uiState.value.notSelfMatchEventIds)
         assertTrue(viewModel.uiState.value.resolvedMatchEventIds.isEmpty())
+        coVerify(exactly = 2) {
+            personActionRepository.refresh(userId = "user-1", surface = "person")
+        }
     }
 
     @Test

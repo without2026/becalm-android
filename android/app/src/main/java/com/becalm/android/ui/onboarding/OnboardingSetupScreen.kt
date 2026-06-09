@@ -12,11 +12,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +38,9 @@ import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.AuthViewModel
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonSize
+import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmNavigationDefaults
@@ -56,11 +62,11 @@ public fun OnboardingSetupScreen(
     onSkipSource: ((OnboardingSourceProvider) -> Unit)? = null,
     onPersistEmailConsent: (suspend (EmailPipaProvider) -> Boolean)? = null,
     onRefreshSource: ((OnboardingSourceProvider) -> Unit)? = null,
-    onStartGmailActivationPreview: (() -> Unit)? = null,
     onConnectContacts: (() -> Unit)? = null,
     onConnectRecording: (() -> Unit)? = null,
     onIntroNext: (() -> Unit)? = null,
     onIntroBack: (() -> Unit)? = null,
+    onStartSetup: (() -> Unit)? = null,
     onCompleteSetup: (() -> Unit)? = null,
     onNavigateToday: (() -> Unit)? = null,
     authViewModel: AuthViewModel? = null,
@@ -242,6 +248,23 @@ public fun OnboardingSetupScreen(
         transientStates = transientStatesState,
         onConnected = {},
     )
+    val gmailState = if (state.gmailActivationPreview.loading) {
+        SourceConnectionState.Syncing
+    } else {
+        transientStates[OnboardingSourceProvider.GMAIL]
+    } ?: if (state.stepStates[OnboardingStep.LINK_GMAIL] == StepStatus.COMPLETE) {
+            SourceConnectionState.Connected
+        } else {
+            SourceConnectionState.Idle
+        }
+    val calendarState = transientStates[OnboardingSourceProvider.GOOGLE_CALENDAR]
+        ?: SourceConnectionProjector.sourceStateFor(
+            provider = OnboardingSourceProvider.GOOGLE_CALENDAR,
+            stepStates = state.stepStates,
+            transientStates = transientStates,
+            respectStepStates = true,
+        )
+    val contactsState = setupStateFor(state.stepStates[OnboardingStep.CONTACTS_PERM])
     BackHandler {
         resolvedViewModel?.onSetupBackRequested()
     }
@@ -249,10 +272,13 @@ public fun OnboardingSetupScreen(
         title = stringResource(R.string.onb_setup_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         actions = {
-            TextButton(
+            IconButton(
                 onClick = onChangeAccount ?: { requireNotNull(resolvedAuthViewModel).onSignOut() },
             ) {
-                Text(text = stringResource(R.string.action_sign_out))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.Logout,
+                    contentDescription = stringResource(R.string.action_sign_out),
+                )
             }
         },
     ) { padding ->
@@ -263,22 +289,6 @@ public fun OnboardingSetupScreen(
 
         when (displayStage) {
             OnboardingSetupStage.INTRO -> {
-                val gmailState = transientStates[OnboardingSourceProvider.GMAIL]
-                    ?: if (state.gmailActivationPreview.loading) {
-                        SourceConnectionState.Syncing
-                    } else if (state.stepStates[OnboardingStep.LINK_GMAIL] == StepStatus.COMPLETE) {
-                        SourceConnectionState.Connected
-                    } else {
-                        SourceConnectionState.Idle
-                    }
-                val calendarState = transientStates[OnboardingSourceProvider.GOOGLE_CALENDAR]
-                    ?: SourceConnectionProjector.sourceStateFor(
-                        provider = OnboardingSourceProvider.GOOGLE_CALENDAR,
-                        stepStates = state.stepStates,
-                        transientStates = transientStates,
-                        respectStepStates = true,
-                    )
-                val contactsState = setupStateFor(state.stepStates[OnboardingStep.CONTACTS_PERM])
                 OnboardingIntroContent(
                     pageIndex = displayIntroPageIndex,
                     gmailConnectionState = gmailState,
@@ -301,7 +311,7 @@ public fun OnboardingSetupScreen(
                         phoneReadOnly = state.selfPhoneReadOnly,
                         phoneVerified = state.selfPhoneVerified,
                     ),
-                    gmailActivationReturnAvailable = state.gmailActivationPreview.canReturnToActivationPreview(),
+                    gmailActivationReturnAvailable = state.gmailActivationPreview.hasReadyPreview(),
                     onNext = onIntroNext ?: { resolvedViewModel?.onIntroNext(); Unit },
                     onBack = onIntroBack ?: { resolvedViewModel?.onIntroBack(); Unit },
                     onConnectContacts = connectContacts,
@@ -344,14 +354,24 @@ public fun OnboardingSetupScreen(
                 )
             }
 
+            OnboardingSetupStage.READY_TO_START -> {
+                OnboardingReadyToStartContent(
+                    selfIdentityConfirmed = state.selfIdentityConfirmed,
+                    contactsConnectionState = contactsState,
+                    callRecordingConnectionState = state.callRecordingConnectionState,
+                    calendarConnectionState = calendarState,
+                    gmailConnectionState = gmailState,
+                    activationPreviewState = state.gmailActivationPreview,
+                    onStart = onStartSetup ?: { requireNotNull(resolvedViewModel).onStartBeCalmSetup() },
+                    onBack = { resolvedViewModel?.onSetupBackRequested() },
+                    modifier = contentModifier,
+                )
+            }
+
             OnboardingSetupStage.GMAIL_PREVIEW -> {
                 GmailActivationPreviewContent(
                     state = state.gmailActivationPreview,
                     onUsePreview = { requireNotNull(resolvedViewModel).onUseGmailActivationPreview() },
-                    onRetry = { requireNotNull(resolvedViewModel).onRetryGmailActivationPreview() },
-                    onStartWithoutPreview = {
-                        requireNotNull(resolvedViewModel).onStartWithoutGmailActivationPreview()
-                    },
                     onAcceptPreview = { preview ->
                         requireNotNull(resolvedViewModel).onAcceptGmailActivationPreview(preview.actionItemId)
                     },
@@ -368,8 +388,8 @@ public fun OnboardingSetupScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     OnboardingSetupProgress(
-                        currentStep = ONBOARDING_INTRO_PAGE_COUNT,
-                        totalSteps = ONBOARDING_INTRO_PAGE_COUNT,
+                        currentStep = ONBOARDING_READY_STEP_COUNT,
+                        totalSteps = ONBOARDING_READY_STEP_COUNT,
                     )
                     FirstMemoryActivationContent(
                         state = state.firstMemory,
@@ -417,14 +437,20 @@ private fun FirstMemoryExitPrompt(
         title = { Text(text = stringResource(R.string.first_memory_exit_title)) },
         text = { Text(text = stringResource(R.string.first_memory_exit_body)) },
         confirmButton = {
-            TextButton(onClick = onKeep) {
-                Text(text = stringResource(R.string.first_memory_exit_keep))
-            }
+            BecalmButton(
+                text = stringResource(R.string.first_memory_exit_keep),
+                onClick = onKeep,
+                variant = BecalmButtonVariant.Primary,
+                size = BecalmButtonSize.Compact,
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDiscard) {
-                Text(text = stringResource(R.string.first_memory_exit_discard))
-            }
+            BecalmButton(
+                text = stringResource(R.string.first_memory_exit_discard),
+                onClick = onDiscard,
+                variant = BecalmButtonVariant.DestructiveTertiary,
+                size = BecalmButtonSize.Compact,
+            )
         },
     )
 }

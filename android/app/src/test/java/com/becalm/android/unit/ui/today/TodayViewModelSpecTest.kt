@@ -39,6 +39,7 @@ import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.ui.actions.PersonActionFeedStatusKind
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.main.OverallSyncState
@@ -56,7 +57,9 @@ import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
@@ -96,6 +99,7 @@ class TodayViewModelSpecTest {
     private val personActionRepository: PersonActionRepository = mockk(relaxed = true)
     private val authRepository: AuthRepository = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
     private val createdViewModels = mutableListOf<TodayViewModel>()
@@ -115,6 +119,7 @@ class TodayViewModelSpecTest {
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { scheduleEventLinkRepository.observeForTodayRange(any(), any(), any(), any(), any()) } returns flowOf(emptyList())
         every { userPrefsStore.observeProcessingPaused() } returns flowOf(false)
+        every { userPrefsStore.observeDisabledCommitmentReminderIds() } returns flowOf(emptySet())
         every { userPrefsStore.observeCalendarWriteJobSnapshots() } returns flowOf(emptyList())
         every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
         every { personActionRepository.observeActiveForSurface(any(), any(), any()) } returns flowOf(emptyList())
@@ -613,7 +618,7 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `TDY-004 schedule commitments stay room-backed and query the upcoming range`() = runTest {
+    fun `TDY-004 schedule commitments stay room-backed and query the default week range`() = runTest {
         val commitmentsFlow = MutableStateFlow<List<TodayCommitmentRow>>(emptyList())
         val dayStartEpochMs = slot<Long>()
         val dayEndEpochMs = slot<Long>()
@@ -639,7 +644,7 @@ class TodayViewModelSpecTest {
                 dayStartEpochMs.captured,
             )
             assertEquals(
-                Instant.parse("2026-04-24T15:00:00Z").toEpochMilliseconds() - 1L,
+                Instant.parse("2026-04-19T15:00:00Z").toEpochMilliseconds() - 1L,
                 dayEndEpochMs.captured,
             )
 
@@ -667,7 +672,7 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `TDY-005 calendar stays room-backed and queries the upcoming schedule window`() = runTest {
+    fun `TDY-005 calendar stays room-backed and queries the default week window`() = runTest {
         val calendarFlow = MutableStateFlow<List<CalendarEventEntity>>(emptyList())
         val todayStart = slot<Instant>()
         val todayEnd = slot<Instant>()
@@ -691,7 +696,7 @@ class TodayViewModelSpecTest {
             assertTrue(emission.timeline.isEmpty())
             assertEquals(Instant.parse("2026-04-17T15:00:00Z"), todayStart.captured)
             assertEquals(
-                Instant.parse("2026-04-24T15:00:00Z").toEpochMilliseconds(),
+                Instant.parse("2026-04-19T15:00:00Z").toEpochMilliseconds(),
                 todayEnd.captured.toEpochMilliseconds(),
             )
 
@@ -716,7 +721,7 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `schedule range defaults to next seven days and can switch to today`() = runTest {
+    fun `schedule range defaults to this week and can switch to today`() = runTest {
         val startBounds = mutableListOf<Long>()
         val endBounds = mutableListOf<Long>()
         coEvery { authRepository.currentSession() } returns session()
@@ -738,10 +743,10 @@ class TodayViewModelSpecTest {
         viewModel.state.test {
             var emission = awaitItem()
             while (emission.loading) emission = awaitItem()
-            assertEquals(ScheduleRangeFilter.NEXT_7_DAYS, emission.scheduleRangeFilter)
+            assertEquals(ScheduleRangeFilter.THIS_WEEK, emission.scheduleRangeFilter)
             assertEquals(Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds(), startBounds.last())
             assertEquals(
-                Instant.parse("2026-04-24T15:00:00Z").toEpochMilliseconds() - 1L,
+                Instant.parse("2026-04-19T15:00:00Z").toEpochMilliseconds() - 1L,
                 endBounds.last(),
             )
 
@@ -1277,6 +1282,75 @@ class TodayViewModelSpecTest {
     }
 
     @Test
+    fun `schedule add to calendar action strips awkward candidate-confirm suffix`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { personActionRepository.observeActiveForSurface(any(), any(), any()) } returns flowOf(
+            listOf(
+                scheduleActionEntity(
+                    title = "5/7 목 코엑스 근처에서 만남 후보 확인",
+                    primaryVerb = "후보 확인",
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading || emission.scheduleActions.isEmpty()) {
+                emission = awaitItem()
+            }
+
+            val action = emission.scheduleActions.single()
+            assertEquals("5/7 목 코엑스 근처에서 만남", action.title)
+            assertEquals("캘린더에 추가", action.primaryVerb)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `schedule action evidence falls back to cached quote when remote original lookup fails`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { personActionRepository.observeActiveForSurface(any(), any(), any()) } returns flowOf(
+            listOf(scheduleActionEntity(primaryEvidenceQuote = "목요일 오후에 코엑스 근처에서 볼까요?")),
+        )
+        coEvery {
+            personActionRepository.fetchEvidenceOriginal(
+                userId = "user-1",
+                actionItemId = "pa-schedule-1",
+                evidenceKind = "schedule_link",
+                evidenceId = "schedule-link-1",
+            )
+        } returns BecalmResult.Failure(BecalmError.Network(404, "missing evidence"))
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading || emission.scheduleActions.isEmpty()) {
+                emission = awaitItem()
+            }
+
+            viewModel.onOpenScheduleActionEvidence(
+                actionItemId = "pa-schedule-1",
+                evidenceKind = "schedule_link",
+                evidenceId = "schedule-link-1",
+            )
+            advanceUntilIdle()
+
+            while (emission.evidenceDetail == null) {
+                emission = awaitItem()
+            }
+            val detail = requireNotNull(emission.evidenceDetail)
+            assertEquals("목요일 오후에 코엑스 근처에서 볼까요?", detail.whyText)
+            assertEquals("메일 일정 후보", detail.evidenceLabel)
+            assertEquals(false, detail.originalIsLocal)
+            assertTrue(detail.metadataText.orEmpty().contains("코엑스"))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `schedule action completion patches backend action and refreshes schedule feed`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         coEvery {
@@ -1664,6 +1738,67 @@ class TodayViewModelSpecTest {
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
     }
 
+    @Test
+    fun `schedule reminder toggle off stores opt-out and cancels local notification`() = runTest {
+        val dueAt = Instant.parse("2026-04-18T12:00:00Z")
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "schedule-reminder-1",
+                    occurredAt = Instant.parse("2026-04-18T09:00:00Z"),
+                    counterpartyRef = null,
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    dueAt = dueAt,
+                ),
+            ),
+        )
+        coEvery { userPrefsStore.setCommitmentReminderDisabled("schedule-reminder-1", true) } just runs
+        every { reminderScheduler.cancel("schedule-reminder-1") } just runs
+
+        val viewModel = buildViewModel()
+        viewModel.state.test {
+            awaitItem()
+            var emission = awaitItem()
+            while (emission.timeline.isEmpty()) {
+                emission = awaitItem()
+            }
+
+            viewModel.onToggleScheduleReminder("schedule-reminder-1", enabled = false)
+            advanceUntilIdle()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) { userPrefsStore.setCommitmentReminderDisabled("schedule-reminder-1", true) }
+        verify(exactly = 1) { reminderScheduler.cancel("schedule-reminder-1") }
+    }
+
+    @Test
+    fun `schedule reminder time setting schedules exact user selected notification time`() = runTest {
+        val triggerAt = Instant.parse("2026-04-18T01:00:00Z")
+        coEvery { userPrefsStore.setCommitmentReminderDisabled("schedule-date-only-1", false) } just runs
+        coEvery { reminderScheduler.scheduleAt("schedule-date-only-1", triggerAt) } just runs
+
+        val viewModel = buildViewModel()
+        viewModel.state.test {
+            awaitItem()
+            viewModel.onSetScheduleReminderAt("schedule-date-only-1", triggerAt)
+            advanceUntilIdle()
+
+            var emission = awaitItem()
+            while ("schedule-date-only-1" !in emission.customReminderIds) {
+                emission = awaitItem()
+            }
+            assertEquals(com.becalm.android.R.string.commitment_action_reminder_on, emission.message?.resId)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) { userPrefsStore.setCommitmentReminderDisabled("schedule-date-only-1", false) }
+        coVerify(exactly = 1) { reminderScheduler.scheduleAt("schedule-date-only-1", triggerAt) }
+    }
+
     private fun buildViewModel(
         personActionRepository: PersonActionRepository = this.personActionRepository,
     ): TodayViewModel = TodayViewModel(
@@ -1678,6 +1813,7 @@ class TodayViewModelSpecTest {
         processingStatusRepository = processingStatusRepository,
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
+        reminderScheduler = reminderScheduler,
         foregroundCatchUpScheduler = foregroundCatchUpScheduler,
         clock = clock,
         logger = logger,
@@ -1816,7 +1952,12 @@ class TodayViewModelSpecTest {
         syncStatus = "synced",
     )
 
-    private fun scheduleActionEntity(providerWriteReady: Boolean = false): PersonActionItemCacheEntity =
+    private fun scheduleActionEntity(
+        providerWriteReady: Boolean = false,
+        title: String = "Jane Kim calendar candidate",
+        primaryVerb: String = "후보 확인",
+        primaryEvidenceQuote: String? = null,
+    ): PersonActionItemCacheEntity =
         PersonActionItemCacheEntity(
             id = "pa-schedule-1",
             userId = "user-1",
@@ -1826,8 +1967,8 @@ class TodayViewModelSpecTest {
             surfacesCsv = "schedule,person",
             actionKind = "add_to_calendar",
             status = "active",
-            title = "Jane Kim calendar candidate",
-            primaryVerb = "후보 확인",
+            title = title,
+            primaryVerb = primaryVerb,
             shortReason = "메일에는 있는데 캘린더에는 없습니다.",
             commitmentId = "commitment-1",
             calendarEventId = null,
@@ -1854,7 +1995,7 @@ class TodayViewModelSpecTest {
             primaryEvidenceSourceRef = "gmail-msg-1",
             primaryEvidenceOccurredAt = null,
             primaryEvidenceLabel = "메일 일정 후보",
-            primaryEvidenceQuote = null,
+            primaryEvidenceQuote = primaryEvidenceQuote,
             providerWriteKind = if (providerWriteReady) "add_to_calendar" else null,
             providerWriteState = if (providerWriteReady) "ready" else null,
             providerWriteProvider = if (providerWriteReady) "google_calendar" else null,

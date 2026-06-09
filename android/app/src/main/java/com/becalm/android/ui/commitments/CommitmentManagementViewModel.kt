@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import javax.inject.Inject
 
 // ─── Filter ───────────────────────────────────────────────────────────────────
@@ -259,6 +260,7 @@ public data class CommitmentUiState(
     val pastSection: CommitmentSectionUiState = CommitmentSectionUiState(expanded = false, dimmed = true),
     val completedSection: CommitmentSectionUiState = CommitmentSectionUiState(),
     val cancelledSection: CommitmentSectionUiState = CommitmentSectionUiState(),
+    val today: LocalDate? = null,
     val filter: CommitmentFilter = CommitmentFilter.ALL,
     val loading: Boolean = true,
     val refreshing: Boolean = false,
@@ -796,6 +798,7 @@ public class CommitmentManagementViewModel @Inject constructor(
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
             scheduleEventLinkRepository = scheduleEventLinkRepository,
+            personActionRepository = personActionRepository,
             userCorrectionRepository = userCorrectionRepository,
             workScheduler = workScheduler,
             logger = logger,

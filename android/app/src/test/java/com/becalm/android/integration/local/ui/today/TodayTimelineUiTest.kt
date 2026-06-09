@@ -7,18 +7,20 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.actions.PersonActionFeedStatusKind
@@ -188,14 +190,45 @@ class TodayTimelineUiTest {
         composeRule.onNodeWithTag("schedule-action-feed-statusline").assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.persons_action_feed_status_quota), substring = true)
             .assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-diffbar").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.schedule_diff_missing_count_title)).assertIsDisplayed()
         composeRule.onNodeWithTag("schedule-action-panel").assertIsDisplayed()
         composeRule.onNodeWithTag("schedule-action-pa-cached").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.schedule_action_missing_section)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.schedule_action_missing_tag)).assertIsDisplayed()
         composeRule.onNodeWithText("캘린더에 없는 미팅 후보").assertIsDisplayed()
         composeRule.onNodeWithTag("schedule-action-feed-statusline-action").performClick()
 
         composeRule.runOnIdle {
             assertEquals(1, processingStatusClicks)
         }
+    }
+
+    @Test
+    fun `schedule action panel renders every missing calendar action`() {
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        scheduleActions = (1..4).map { index ->
+                            scheduleAction(
+                                id = "pa-missing-$index",
+                                title = "캘린더에 빠진 일정 $index",
+                                reason = "메일에는 약속이 있지만 캘린더에는 없습니다.",
+                            )
+                        },
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("schedule-action-panel").assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-timeline-list")
+            .performScrollToNode(hasText("캘린더에 빠진 일정 4"))
+        composeRule.onNodeWithText("캘린더에 빠진 일정 4").assertExists()
     }
 
     @Test
@@ -232,9 +265,117 @@ class TodayTimelineUiTest {
         }
 
         composeRule.onNodeWithTag("schedule-action-panel").assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-diffbar").assertIsDisplayed()
         composeRule.onNodeWithText("김도현 대표 계약서 회신 마감").assertIsDisplayed()
-        composeRule.onAllNodes(hasScrollAction())[1].performScrollToNode(hasText("투자자 미팅"))
+        composeRule.onAllNodesWithText(string(R.string.schedule_action_open_detail)).assertCountEquals(0)
+        composeRule.onNodeWithTag("schedule-timeline-list").assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-timeline-list").performScrollToNode(hasText("투자자 미팅"))
         composeRule.onNodeWithText("투자자 미팅").assertExists()
+    }
+
+    @Test
+    fun `schedule row exposes reminder icon toggle for eligible confirmed commitments`() {
+        var toggleRequest: Pair<String, Boolean>? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        today = kotlinx.datetime.LocalDate(2026, 6, 9),
+                        timeline = listOf(
+                            TimelineItem.Commitment(
+                                id = "schedule-reminder-1",
+                                itemType = CommitmentItemType.SCHEDULE,
+                                title = "오후 미팅",
+                                direction = null,
+                                scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                                rowTreatment = com.becalm.android.ui.today.TodayCommitmentRowTreatment.SCHEDULE,
+                                counterpartyDisplayName = null,
+                                sourceType = SourceType.GMAIL,
+                                sourceTitle = "미팅 조율",
+                                quote = null,
+                                dueAt = Instant.parse("2026-06-09T06:00:00Z"),
+                                dueIsApproximate = false,
+                                dueHint = null,
+                                sortKey = Instant.parse("2026-06-09T06:00:00Z"),
+                                timelineAt = Instant.parse("2026-06-09T06:00:00Z"),
+                                isTimed = true,
+                            ),
+                        ),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onToggleScheduleReminder = { id, enabled ->
+                        toggleRequest = id to enabled
+                    },
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule
+            .onNodeWithContentDescription(string(R.string.schedule_row_reminder_on_action))
+            .assertIsDisplayed()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("schedule-reminder-1" to false, toggleRequest)
+        }
+    }
+
+    @Test
+    fun `date only schedule row opens reminder time sheet and saves selected notification time`() {
+        var reminderRequest: Pair<String, Instant>? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                TodayTimelineContent(
+                    state = TodayUiState(
+                        loading = false,
+                        today = kotlinx.datetime.LocalDate(2026, 6, 9),
+                        timeline = listOf(
+                            TimelineItem.Commitment(
+                                id = "schedule-date-only-1",
+                                itemType = CommitmentItemType.SCHEDULE,
+                                title = "금요일 미팅",
+                                direction = null,
+                                scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                                rowTreatment = com.becalm.android.ui.today.TodayCommitmentRowTreatment.SCHEDULE,
+                                counterpartyDisplayName = null,
+                                sourceType = SourceType.GMAIL,
+                                sourceTitle = "미팅 조율",
+                                quote = null,
+                                dueAt = Instant.parse("2026-06-11T15:00:00Z"),
+                                dueIsApproximate = true,
+                                dueHint = "6/12",
+                                sortKey = Instant.parse("2026-06-11T15:00:00Z"),
+                                timelineAt = null,
+                                isTimed = false,
+                            ),
+                        ),
+                    ),
+                    onOpenSettings = {},
+                    onPullRefresh = {},
+                    onSetScheduleReminderAt = { id, triggerAt ->
+                        reminderRequest = id to triggerAt
+                    },
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule
+            .onNodeWithContentDescription(string(R.string.schedule_row_reminder_time_action))
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithTag("schedule-reminder-time-sheet").assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-reminder-time-chip-09-00").performClick()
+        composeRule.onNodeWithTag("schedule-reminder-time-save").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("schedule-date-only-1" to Instant.parse("2026-06-12T00:00:00Z"), reminderRequest)
+        }
     }
 
     @Test
@@ -401,8 +542,11 @@ class TodayTimelineUiTest {
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.today_empty_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.today_empty_message)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.schedule_section_today)).assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.schedule_section_empty)).onFirst().assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-timeline-list")
+            .performScrollToNode(hasText(string(R.string.schedule_section_this_week)))
+        composeRule.onAllNodesWithText(string(R.string.schedule_section_this_week)).onFirst().assertIsDisplayed()
         composeRule.onNodeWithTag("evidence-import-fab").performClick()
         composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
         composeRule.waitForIdle()
@@ -611,6 +755,7 @@ class TodayTimelineUiTest {
         id: String,
         title: String,
         reason: String,
+        primaryVerb: String = string(R.string.schedule_action_add_to_calendar),
     ): com.becalm.android.ui.actions.PersonActionItemUi =
         com.becalm.android.ui.actions.PersonActionItemUi(
             id = id,
@@ -618,7 +763,7 @@ class TodayTimelineUiTest {
             personDisplayName = "김민홍",
             actionKind = "add_to_calendar",
             title = title,
-            primaryVerb = string(R.string.schedule_action_add_to_calendar),
+            primaryVerb = primaryVerb,
             shortReason = reason,
             commitmentId = "commitment-$id",
             calendarEventId = null,

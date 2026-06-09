@@ -11,6 +11,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -39,6 +40,7 @@ import com.becalm.android.ui.persons.ManualMemorySyncStatusKind
 import com.becalm.android.ui.persons.ManualMemorySyncStatusUi
 import com.becalm.android.ui.persons.SourceEventCardProjection
 import com.becalm.android.ui.persons.SourceEventCardRow
+import com.becalm.android.ui.persons.PersonTimelineThreadEvent
 import com.becalm.android.ui.persons.UnassignedEventSummary
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.main.MainTabHeaderState
@@ -62,7 +64,9 @@ class PersonsUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun `persons screen shows offline badge unassigned section and enriched row meta`() {
+    fun `persons screen shows offline badge matching summary and enriched row meta`() {
+        var matchingClicks = 0
+
         composeRule.setContent {
             BecalmTheme {
                 PersonsScreenContent(
@@ -94,11 +98,11 @@ class PersonsUiTest {
                     snackbarHostState = SnackbarHostState(),
                     onQueryChange = {},
                     onPersonClick = {},
+                    onOpenUnassigned = { matchingClicks += 1 },
                 )
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.person_matching_required_banner_title)).assertExists()
         composeRule.onNodeWithText(string(R.string.persons_offline_badge_no_sync)).assertIsDisplayed()
         composeRule.onNodeWithTag("persons-list")
             .performScrollToNode(hasText("김철수", substring = true))
@@ -107,11 +111,16 @@ class PersonsUiTest {
         composeRule.onNodeWithText(string(R.string.persons_pending_commitments_fmt, 2), substring = true).assertExists()
         composeRule.onNodeWithText("계약서 검토 요청", substring = true).assertExists()
         composeRule.onNodeWithTag("persons-list")
-            .performScrollToNode(hasText(string(R.string.persons_unassigned_title)))
-        composeRule.onNodeWithText(string(R.string.persons_unassigned_title)).assertExists()
-        composeRule.onNodeWithTag("persons-list")
-            .performScrollToNode(hasText("미분류 이벤트"))
-        composeRule.onNodeWithText("미분류 이벤트").assertExists()
+            .performScrollToNode(hasTestTag("persons-matching-queue-summary"))
+        composeRule.onNodeWithTag("persons-matching-queue-summary").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_matching_queue_title_fmt, 1)).assertExists()
+        composeRule.onNodeWithText(string(R.string.person_matching_queue_action)).assertExists()
+        composeRule.onAllNodesWithText("미분류 이벤트").assertCountEquals(0)
+
+        composeRule.onNodeWithTag("persons-matching-queue-summary").performClick()
+        composeRule.runOnIdle {
+            assertEquals(1, matchingClicks)
+        }
     }
 
     @Test
@@ -475,7 +484,7 @@ class PersonsUiTest {
     }
 
     @Test
-    fun `persons screen keeps matching source and processing warnings compact above action rows`() {
+    fun `persons screen keeps matching queue source and processing warnings compact around action rows`() {
         var matchingClicks = 0
         var openedSource: String? = null
 
@@ -533,11 +542,11 @@ class PersonsUiTest {
             }
         }
 
-        composeRule.onNodeWithTag("persons-matching-required-statusline").assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.person_matching_required_status_prefix_fmt, 1), substring = true)
-            .assertIsDisplayed()
-        composeRule.onAllNodesWithText(string(R.string.person_matching_required_banner_title))
-            .assertCountEquals(0)
+        composeRule.onAllNodesWithTag("persons-matching-required-statusline").assertCountEquals(0)
+        composeRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasTestTag("persons-matching-queue-summary"))
+        composeRule.onNodeWithTag("persons-matching-queue-summary").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_matching_queue_title_fmt, 1)).assertIsDisplayed()
         composeRule.onNodeWithTag("persons-source-statusline-${SourceType.GMAIL}").assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.persons_action_feed_status_degraded_compact), substring = true)
             .assertIsDisplayed()
@@ -545,7 +554,7 @@ class PersonsUiTest {
         composeRule.onAllNodesWithTag("evidence-import-fab")
             .assertCountEquals(0)
 
-        composeRule.onNodeWithTag("persons-matching-required-status-action").performClick()
+        composeRule.onNodeWithTag("persons-matching-queue-summary").performClick()
         composeRule.onNodeWithTag("persons-source-reconnect-${SourceType.GMAIL}").performClick()
 
         composeRule.runOnIdle {
@@ -689,8 +698,11 @@ class PersonsUiTest {
         composeRule.onNodeWithText(string(R.string.person_detail_timeline_section_fmt, 2)).assertIsDisplayed()
         composeRule.onNodeWithTag("person-detail-list")
             .performScrollToNode(hasText("콜 녹음"))
-        composeRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 1)).assertExists()
-        composeRule.onAllNodesWithText("제안서 보내기").assertCountEquals(0)
+        composeRule.onNodeWithText(
+            string(R.string.person_detail_timeline_tag_give_fmt, 1) +
+                " · " +
+                string(R.string.person_detail_timeline_tag_take_fmt, 1),
+        ).assertExists()
         composeRule.onAllNodesWithText("완료된 약속").assertCountEquals(0)
     }
 
@@ -841,10 +853,10 @@ class PersonsUiTest {
         }
 
         composeRule.onNodeWithTag("person-detail-list")
-            .performScrollToNode(hasText(string(R.string.person_detail_next_action_email_reply)))
+            .performScrollToNode(hasText("자료 확인 요청에 답장"))
         composeRule.onNodeWithTag("person-detail-next-action-panel").assertIsDisplayed()
         composeRule.onAllNodesWithTag("person-detail-relationship-recall").assertCountEquals(0)
-        composeRule.onAllNodesWithText(string(R.string.person_detail_next_action_email_reply)).assertCountEquals(1)
+        composeRule.onAllNodesWithText("자료 확인 요청에 답장").assertCountEquals(1)
         composeRule.onNodeWithTag("person-detail-action-pa-reply").performClick()
 
         composeRule.runOnIdle {
@@ -1027,12 +1039,62 @@ class PersonsUiTest {
             }
         }
 
-        composeRule.onAllNodesWithText(string(R.string.raw_event_commitments_extracted, 1)).assertCountEquals(2)
+        composeRule.onNodeWithText(string(R.string.person_detail_timeline_tag_give_fmt, 1)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_detail_timeline_tag_schedule_fmt, 1)).assertIsDisplayed()
         composeRule.onAllNodesWithText(string(R.string.person_detail_bucket_my_actions)).assertCountEquals(0)
         composeRule.onAllNodesWithText(string(R.string.commitment_item_type_schedule)).assertCountEquals(0)
         composeRule.onAllNodesWithText("give").assertCountEquals(0)
         composeRule.onAllNodesWithText("pending").assertCountEquals(0)
         composeRule.onAllNodesWithText("confirmed").assertCountEquals(0)
+    }
+
+    @Test
+    fun `source event card expands email thread messages`() {
+        var tappedEventId: String? = null
+        composeRule.setContent {
+            BecalmTheme {
+                var expanded by remember { mutableStateOf(false) }
+                SourceEventCardRow(
+                    card = SourceEventCardProjection(
+                        sourceEventKey = "thread:gmail:thread-1",
+                        sourceType = SourceType.GMAIL,
+                        rawEventId = "raw-mail-2",
+                        occurredAt = Instant.parse("2026-04-24T02:00:00Z"),
+                        title = "Re: 계약서 확인",
+                        snippet = "두 번째 메일",
+                        isEmailThread = true,
+                        threadMessageCount = 2,
+                        threadEvents = listOf(
+                            PersonTimelineThreadEvent(
+                                rawEventId = "raw-mail-1",
+                                sourceType = SourceType.GMAIL,
+                                occurredAt = Instant.parse("2026-04-24T01:00:00Z"),
+                                title = "계약서 확인",
+                                snippet = "첫 번째 메일",
+                            ),
+                            PersonTimelineThreadEvent(
+                                rawEventId = "raw-mail-2",
+                                sourceType = SourceType.GMAIL,
+                                occurredAt = Instant.parse("2026-04-24T02:00:00Z"),
+                                title = "Re: 계약서 확인",
+                                snippet = "두 번째 메일",
+                            ),
+                        ),
+                    ),
+                    onEventTap = { tappedEventId = it },
+                    expanded = expanded,
+                    onThreadToggle = { expanded = !expanded },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.person_detail_mail_thread_expand_fmt, 2)).performClick()
+        composeRule.onNodeWithText("계약서 확인").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_detail_mail_thread_current)).assertIsDisplayed()
+        composeRule.onNodeWithTag("person-detail-thread-event-raw-mail-1").performClick()
+        assertEquals("raw-mail-1", tappedEventId)
+        composeRule.onNodeWithTag("person-detail-thread-event-raw-mail-2").performClick()
+        assertEquals("raw-mail-2", tappedEventId)
     }
 
     private fun string(resId: Int, vararg args: Any): String =

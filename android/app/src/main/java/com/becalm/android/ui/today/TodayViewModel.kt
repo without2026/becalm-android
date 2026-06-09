@@ -9,7 +9,9 @@ import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.CalendarWriteJobPrefsSnapshot
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarWriteJobStatus
 import com.becalm.android.data.repository.CalendarEventRepository
@@ -23,9 +25,12 @@ import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.PersonActionRefreshStats
 import com.becalm.android.data.repository.ScheduleRowTombstoneRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
+import com.becalm.android.data.repository.SourceOriginalContext
+import com.becalm.android.data.repository.SourceOriginalResolver
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.UserCorrectionRepository
+import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.ui.actions.PersonActionEvidenceDetailUi
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.actions.PersonActionFeedStatusUi
@@ -58,6 +63,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -259,7 +265,7 @@ public data class TodayUiState(
     val loading: Boolean = true,
     val timeline: List<TimelineItem> = emptyList(),
     val personFocus: List<TodayPersonFocus> = buildTodayPersonFocus(timeline),
-    val scheduleRangeFilter: ScheduleRangeFilter = ScheduleRangeFilter.NEXT_7_DAYS,
+    val scheduleRangeFilter: ScheduleRangeFilter = ScheduleRangeFilter.THIS_WEEK,
     val today: LocalDate? = null,
     val scheduleActions: List<PersonActionItemUi> = emptyList(),
     val scheduleActionFeedStatus: PersonActionFeedStatusUi? = null,
@@ -275,6 +281,8 @@ public data class TodayUiState(
     val scheduleConflictReviewItems: List<ScheduleConflictReviewItem> = emptyList(),
     val processingPaused: Boolean = false,
     val deletingRows: Set<ScheduleRowRef> = emptySet(),
+    val disabledReminderIds: Set<String> = emptySet(),
+    val customReminderIds: Set<String> = emptySet(),
     val refreshing: Boolean = false,
     val message: UiMessage? = null,
     val error: UiMessage? = null,
@@ -300,6 +308,8 @@ private data class TodayEvidenceState(
 private data class TodayScheduleTransientState(
     val deletingRows: Set<ScheduleRowRef>,
     val calendarWriteJobs: List<CalendarWriteJobUi>,
+    val disabledReminderIds: Set<String>,
+    val customReminderIds: Set<String>,
 )
 
 /**
@@ -331,11 +341,14 @@ public class TodayViewModel @Inject constructor(
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository,
     private val userCorrectionRepository: UserCorrectionRepository = NoopUserCorrectionRepository,
     private val personActionRepository: PersonActionRepository = NoopPersonActionRepository,
+    private val rawIngestionEventDao: RawIngestionEventDao? = null,
+    private val sourceOriginalResolver: SourceOriginalResolver? = null,
     private val workScheduler: WorkScheduler,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
     private val authRepository: AuthRepository,
     private val userPrefsStore: UserPrefsStore,
+    private val reminderScheduler: ReminderScheduler,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
     clock: Clock,
     private val logger: Logger,
@@ -367,7 +380,7 @@ public class TodayViewModel @Inject constructor(
     private val refreshingFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private val refreshMessageFlow: MutableStateFlow<UiMessage?> = MutableStateFlow(null)
     private val scheduleRangeFilterFlow: MutableStateFlow<ScheduleRangeFilter> =
-        MutableStateFlow(ScheduleRangeFilter.NEXT_7_DAYS)
+        MutableStateFlow(ScheduleRangeFilter.THIS_WEEK)
     private val evidenceDetailFlow: MutableStateFlow<PersonActionEvidenceDetailUi?> = MutableStateFlow(null)
     private val loadingEvidenceActionIdFlow: MutableStateFlow<String?> = MutableStateFlow(null)
     private val loadingScheduleActionIdFlow: MutableStateFlow<String?> = MutableStateFlow(null)
@@ -388,14 +401,19 @@ public class TodayViewModel @Inject constructor(
     private val dismissedProcessingKeyFlow: MutableStateFlow<String?> = MutableStateFlow(null)
     private val deletingRowsFlow: MutableStateFlow<Set<ScheduleRowRef>> = MutableStateFlow(emptySet())
     private val calendarWriteJobsFlow: MutableStateFlow<List<CalendarWriteJobUi>> = MutableStateFlow(emptyList())
+    private val customScheduleReminderIdsFlow: MutableStateFlow<Set<String>> = MutableStateFlow(emptySet())
     private val calendarWritePollingJobs: MutableMap<String, Job> = mutableMapOf()
     private val scheduleTransientFlow = combine(
         deletingRowsFlow,
         calendarWriteJobsFlow,
-    ) { deletingRows, calendarWriteJobs ->
+        userPrefsStore.observeDisabledCommitmentReminderIds(),
+        customScheduleReminderIdsFlow,
+    ) { deletingRows, calendarWriteJobs, disabledReminderIds, customReminderIds ->
         TodayScheduleTransientState(
             deletingRows = deletingRows,
             calendarWriteJobs = calendarWriteJobs,
+            disabledReminderIds = disabledReminderIds,
+            customReminderIds = customReminderIds,
         )
     }
 
@@ -440,6 +458,8 @@ public class TodayViewModel @Inject constructor(
             loadingScheduleDismissActionId = evidenceState.loadingScheduleDismissActionId,
             deletingRows = scheduleTransient.deletingRows,
             calendarWriteJobs = scheduleTransient.calendarWriteJobs,
+            disabledReminderIds = scheduleTransient.disabledReminderIds,
+            customReminderIds = scheduleTransient.customReminderIds,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -456,7 +476,7 @@ public class TodayViewModel @Inject constructor(
         evidenceKind: String?,
         evidenceId: String?,
     ) {
-        if (actionItemId.isBlank() || evidenceKind.isNullOrBlank() || evidenceId.isNullOrBlank()) {
+        if (actionItemId.isBlank()) {
             refreshMessageFlow.value = UiMessage.resource(R.string.commitments_error_evidence_failed)
             return
         }
@@ -468,23 +488,36 @@ public class TodayViewModel @Inject constructor(
             }
             loadingEvidenceActionIdFlow.value = actionItemId
             refreshMessageFlow.value = null
-            when (
-                val result = personActionRepository.fetchEvidenceOriginal(
-                    userId = userId,
-                    actionItemId = actionItemId,
-                    evidenceKind = evidenceKind,
-                    evidenceId = evidenceId,
-                )
-            ) {
-                is BecalmResult.Success -> {
-                    evidenceDetailFlow.value = result.value.toPersonActionEvidenceDetailUi()
+            val action = state.value.scheduleActions.firstOrNull { it.id == actionItemId }
+            try {
+                val result = if (!evidenceKind.isNullOrBlank() && !evidenceId.isNullOrBlank()) {
+                    personActionRepository.fetchEvidenceOriginal(
+                        userId = userId,
+                        actionItemId = actionItemId,
+                        evidenceKind = evidenceKind,
+                        evidenceId = evidenceId,
+                    )
+                } else {
+                    null
                 }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "schedule action evidence failed id=${hashId(actionItemId)}: ${result.error}")
+
+                if (result is BecalmResult.Success) {
+                    evidenceDetailFlow.value = result.value.toPersonActionEvidenceDetailUi()
+                    return@launch
+                }
+                if (result is BecalmResult.Failure) {
+                    logger.w(TAG, "schedule action evidence remote lookup failed id=${hashId(actionItemId)}: ${result.error}")
+                }
+
+                val fallback = buildScheduleActionEvidenceFallback(userId = userId, action = action)
+                if (fallback != null) {
+                    evidenceDetailFlow.value = fallback
+                } else {
                     refreshMessageFlow.value = UiMessage.resource(R.string.commitments_error_evidence_failed)
                 }
+            } finally {
+                loadingEvidenceActionIdFlow.value = null
             }
-            loadingEvidenceActionIdFlow.value = null
         }
     }
 
@@ -946,6 +979,7 @@ public class TodayViewModel @Inject constructor(
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
             scheduleEventLinkRepository = scheduleEventLinkRepository,
+            personActionRepository = personActionRepository,
             userCorrectionRepository = userCorrectionRepository,
             workScheduler = workScheduler,
             logger = logger,
@@ -960,6 +994,86 @@ public class TodayViewModel @Inject constructor(
             }
         }
     }
+
+    private suspend fun buildScheduleActionEvidenceFallback(
+        userId: String,
+        action: PersonActionItemUi?,
+    ): PersonActionEvidenceDetailUi? {
+        if (action == null) return null
+        val rawEvent = resolveScheduleActionRawEvent(userId = userId, action = action)
+        val original = rawEvent?.let { event ->
+            runCatching {
+                sourceOriginalResolver?.resolve(userId = userId, event = event)
+            }
+                .onFailure { logger.w(TAG, "schedule action local original fallback failed id=${hashId(action.id)}", it) }
+                .getOrNull()
+        }
+        val localOriginalText = original?.toDisplayText()
+        val metadataText = listOfNotNull(
+            action.evidence?.quote?.takeIf { it.isNotBlank() },
+            rawEvent?.eventSnippet?.takeIf { it.isNotBlank() },
+            action.shortReason.takeIf { it.isNotBlank() },
+            rawEvent?.eventTitle?.takeIf { it.isNotBlank() },
+        )
+            .distinct()
+            .joinToString("\n\n")
+            .takeIf { it.isNotBlank() }
+        val why = action.evidence?.quote?.takeIf { it.isNotBlank() }
+            ?: action.shortReason.takeIf { it.isNotBlank() }
+            ?: action.title
+        val originalText = localOriginalText ?: metadataText ?: why
+        if (originalText.isBlank() && why.isBlank()) return null
+        return PersonActionEvidenceDetailUi(
+            actionItemId = action.id,
+            evidenceLabel = action.evidence?.label?.takeIf { it.isNotBlank() }
+                ?: rawEvent?.eventTitle?.takeIf { it.isNotBlank() }
+                ?: action.title,
+            whyText = why,
+            originalTitle = rawEvent?.eventTitle?.takeIf { it.isNotBlank() }
+                ?: action.evidence?.label?.takeIf { it.isNotBlank() }
+                ?: action.title,
+            originalText = originalText,
+            metadataText = metadataText,
+            originalIsLocal = localOriginalText != null,
+            originalTruncated = original?.archivedOriginal?.markdownTruncated == true,
+            sourceType = rawEvent?.sourceType ?: action.sourceType,
+        )
+    }
+
+    private suspend fun resolveScheduleActionRawEvent(
+        userId: String,
+        action: PersonActionItemUi,
+    ): RawIngestionEventEntity? {
+        val rawDao = rawIngestionEventDao ?: return null
+        val idCandidates = listOfNotNull(
+            action.sourceEventId,
+            action.evidence?.id?.takeIf { action.evidence.kind == "source_event" },
+            action.evidence?.sourceRef?.removePrefix("raw:"),
+            action.sourceRef?.removePrefix("raw:"),
+        ).distinctNonBlank()
+        for (candidate in idCandidates) {
+            rawDao.findById(candidate, userId)?.let { return it }
+        }
+        val sourceRefCandidates = listOfNotNull(
+            action.sourceRef,
+            action.evidence?.sourceRef,
+            action.sourceEventId?.let { "raw:$it" },
+        ).distinctNonBlank()
+        if (sourceRefCandidates.isEmpty()) return null
+        return rawDao.findBySourceRefsForUser(userId = userId, sourceRefs = sourceRefCandidates).firstOrNull()
+    }
+
+    private fun SourceOriginalContext.toDisplayText(): String? =
+        listOfNotNull(
+            emailBody?.bodyPlain?.takeIf { it.isNotBlank() },
+            emailBody?.bodyHtml?.takeIf { it.isNotBlank() },
+            archivedOriginal?.markdown?.takeIf { it.isNotBlank() },
+        ).firstOrNull()
+
+    private fun List<String>.distinctNonBlank(): List<String> =
+        map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
 
     /** TDY-007 settings entry from the top-right icon. */
     public fun onOpenSettings() {
@@ -982,6 +1096,34 @@ public class TodayViewModel @Inject constructor(
                     refreshMessageFlow.value = UiMessage.resource(R.string.today_schedule_conflict_resolve_failed)
                 }
             }
+        }
+    }
+
+    public fun onToggleScheduleReminder(commitmentId: String, enabled: Boolean) {
+        viewModelScope.launch(ioDispatcher) {
+            val dueAt = state.value.timeline
+                .filterIsInstance<TimelineItem.Commitment>()
+                .firstOrNull { it.id == commitmentId }
+                ?.dueAt
+            userPrefsStore.setCommitmentReminderDisabled(commitmentId, disabled = !enabled)
+            if (enabled) {
+                reminderScheduler.schedule(commitmentId, dueAt)
+                customScheduleReminderIdsFlow.update { it - commitmentId }
+                refreshMessageFlow.value = UiMessage.resource(R.string.commitment_action_reminder_on)
+            } else {
+                reminderScheduler.cancel(commitmentId)
+                customScheduleReminderIdsFlow.update { it - commitmentId }
+                refreshMessageFlow.value = UiMessage.resource(R.string.commitment_action_reminder_off)
+            }
+        }
+    }
+
+    public fun onSetScheduleReminderAt(commitmentId: String, triggerAt: Instant) {
+        viewModelScope.launch(ioDispatcher) {
+            userPrefsStore.setCommitmentReminderDisabled(commitmentId, disabled = false)
+            reminderScheduler.scheduleAt(commitmentId = commitmentId, triggerAt = triggerAt)
+            customScheduleReminderIdsFlow.update { it + commitmentId }
+            refreshMessageFlow.value = UiMessage.resource(R.string.commitment_action_reminder_on)
         }
     }
 

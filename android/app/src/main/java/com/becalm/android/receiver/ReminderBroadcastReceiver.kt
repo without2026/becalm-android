@@ -92,6 +92,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val commitmentId = intent.getStringExtra(EXTRA_COMMITMENT_ID) ?: return
         val scheduledUserId = intent.getStringExtra(EXTRA_USER_ID).orEmpty()
+        val allowUndatedReminder = intent.getBooleanExtra(EXTRA_ALLOW_UNDATED_REMINDER, false)
 
         // Finding 4 (security-auditor): POST_NOTIFICATIONS is a runtime permission on API 33+.
         // Skip notification silently rather than crash; log WARN with redacted ID for diagnostics.
@@ -115,7 +116,12 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
         val pending = goAsync()
         applicationScope.launch(ioDispatcher) {
             try {
-                handle(context, commitmentId, scheduledUserId)
+                handle(
+                    context = context,
+                    commitmentId = commitmentId,
+                    scheduledUserId = scheduledUserId,
+                    allowUndatedReminder = allowUndatedReminder,
+                )
             } finally {
                 pending.finish()
             }
@@ -135,6 +141,20 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
         context: Context,
         commitmentId: String,
         scheduledUserId: String,
+    ) {
+        handle(
+            context = context,
+            commitmentId = commitmentId,
+            scheduledUserId = scheduledUserId,
+            allowUndatedReminder = false,
+        )
+    }
+
+    internal suspend fun handle(
+        context: Context,
+        commitmentId: String,
+        scheduledUserId: String,
+        allowUndatedReminder: Boolean,
     ) {
         if (scheduledUserId.isBlank()) {
             // An alarm without a captured owner predates the user-scoping fix
@@ -171,7 +191,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             )
             return
         }
-        if (entity.dueAt == null) {
+        if (entity.dueAt == null && !allowUndatedReminder) {
             logger.d(
                 TAG,
                 "silent drop: due_at missing for commitmentId_hash=${redact(commitmentId)}",
@@ -186,6 +206,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
                 commitmentId = commitmentId,
                 title = entity.title,
                 direction = entity.direction.orEmpty(),
+                customTiming = allowUndatedReminder,
             ),
         )
     }
@@ -251,6 +272,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
         /** Intent extra key carrying the opaque commitment identifier. */
         public const val EXTRA_COMMITMENT_ID: String = "commitment_id"
         public const val EXTRA_NOTIFICATION_INSTANCE_ID: String = "notification_instance_id"
+        public const val EXTRA_ALLOW_UNDATED_REMINDER: String = "allow_undated_reminder"
 
         /**
          * Intent extra key carrying the user id that owned the commitment at
@@ -296,6 +318,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             commitmentId: String,
             title: String,
             direction: String,
+            customTiming: Boolean = false,
         ): ReminderNotificationSpec {
             val bodyResId = when (direction) {
                 "give" -> R.string.commitment_alarm_body_give_fmt
@@ -307,7 +330,13 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
                 notificationInstanceId = UUID.randomUUID().toString(),
                 channelId = CHANNEL_ID,
                 deepLinkUri = "becalm://commitments/$commitmentId",
-                title = context.getString(R.string.commitment_alarm_title),
+                title = context.getString(
+                    if (customTiming) {
+                        R.string.commitment_alarm_custom_title
+                    } else {
+                        R.string.commitment_alarm_title
+                    },
+                ),
                 body = context.getString(bodyResId, title),
             )
         }

@@ -10,12 +10,15 @@ import kotlinx.datetime.Instant
 /**
  * Room entity storing the verbatim email body text for rows in [RawIngestionEventEntity].
  *
- * ## Room-only — `room_only: true`
+ * ## Local canonical store with beta backend body mirror
  * This table is the canonical on-device store for email content. Mirrors
- * `.spec/contracts/data-model.yml:327-390 § email_body` **minus** the Supabase/Railway
- * mirror. Per EMAIL-006 (`.spec/email-pipeline.spec.yml:58-64`) the columns [bodyPlain],
- * [bodyHtml], [attachmentsMeta], and [rawHeaders] MUST NEVER leave the device. Any
- * upload path that serializes this entity is a production-blocking privacy bug.
+ * `.spec/contracts/data-model.yml:327-390 § email_body` **minus** a backend `email_body`
+ * table. Per EMAIL-006 (`.spec/email-pipeline.spec.yml:58-64`) [bodyHtml],
+ * [attachmentsMeta], and [rawHeaders] MUST NEVER leave the device. During the
+ * mail-body beta, backend-managed source refresh may return nullable `email_body_plain`
+ * from `source_events`; Android mirrors that plain-text body into [bodyPlain] for
+ * raw-event detail rendering. Any upload path that serializes this whole entity is a
+ * production-blocking privacy bug.
  *
  * ## 30-day retention sweep
  * The future `RetentionSweepWorker` (`feat/worker/retention`) is the authoritative
@@ -75,7 +78,9 @@ public data class EmailBodyEntity(
      * co-delete contract. The parent raw-event UUID is the only cross-layer handle
      * that reaches Railway as a stored raw-event reference. When backend Gemini email
      * extraction is enabled, [bodyPlain] may be sent transiently in the upload request as
-     * extraction context; the backend does not persist it in `raw_ingestion_events`.
+     * extraction context. During the mail-body beta, Railway may also persist
+     * provider plain text in `source_events.email_body_plain` and Android mirrors it
+     * back into [bodyPlain] for raw-event detail rendering.
      * Spec: `.spec/contracts/data-model.yml:327-390 § email_body.raw_event_id`.
      */
     @ColumnInfo(name = "raw_event_id")

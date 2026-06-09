@@ -100,6 +100,16 @@ public interface CalendarEventDao {
     )
     public suspend fun findAllForUser(userId: String): List<CalendarEventEntity>
 
+    @Query(
+        """
+        SELECT * FROM calendar_events
+        WHERE user_id = :userId
+          AND id IN (:ids)
+        ORDER BY start_at ASC
+        """,
+    )
+    public fun observeByIdsForUser(userId: String, ids: List<String>): Flow<List<CalendarEventEntity>>
+
     @Query("SELECT COUNT(*) FROM calendar_events WHERE user_id = :userId")
     public suspend fun countForUser(userId: String): Int
 

@@ -1,6 +1,7 @@
 package com.becalm.android.ui.persons
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,7 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -49,6 +51,7 @@ import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonSize
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.ContactRow
@@ -122,6 +125,13 @@ public fun RawEventDetailSheet(
             }
             state.sourceType != null -> RawEventDetailContent(
                 state = state,
+                onThreadMessageClick = { rawEventId ->
+                    if (rawEventId != state.eventId) {
+                        navController.navigate(BecalmRoute.RawEventDetail(personId = personId, eventId = rawEventId).path) {
+                            launchSingleTop = true
+                        }
+                    }
+                },
                 onParticipantReassign = viewModel::onParticipantReassign,
                 onParticipantIgnore = viewModel::onParticipantIgnore,
                 modifier = Modifier.padding(padding),
@@ -140,6 +150,7 @@ public fun RawEventDetailSheet(
 internal fun RawEventDetailContent(
     state: RawEventDetailUiState,
     modifier: Modifier = Modifier,
+    onThreadMessageClick: (String) -> Unit = {},
     onParticipantReassign: (String, String) -> Unit = { _, _ -> },
     onParticipantIgnore: (String) -> Unit = {},
 ) {
@@ -178,6 +189,28 @@ internal fun RawEventDetailContent(
             }
         }
 
+        if (state.sourceType in EMAIL_SOURCE_TYPES && state.hasEmailBodyDetail()) {
+            item {
+                EvidenceCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    EmailEventBodySection(state = state)
+                }
+            }
+        }
+
+        if (state.hasAudioTranscriptDetail()) {
+            item {
+                EvidenceCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    RawEventTranscriptSection(state = state)
+                }
+            }
+        }
+
         if (visibleExtractedCommitments.isNotEmpty()) {
             item {
                 rawEventWhyText(visibleExtractedCommitments)?.let { whyText ->
@@ -186,6 +219,16 @@ internal fun RawEventDetailContent(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+            }
+        }
+
+        if (state.sourceType in EMAIL_SOURCE_TYPES && state.threadMessages.size > 1) {
+            item {
+                RawEventThreadSection(
+                    messages = state.threadMessages,
+                    onMessageClick = onThreadMessageClick,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 
@@ -210,27 +253,83 @@ internal fun RawEventDetailContent(
                 )
             }
         }
+    }
+}
 
-        if (state.hasAudioTranscriptDetail()) {
-            item {
-                EvidenceCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(16.dp),
-                ) {
-                    RawEventTranscriptSection(state = state)
-                }
+@Composable
+private fun RawEventThreadSection(
+    messages: List<RawEventThreadMessageUi>,
+    onMessageClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    EvidenceCard(
+        modifier = modifier.testTag("raw-event-thread-section"),
+        contentPadding = PaddingValues(16.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = stringResource(R.string.raw_event_thread_title_fmt, messages.size),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            messages.forEach { message ->
+                RawEventThreadMessageRow(
+                    message = message,
+                    onClick = { onMessageClick(message.rawEventId) },
+                )
             }
         }
+    }
+}
 
-        if (state.sourceType in EMAIL_SOURCE_TYPES && state.hasEmailBodyDetail()) {
-            item {
-                EvidenceCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(16.dp),
-                ) {
-                    EmailEventBodySection(state = state)
-                }
-            }
+@Composable
+private fun RawEventThreadMessageRow(
+    message: RawEventThreadMessageUi,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick)
+            .testTag("raw-event-thread-message-${message.rawEventId}")
+            .padding(vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (message.isCurrent) {
+                    stringResource(R.string.raw_event_thread_current)
+                } else {
+                    stringResource(R.string.raw_event_thread_message)
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = if (message.isCurrent) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            IngestionTimestamp(timestamp = message.timestamp)
+        }
+        Text(
+            text = message.title ?: stringResource(R.string.raw_event_detail_no_title),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        message.snippet?.takeIf { it.isNotBlank() }?.let { snippet ->
+            Text(
+                text = snippet,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -321,6 +420,7 @@ private fun RawEventParticipantCorrectionRowContent(
                 enabled = !saving && choices.isNotEmpty(),
                 onClick = { editing = !editing },
                 variant = BecalmButtonVariant.Secondary,
+                size = BecalmButtonSize.Compact,
                 modifier = Modifier.weight(1f),
             )
             BecalmButton(
@@ -328,7 +428,9 @@ private fun RawEventParticipantCorrectionRowContent(
                 enabled = !saving,
                 loading = saving,
                 onClick = { showIgnoreConfirm = true },
-                variant = BecalmButtonVariant.Secondary,
+                variant = BecalmButtonVariant.DestructiveTertiary,
+                size = BecalmButtonSize.Compact,
+                leadingIcon = Icons.Outlined.Close,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -374,20 +476,24 @@ private fun RawEventParticipantCorrectionRowContent(
             title = { Text(text = stringResource(R.string.raw_event_person_ignore_confirm_title)) },
             text = { Text(text = stringResource(R.string.raw_event_person_ignore_confirm_body)) },
             confirmButton = {
-                TextButton(
+                BecalmButton(
+                    text = stringResource(R.string.raw_event_person_ignore_confirm_action),
                     onClick = {
                         showIgnoreConfirm = false
                         onParticipantIgnore(participant.participantId)
                     },
                     enabled = !saving,
-                ) {
-                    Text(text = stringResource(R.string.raw_event_person_ignore_confirm_action))
-                }
+                    variant = BecalmButtonVariant.Destructive,
+                    size = BecalmButtonSize.Compact,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showIgnoreConfirm = false }) {
-                    Text(text = stringResource(R.string.raw_event_person_cancel_action))
-                }
+                BecalmButton(
+                    text = stringResource(R.string.raw_event_person_cancel_action),
+                    onClick = { showIgnoreConfirm = false },
+                    variant = BecalmButtonVariant.Tertiary,
+                    size = BecalmButtonSize.Compact,
+                )
             },
         )
     }

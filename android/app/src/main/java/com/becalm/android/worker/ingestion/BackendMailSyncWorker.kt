@@ -18,6 +18,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
@@ -59,6 +60,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
     private val sourceConnectionRepositoryProvider: Provider<SourceConnectionRepository>,
     private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
     private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
+    private val personActionRepositoryProvider: Provider<PersonActionRepository>,
     private val userCorrectionRepositoryProvider: Provider<UserCorrectionRepository>,
     private val userPrefsStore: UserPrefsStore,
     private val syncCursorStore: SyncCursorStore,
@@ -116,6 +118,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
             commitmentRepository = commitmentRepositoryProvider.get(),
             sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
             commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
+            personActionRepository = personActionRepositoryProvider.get(),
             userCorrectionRepository = userCorrectionRepositoryProvider.get(),
             syncCursorStore = syncCursorStore,
             sourceStatusRepository = sourceStatusRepository,

@@ -15,6 +15,7 @@ import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventAnchorOrigin
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CalendarEventRepositoryImpl
@@ -44,6 +45,7 @@ import kotlinx.datetime.Instant
 import java.util.UUID
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -208,6 +210,8 @@ class PersonDetailLocalIntegrationTest {
             personEnrichmentRepository = enrichmentRepository,
             personIndexDao = db.personIndexDao(),
             rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
+            calendarEventDao = db.calendarEventDao(),
             manualMemoryOutboxDao = db.manualMemoryOutboxDao(),
             workScheduler = mockk(relaxed = true),
             reminderScheduler = mockk(relaxed = true),
@@ -241,6 +245,70 @@ class PersonDetailLocalIntegrationTest {
                 listOf("완료된 약속"),
                 state.sourceEventCards.single { it.sourceEventKey == "raw:event-2" }.myActions.map { it.title },
             )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `person detail groups email source events by conversation ref`() = runTest {
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, PERSON_REF)).personId
+        val firstAt = Instant.parse("2026-04-23T03:00:00Z")
+        val secondAt = Instant.parse("2026-04-23T04:00:00Z")
+        db.rawIngestionEventDao().insertAll(
+            listOf(
+                rawEvent(
+                    id = "mail-thread-1",
+                    sourceType = SourceType.GMAIL,
+                    timestamp = firstAt,
+                    title = "첫 번째 메일",
+                    snippet = "첫 번째 미리보기",
+                ).copy(conversationRef = "gmail-thread-1"),
+                rawEvent(
+                    id = "mail-thread-2",
+                    sourceType = SourceType.GMAIL,
+                    timestamp = secondAt,
+                    title = "두 번째 메일",
+                    snippet = "두 번째 미리보기",
+                ).copy(conversationRef = "gmail-thread-1"),
+            ),
+        )
+        db.personIndexDao().upsertInteractions(
+            listOf(
+                indexedInteraction(personId, SourceType.GMAIL, "raw:mail-thread-1", "email", "counterparty", null, null, firstAt, "첫 번째 메일", "첫 번째 미리보기"),
+                indexedInteraction(personId, SourceType.GMAIL, "raw:mail-thread-2", "email", "counterparty", null, null, secondAt, "두 번째 메일", "두 번째 미리보기"),
+                indexedInteraction(personId, SourceType.GMAIL, "raw:mail-thread-1", "commitment", CommitmentItemType.ACTION, "give", "pending", firstAt, "첫 번째 후속 조치", "quote"),
+                indexedInteraction(personId, SourceType.GMAIL, "raw:mail-thread-2", "commitment", CommitmentItemType.ACTION, "give", "pending", secondAt, "두 번째 후속 조치", "quote"),
+            ),
+        )
+
+        val viewModel = PersonDetailViewModel(
+            personEnrichmentRepository = enrichmentRepository,
+            personIndexDao = db.personIndexDao(),
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            commitmentDao = db.commitmentDao(),
+            calendarEventDao = db.calendarEventDao(),
+            manualMemoryOutboxDao = db.manualMemoryOutboxDao(),
+            workScheduler = mockk(relaxed = true),
+            reminderScheduler = mockk(relaxed = true),
+            userPrefsStore = userPrefsStore,
+            savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
+            logger = logger,
+        )
+
+        viewModel.uiState.test {
+            var state = awaitItem()
+            while (state.loading || state.sourceEventCards.singleOrNull()?.myActions?.size != 2) {
+                state = awaitItem()
+            }
+
+            val card = state.sourceEventCards.single()
+            assertEquals("thread:gmail:gmail-thread-1", card.sourceEventKey)
+            assertEquals("mail-thread-2", card.rawEventId)
+            assertEquals("두 번째 메일", card.title)
+            assertTrue(card.isEmailThread)
+            assertEquals(2, card.threadMessageCount)
+            assertEquals(setOf("raw:mail-thread-1", "raw:mail-thread-2"), card.relatedSourceEventKeys.toSet())
+            assertEquals(setOf("첫 번째 후속 조치", "두 번째 후속 조치"), card.myActions.map { it.title }.toSet())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -281,6 +349,7 @@ class PersonDetailLocalIntegrationTest {
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),
+                rawIngestionEventDao = db.rawIngestionEventDao(),
                 personIndexDao = db.personIndexDao(),
                 personEnrichmentRepository = enrichmentRepository,
             ),
@@ -357,6 +426,7 @@ class PersonDetailLocalIntegrationTest {
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),
+                rawIngestionEventDao = db.rawIngestionEventDao(),
                 personIndexDao = db.personIndexDao(),
                 personEnrichmentRepository = enrichmentRepository,
             ),
@@ -381,6 +451,80 @@ class PersonDetailLocalIntegrationTest {
                 state.extractedCommitments.map { it.title },
             )
             assertEquals("alice@example.com,bob@example.com", state.attendeesRaw)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `raw event detail hides already resolved participant corrections`() = runTest {
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "event-corrections",
+                sourceType = SourceType.GMAIL,
+                timestamp = Instant.parse("2026-04-23T05:00:00Z"),
+                title = "메일 제목",
+                snippet = "메일 미리보기",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-resolved",
+                    sourceEventId = "event-corrections",
+                    personId = "person-resolved",
+                    displayName = "이미 연결된 사람",
+                    resolutionStatus = "resolved",
+                ),
+                sourceParticipant(
+                    id = "participant-unresolved",
+                    sourceEventId = "event-corrections",
+                    personId = null,
+                    displayName = "확인할 사람",
+                    resolutionStatus = "unresolved",
+                ),
+                sourceParticipant(
+                    id = "participant-suggested-self",
+                    sourceEventId = "event-corrections",
+                    personId = null,
+                    displayName = "내 계정 후보",
+                    resolutionStatus = "suggested_self",
+                ),
+                sourceParticipant(
+                    id = "participant-ignored",
+                    sourceEventId = "event-corrections",
+                    personId = null,
+                    displayName = "무시된 후보",
+                    resolutionStatus = "ignored",
+                ),
+            ),
+        )
+
+        val viewModel = RawEventDetailViewModel(
+            rawIngestionRepository = rawIngestionRepository,
+            sourceOriginalResolver = sourceOriginalResolver,
+            projectionPort = RoomBackedRawEventDetailProjectionPort(
+                commitmentDao = db.commitmentDao(),
+                calendarEventDao = db.calendarEventDao(),
+                rawIngestionEventDao = db.rawIngestionEventDao(),
+                personIndexDao = db.personIndexDao(),
+                personEnrichmentRepository = enrichmentRepository,
+            ),
+            userPrefsStore = userPrefsStore,
+            savedStateHandle = SavedStateHandle(mapOf(ARG_EVENT_ID to "event-corrections")),
+            logger = logger,
+            ioDispatcher = UnconfinedTestDispatcher(),
+        )
+
+        viewModel.uiState.test {
+            var state = awaitItem()
+            while (state.loading) {
+                state = awaitItem()
+            }
+
+            assertEquals(
+                setOf("participant-unresolved", "participant-suggested-self"),
+                state.participantCorrections.map { it.participantId }.toSet(),
+            )
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -461,6 +605,7 @@ class PersonDetailLocalIntegrationTest {
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),
+                rawIngestionEventDao = db.rawIngestionEventDao(),
                 personIndexDao = db.personIndexDao(),
                 personEnrichmentRepository = enrichmentRepository,
             ),
@@ -559,6 +704,35 @@ class PersonDetailLocalIntegrationTest {
         snippet = snippet,
         confidence = 1.0,
     )
+
+    private fun sourceParticipant(
+        id: String,
+        sourceEventId: String,
+        personId: String?,
+        displayName: String,
+        resolutionStatus: String,
+    ): SourceEventParticipantEntity =
+        SourceEventParticipantEntity(
+            id = id,
+            userId = USER_ID,
+            sourceEventId = sourceEventId,
+            sourceType = SourceType.GMAIL,
+            sourceRef = sourceEventId,
+            personId = personId,
+            role = "counterparty",
+            relationToUser = "counterparty",
+            identityType = "name",
+            normalizedValue = displayName,
+            displayNameRaw = displayName,
+            emailRaw = null,
+            phoneRaw = null,
+            organizationRaw = null,
+            titleRaw = null,
+            evidence = displayName,
+            confidence = 0.95,
+            resolutionStatus = resolutionStatus,
+            createdAt = Instant.parse("2026-04-23T05:00:00Z"),
+        )
 
     private companion object {
         private const val USER_ID = "user-1"

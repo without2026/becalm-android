@@ -144,9 +144,12 @@ public data class RawIngestionEventDto(
     @field:Json(name = "extracted_count") val extractedCount: Int? = null,
 
     /**
-     * Email-only extraction context sent to Railway / Vertex Gemini. This field is not stored
-     * in `raw_ingestion_events`; the backend consumes it during the batch request to extract
-     * action / schedule / decision items from Naver, Daum, Gmail, and Outlook mail.
+     * Email-only plain-text body.
+     *
+     * Local upload path: sent as transient Railway / Vertex Gemini extraction context.
+     * Mail refresh path: provider mail rows may return this nullable field
+     * from `source_events.email_body_plain` so Android can beta-mirror it into the local
+     * `email_body` table for raw-event detail rendering. Do not log this value.
      */
     @field:Json(name = "email_body_plain") val emailBodyPlain: String? = null,
 

@@ -242,7 +242,7 @@ internal fun ImapForm(
         BecalmButton(
             text = stringResource(R.string.action_skip),
             onClick = onSkip,
-            variant = BecalmButtonVariant.Text,
+            variant = BecalmButtonVariant.Tertiary,
             modifier = Modifier.testTag("imap-skip"),
         )
     }

@@ -9,6 +9,7 @@ import com.becalm.android.core.analytics.ProductAnalyticsEvent
 import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.util.KST
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.PersonActionSyncStateEntity
 import com.becalm.android.data.repository.FirstMemoryRepository
@@ -43,7 +44,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toLocalDateTime
 
 // ─── UI models ────────────────────────────────────────────────────────────────
 
@@ -120,16 +125,19 @@ public data class PersonSection(
     val people: List<PersonRow>,
 )
 
-public fun buildPersonSections(people: List<PersonRow>): List<PersonSection> {
+public fun buildPersonSections(
+    people: List<PersonRow>,
+    now: Instant = Clock.System.now(),
+): List<PersonSection> {
     val today = ArrayList<PersonRow>()
     val thisWeek = ArrayList<PersonRow>()
     val reconnect = ArrayList<PersonRow>()
     people.forEach { person ->
         val action = person.topAction
         when {
-            action != null && action.isUrgentForTodaySection() -> today += person
-            action != null -> thisWeek += person
-            person.pendingCommitmentCount > 0 -> today += person
+            action != null && action.isReconnectAction() -> reconnect += person
+            action != null && action.isDueTodaySection(now) -> today += person
+            action != null && action.isDueThisWeekSection(now) -> thisWeek += person
             else -> reconnect += person
         }
     }
@@ -149,9 +157,39 @@ public fun buildPersonSections(people: List<PersonRow>): List<PersonSection> {
     )
 }
 
-private fun PersonActionSummary.isUrgentForTodaySection(): Boolean {
-    val score = urgencyScore
-    return score >= 60.0 || (score in 0.0..1.0 && score >= 0.6)
+private fun PersonActionSummary.isReconnectAction(): Boolean =
+    actionKind == "reconnect_person"
+
+private fun PersonActionSummary.isDueTodaySection(now: Instant): Boolean {
+    val today = now.toLocalDateTime(KST).date
+    val dueDate = dueAt?.toLocalDateTime(KST)?.date
+    if (dueDate != null) return today.daysUntil(dueDate) <= 0
+    return dueHint.containsAnyHint("오늘", "금일", "today")
+}
+
+private fun PersonActionSummary.isDueThisWeekSection(now: Instant): Boolean {
+    val today = now.toLocalDateTime(KST).date
+    val dueDate = dueAt?.toLocalDateTime(KST)?.date
+    if (dueDate != null) {
+        val days = today.daysUntil(dueDate)
+        return days in 1 until daysUntilNextWeek(today)
+    }
+    return dueHint.containsAnyHint("이번 주", "이번주", "금주", "내일", "tomorrow", "this week")
+}
+
+private fun String?.containsAnyHint(vararg hints: String): Boolean {
+    val value = this?.trim()?.lowercase() ?: return false
+    return hints.any { value.contains(it.lowercase()) }
+}
+
+private fun daysUntilNextWeek(today: LocalDate): Int = when (today.dayOfWeek) {
+    DayOfWeek.MONDAY -> 7
+    DayOfWeek.TUESDAY -> 6
+    DayOfWeek.WEDNESDAY -> 5
+    DayOfWeek.THURSDAY -> 4
+    DayOfWeek.FRIDAY -> 3
+    DayOfWeek.SATURDAY -> 2
+    DayOfWeek.SUNDAY -> 1
 }
 
 /**
@@ -455,6 +493,7 @@ public class PersonsViewModel @Inject constructor(
             when (result) {
                 is BecalmResult.Success -> {
                     finishMatchSaving(eventId = eventId, resolved = true)
+                    refreshActionCacheForCurrentUser()
                     productAnalytics.track(
                         ProductAnalyticsEvent(
                             eventId = UUID.randomUUID().toString(),
@@ -501,6 +540,7 @@ public class PersonsViewModel @Inject constructor(
             ) {
                 is BecalmResult.Success -> {
                     finishMatchSaving(eventId = eventId, resolved = true)
+                    refreshActionCacheForCurrentUser()
                     productAnalytics.track(
                         ProductAnalyticsEvent(
                             eventId = UUID.randomUUID().toString(),
@@ -548,6 +588,7 @@ public class PersonsViewModel @Inject constructor(
             ) {
                 is BecalmResult.Success -> {
                     finishMatchSaving(eventId = eventId, resolved = false, notSelfRejected = true)
+                    refreshActionCacheForCurrentUser()
                     productAnalytics.track(
                         ProductAnalyticsEvent(
                             eventId = UUID.randomUUID().toString(),

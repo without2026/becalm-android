@@ -24,7 +24,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -38,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonSize
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
@@ -348,7 +348,7 @@ private fun SettingsIdentityAnchorRow(
                 BecalmButton(
                     text = stringResource(R.string.settings_identity_anchor_archive),
                     onClick = onArchive,
-                    variant = BecalmButtonVariant.Text,
+                    variant = BecalmButtonVariant.Tertiary,
                     loading = archiving,
                     modifier = Modifier.testTag("settings-identity-anchor-archive"),
                 )
@@ -402,7 +402,7 @@ private fun SettingsSourceConnectionRow(
             BecalmButton(
                 text = stringResource(R.string.settings_identity_connection_delete),
                 onClick = onDelete,
-                variant = BecalmButtonVariant.Text,
+                variant = BecalmButtonVariant.Tertiary,
                 enabled = !busy,
                 loading = deleting,
                 modifier = Modifier
@@ -431,20 +431,22 @@ private fun SettingsConnectionDeleteDialog(
             )
         },
         confirmButton = {
-            TextButton(
+            BecalmButton(
+                text = stringResource(R.string.settings_identity_connection_delete_confirm),
                 onClick = onConfirm,
+                variant = BecalmButtonVariant.Destructive,
+                size = BecalmButtonSize.Compact,
                 modifier = Modifier.testTag("settings-identity-connection-delete-confirm"),
-            ) {
-                Text(stringResource(R.string.settings_identity_connection_delete_confirm))
-            }
+            )
         },
         dismissButton = {
-            TextButton(
+            BecalmButton(
+                text = stringResource(R.string.action_cancel),
                 onClick = onDismiss,
+                variant = BecalmButtonVariant.Tertiary,
+                size = BecalmButtonSize.Compact,
                 modifier = Modifier.testTag("settings-identity-connection-delete-cancel"),
-            ) {
-                Text(stringResource(R.string.action_cancel))
-            }
+            )
         },
     )
 }

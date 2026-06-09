@@ -109,7 +109,7 @@ internal fun FirstMemoryActivationContent(
             BecalmButton(
                 text = stringResource(R.string.first_memory_skip),
                 onClick = onSkip,
-                variant = BecalmButtonVariant.Text,
+                variant = BecalmButtonVariant.Tertiary,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("first-memory-skip"),
@@ -255,7 +255,7 @@ private fun FirstMemoryForm(
                 BecalmButton(
                     text = stringResource(R.string.first_memory_skip),
                     onClick = onSkip,
-                    variant = BecalmButtonVariant.Text,
+                    variant = BecalmButtonVariant.Tertiary,
                     enabled = !state.saving,
                     modifier = Modifier
                         .fillMaxWidth()

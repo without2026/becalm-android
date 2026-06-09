@@ -8,7 +8,7 @@ internal object MirrorCursorKeys {
         "commitment_participants:v2_user:${userId.stableCursorUserKey()}"
 
     fun rawEvents(userId: String, sourceType: String?): String =
-        "raw_ingestion_events:v4_user:${userId.stableCursorUserKey()}:source_event_anchor:${sourceType ?: "all"}"
+        "raw_ingestion_events:v6_user:${userId.stableCursorUserKey()}:source_event_anchor:email_body:${sourceType ?: "all"}"
 
     fun calendarEvents(userId: String): String =
         "calendar_events:v2_user:${userId.stableCursorUserKey()}"

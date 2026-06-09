@@ -68,7 +68,7 @@ internal fun SettingsSourcesSection(
         BecalmButton(
             text = stringResource(R.string.action_wipe_data),
             onClick = onWipeClick,
-            variant = BecalmButtonVariant.Secondary,
+            variant = BecalmButtonVariant.Destructive,
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("settings-wipe-button"),

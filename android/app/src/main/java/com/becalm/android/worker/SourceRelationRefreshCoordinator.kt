@@ -7,6 +7,7 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceMirrorCursorReset
@@ -30,6 +31,7 @@ internal class SourceRelationRefreshCoordinator(
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    private val personActionRepository: PersonActionRepository? = null,
     private val userCorrectionRepository: UserCorrectionRepository? = null,
     private val syncCursorStore: SyncCursorStore? = null,
     private val workScheduler: WorkScheduler,
@@ -209,6 +211,7 @@ internal class SourceRelationRefreshCoordinator(
             hasMore = hasMore,
         )
         if (stats.changedCount > 0) {
+            refreshPersonActions(userId)
             SourceGraphChangedNotifier(workScheduler).notifyChanged()
         }
         if (stats.hasMore) {
@@ -219,6 +222,20 @@ internal class SourceRelationRefreshCoordinator(
 
     private fun missingRepository(name: String): BecalmResult.Failure =
         BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("$name is required for this refresh plan")))
+
+    private suspend fun refreshPersonActions(userId: String) {
+        val repository = personActionRepository ?: return
+        when (val result = repository.refresh(userId = userId, surface = null)) {
+            is BecalmResult.Success -> logger.d(
+                TAG,
+                "person action cache refreshed fetched=${result.value.fetched} deleted=${result.value.deleted}",
+            )
+            is BecalmResult.Failure -> logger.w(
+                TAG,
+                "person action cache refresh failed after source relation refresh: ${result.error}",
+            )
+        }
+    }
 
     private companion object {
         private const val TAG = "SourceRelationRefresh"

@@ -23,6 +23,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.onboarding.FirstMemoryKind
 import com.becalm.android.domain.onboarding.FirstMemoryOrigin
 import com.becalm.android.ui.onboarding.BatteryOptimizationContent
@@ -49,6 +51,8 @@ import com.becalm.android.ui.onboarding.GmailOAuthContent
 import com.becalm.android.ui.onboarding.GoogleCalendarOAuthContent
 import com.becalm.android.ui.onboarding.ImapForm
 import com.becalm.android.ui.onboarding.NotificationPermissionContent
+import com.becalm.android.ui.onboarding.OnboardingActivationScanSummaryUi
+import com.becalm.android.ui.onboarding.OnboardingActivationPreviewSourceSet
 import com.becalm.android.ui.onboarding.OnboardingCompleteContent
 import com.becalm.android.ui.onboarding.OnboardingCompletionSummaryUi
 import com.becalm.android.ui.onboarding.OnboardingContactsPreviewUi
@@ -212,7 +216,7 @@ class OnboardingUiTest {
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.action_sign_out)).performClick()
+        composeRule.onNodeWithContentDescription(string(R.string.action_sign_out)).performClick()
 
         composeRule.runOnIdle {
             assertEquals(1, signOutClicks)
@@ -257,7 +261,7 @@ class OnboardingUiTest {
     }
 
     @Test
-    fun `compact setup intro exposes optional source actions and gmail skip fallback`() {
+    fun `compact setup intro exposes optional source actions and blocks gmail fallback while pending`() {
         val connectedSources = mutableListOf<OnboardingSourceProvider>()
         var contactsClicks = 0
         var state by mutableStateOf(
@@ -282,7 +286,7 @@ class OnboardingUiTest {
                     onIntroNext = {
                         state = if (state.introPageIndex + 1 >= ONBOARDING_INTRO_PAGE_COUNT) {
                             state.copy(
-                                setupStage = OnboardingSetupStage.FIRST_MEMORY,
+                                setupStage = OnboardingSetupStage.READY_TO_START,
                                 introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
                             )
                         } else {
@@ -338,7 +342,7 @@ class OnboardingUiTest {
         composeRule.onNodeWithTag("onboarding-intro-skip-gmail")
             .performScrollTo()
             .assertIsDisplayed()
-            .performClick()
+            .assertIsNotEnabled()
 
         composeRule.runOnIdle {
             assertEquals(
@@ -347,6 +351,51 @@ class OnboardingUiTest {
             )
             assertEquals(1, contactsClicks)
         }
+    }
+
+    @Test
+    fun `compact setup intro can skip gmail to ready when no gmail connection is pending`() {
+        var state by mutableStateOf(
+            OnboardingUiState(
+                sourceOwnershipsLoaded = true,
+                introPageIndex = ONBOARDING_INTRO_PAGE_COUNT - 1,
+            ),
+        )
+
+        composeRule.setContent {
+            BecalmTheme {
+                OnboardingSetupScreen(
+                    navController = rememberNavController(),
+                    emailEventsOverride = emptyFlow(),
+                    calendarEventsOverride = emptyFlow(),
+                    stateOverride = state,
+                    onConnectSource = { _, _ -> },
+                    onSkipSource = {},
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onIntroNext = {
+                        state = state.copy(
+                            setupStage = OnboardingSetupStage.READY_TO_START,
+                            introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                        )
+                    },
+                    onCompleteSetup = {},
+                    onNavigateToday = {},
+                    onChangeAccount = {},
+                    onNavigateAfterSignOut = {},
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("onboarding-intro-skip-gmail")
+            .performScrollTo()
+            .assertIsEnabled()
+            .assertTextContains(string(R.string.onb_intro_email_skip))
+            .performClick()
+        composeRule.onNodeWithText(string(R.string.onb_ready_title))
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -413,6 +462,151 @@ class OnboardingUiTest {
             .performScrollTo()
             .assertIsDisplayed()
         composeRule.onNodeWithTag("onboarding-intro-connect-gmail")
+            .performScrollTo()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithTag("onboarding-intro-skip-gmail")
+            .performScrollTo()
+            .assertTextContains(string(R.string.onb_intro_next))
+    }
+
+    @Test
+    fun `compact setup intro disables gmail next while gmail is syncing`() {
+        composeRule.setContent {
+            BecalmTheme {
+                OnboardingSetupScreen(
+                    navController = rememberNavController(),
+                    emailEventsOverride = emptyFlow(),
+                    calendarEventsOverride = emptyFlow(),
+                    stateOverride = OnboardingUiState(
+                        sourceOwnershipsLoaded = true,
+                        introPageIndex = ONBOARDING_INTRO_PAGE_COUNT - 1,
+                        gmailActivationPreview = GmailActivationPreviewUiState(
+                            loading = true,
+                            status = GmailActivationPreviewStatus.Loading,
+                        ),
+                    ),
+                    onConnectSource = { _, _ -> },
+                    onSkipSource = {},
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onCompleteSetup = {},
+                    onNavigateToday = {},
+                    onChangeAccount = {},
+                    onNavigateAfterSignOut = {},
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("onboarding-intro-skip-gmail")
+            .performScrollTo()
+            .assertIsNotEnabled()
+    }
+
+    @Test
+    fun `compact setup ready starts activation scan from explicit start action`() {
+        var startClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                OnboardingSetupScreen(
+                    navController = rememberNavController(),
+                    emailEventsOverride = emptyFlow(),
+                    calendarEventsOverride = emptyFlow(),
+                    stateOverride = OnboardingUiState(
+                        setupStage = OnboardingSetupStage.READY_TO_START,
+                        introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                        sourceOwnershipsLoaded = true,
+                        selfIdentityConfirmed = true,
+                        stepStates = mapOf(
+                            OnboardingStep.CONTACTS_PERM to StepStatus.GRANTED,
+                            OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.COMPLETE,
+                            OnboardingStep.LINK_GMAIL to StepStatus.COMPLETE,
+                        ),
+                        callRecordingConnectionState = SourceConnectionState.Connected,
+                    ),
+                    onConnectSource = { _, _ -> },
+                    onSkipSource = {},
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onStartSetup = { startClicks += 1 },
+                    onCompleteSetup = {},
+                    onNavigateToday = {},
+                    onChangeAccount = {},
+                    onNavigateAfterSignOut = {},
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("onboarding-ready-to-start")
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_ready_title))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_ready_email_title))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("onboarding-ready-start")
+            .performScrollTo()
+            .assertIsEnabled()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, startClicks)
+        }
+    }
+
+    @Test
+    fun `compact setup ready shows activation scan progress without leaving ready surface`() {
+        composeRule.setContent {
+            BecalmTheme {
+                OnboardingSetupScreen(
+                    navController = rememberNavController(),
+                    emailEventsOverride = emptyFlow(),
+                    calendarEventsOverride = emptyFlow(),
+                    stateOverride = OnboardingUiState(
+                        setupStage = OnboardingSetupStage.READY_TO_START,
+                        introPageIndex = ONBOARDING_INTRO_PAGE_COUNT,
+                        sourceOwnershipsLoaded = true,
+                        selfIdentityConfirmed = true,
+                        stepStates = mapOf(
+                            OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.COMPLETE,
+                            OnboardingStep.LINK_GMAIL to StepStatus.COMPLETE,
+                        ),
+                        gmailActivationPreview = GmailActivationPreviewUiState(
+                            loading = true,
+                            status = GmailActivationPreviewStatus.Loading,
+                            progress = 0.55f,
+                            progressMessage = "Gmail과 Google Calendar를 확인하고 있습니다",
+                            sourceSet = OnboardingActivationPreviewSourceSet.GmailAndGoogleCalendar,
+                        ),
+                    ),
+                    onConnectSource = { _, _ -> },
+                    onSkipSource = {},
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onCompleteSetup = {},
+                    onNavigateToday = {},
+                    onChangeAccount = {},
+                    onNavigateAfterSignOut = {},
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("onboarding-ready-to-start").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_activation_preview_loading_title))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Gmail과 Google Calendar를 확인하고 있습니다")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("gmail-activation-progress").assertIsDisplayed()
+        composeRule.onNodeWithTag("onboarding-ready-start")
+            .performScrollTo()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithTag("onboarding-ready-back")
             .performScrollTo()
             .assertIsNotEnabled()
     }
@@ -489,9 +683,55 @@ class OnboardingUiTest {
         }
 
         composeRule.onNodeWithTag("onboarding-gmail-inline-preview").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_intro_email_preview_connected_label_fmt, 1))
+            .assertIsDisplayed()
         composeRule.onNodeWithText("금요일까지 제안서 초안 보내기").assertIsDisplayed()
+        composeRule.onNodeWithText("근거 메일: Re: BeCalm 사업 소개서 공유").assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.onb_intro_email_contact_match)).assertIsDisplayed()
         composeRule.onNodeWithTag("onboarding-intro-connect-gmail")
+            .assertIsNotEnabled()
+    }
+
+    @Test
+    fun `compact setup intro keeps gmail syncing while activation preview is pending after connection`() {
+        composeRule.setContent {
+            BecalmTheme {
+                OnboardingSetupScreen(
+                    navController = rememberNavController(),
+                    emailEventsOverride = emptyFlow(),
+                    calendarEventsOverride = emptyFlow(),
+                    stateOverride = OnboardingUiState(
+                        sourceOwnershipsLoaded = true,
+                        introPageIndex = ONBOARDING_INTRO_PAGE_COUNT - 1,
+                        stepStates = mapOf(OnboardingStep.LINK_GMAIL to StepStatus.COMPLETE),
+                        gmailActivationPreview = GmailActivationPreviewUiState(
+                            loading = true,
+                            status = GmailActivationPreviewStatus.Loading,
+                            progress = 0.55f,
+                            progressMessage = "메일 속 약속 후보를 확인하고 있습니다",
+                        ),
+                    ),
+                    onConnectSource = { _, _ -> },
+                    onSkipSource = {},
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onCompleteSetup = {},
+                    onNavigateToday = {},
+                    onChangeAccount = {},
+                    onNavigateAfterSignOut = {},
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.onb_intro_email_syncing))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("onboarding-gmail-inline-progress")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("onboarding-intro-skip-gmail")
+            .performScrollTo()
             .assertIsNotEnabled()
     }
 
@@ -633,6 +873,11 @@ class OnboardingUiTest {
                                 dueHint = "이번 주",
                             ),
                         ),
+                        sourceSet = OnboardingActivationPreviewSourceSet.GmailAndGoogleCalendar,
+                        scanSummary = OnboardingActivationScanSummaryUi(
+                            gmailCount = 142,
+                            calendarCount = 18,
+                        ),
                     ),
                     onUsePreview = { usedPreview += 1 },
                     onAcceptPreview = { acceptedPreviewIds += requireNotNull(it.actionItemId) },
@@ -643,16 +888,25 @@ class OnboardingUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.onb_activation_preview_ready_title_fmt, 3)).assertIsDisplayed()
+        composeRule.onNodeWithText("CEO 제안").assertDoesNotExist()
+        composeRule.onNodeWithText(string(R.string.onb_activation_preview_scan_log_gmail_calendar_fmt, 142, 18))
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(
+            string(
+                R.string.onb_activation_preview_scan_result_warning_fmt,
+                string(R.string.onb_activation_preview_scan_result_calendar_fmt, 1, 3),
+            ),
+        ).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.onb_activation_preview_high_confidence_section_fmt, 2))
             .assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.onb_activation_preview_confirm_needed_section_fmt, 1))
             .performScrollTo()
             .assertIsDisplayed()
         composeRule.onAllNodesWithText(string(R.string.onb_activation_preview_high_confidence_label))
-            .assertCountEquals(0)
+            .assertCountEquals(2)
         composeRule.onAllNodesWithText(string(R.string.onb_activation_preview_confirm_needed_label))
             .assertCountEquals(1)
-        composeRule.onNodeWithText("민지 / 금요일").performScrollTo().assertIsDisplayed()
+        composeRule.onAllNodesWithText("근거 · Re: BeCalm 사업 소개서 공유").assertCountEquals(3)
         composeRule.onNodeWithText("금요일까지 제안서 초안 보내기").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("수정 계약서 회신").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("분기 미팅 날짜 제안하기").performScrollTo().assertIsDisplayed()
@@ -739,6 +993,7 @@ class OnboardingUiTest {
         actionKind: String? = null,
         reasonCodes: List<String> = emptyList(),
         dueHint: String,
+        sourceType: String = SourceType.GMAIL,
     ): GmailActivationPreviewUi =
         GmailActivationPreviewUi(
             commitmentId = commitmentId,
@@ -755,7 +1010,7 @@ class OnboardingUiTest {
             scheduleStatus = null,
             decisionStatus = null,
             dueHint = dueHint,
-            sourceType = "gmail",
+            sourceType = sourceType,
             sourceTitle = "Re: BeCalm 사업 소개서 공유",
             actionItemId = actionItemId,
             actionKind = actionKind,
@@ -763,127 +1018,39 @@ class OnboardingUiTest {
         )
 
     @Test
-    fun `gmail activation pending keeps user on gmail surface with wait and start actions`() {
-        var waitClicks = 0
-        var startClicks = 0
-
+    fun `calendar only activation preview shows calendar connected and gmail needed`() {
         composeRule.setContent {
             BecalmTheme {
                 GmailActivationPreviewContent(
                     state = GmailActivationPreviewUiState(
-                        status = GmailActivationPreviewStatus.StillProcessing,
-                        progress = 0.55f,
-                        progressMessage = "메일 속 약속 후보를 확인하고 있습니다",
+                        previews = listOf(
+                            gmailActivationPreview(
+                                commitmentId = "commitment-calendar-1",
+                                actionItemId = "pa-calendar-1",
+                                personName = "민지",
+                                title = "다음 미팅 전에 자료 확인하기",
+                                itemType = "schedule",
+                                sourceType = SourceType.GOOGLE_CALENDAR,
+                                dueHint = "내일",
+                            ),
+                        ),
+                        sourceSet = OnboardingActivationPreviewSourceSet.GoogleCalendar,
+                        scanSummary = OnboardingActivationScanSummaryUi(calendarCount = 18),
                     ),
                     onUsePreview = {},
-                    onRetry = { waitClicks += 1 },
-                    onStartWithoutPreview = { startClicks += 1 },
                 )
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.onb_activation_preview_processing_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.onb_intro_email_connected)).assertIsDisplayed()
-        composeRule.onNodeWithTag("gmail-activation-progress").assertIsDisplayed()
-        composeRule.onNodeWithTag("gmail-activation-wait").assertIsDisplayed().performClick()
-        composeRule.onNodeWithTag("gmail-activation-start-without-preview").assertIsDisplayed().performClick()
-        composeRule.onAllNodesWithTag("gmail-activation-manual").assertCountEquals(0)
-
-        composeRule.runOnIdle {
-            assertEquals(1, waitClicks)
-            assertEquals(1, startClicks)
-        }
-    }
-
-    @Test
-    fun `P1-GAP-006 gmail activation retryable failure keeps retry and start actions`() {
-        var waitClicks = 0
-        var startClicks = 0
-
-        composeRule.setContent {
-            BecalmTheme {
-                GmailActivationPreviewContent(
-                    state = GmailActivationPreviewUiState(
-                        status = GmailActivationPreviewStatus.FailedRetryable,
-                    ),
-                    onUsePreview = {},
-                    onRetry = { waitClicks += 1 },
-                    onStartWithoutPreview = { startClicks += 1 },
-                )
-            }
-        }
-
-        composeRule.onNodeWithText(string(R.string.onb_activation_preview_failed_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.onb_activation_preview_failed_retryable_body)).assertIsDisplayed()
-        composeRule.onNodeWithTag("gmail-activation-wait").assertIsDisplayed().performClick()
-        composeRule.onNodeWithTag("gmail-activation-start-without-preview").assertIsDisplayed().performClick()
-        composeRule.onAllNodesWithTag("gmail-activation-manual").assertCountEquals(0)
-
-        composeRule.runOnIdle {
-            assertEquals(1, waitClicks)
-            assertEquals(1, startClicks)
-        }
-    }
-
-    @Test
-    fun `P1-GAP-006 gmail activation terminal failure starts without retry loop`() {
-        var waitClicks = 0
-        var startClicks = 0
-
-        composeRule.setContent {
-            BecalmTheme {
-                GmailActivationPreviewContent(
-                    state = GmailActivationPreviewUiState(
-                        status = GmailActivationPreviewStatus.FailedTerminal,
-                    ),
-                    onUsePreview = {},
-                    onRetry = { waitClicks += 1 },
-                    onStartWithoutPreview = { startClicks += 1 },
-                )
-            }
-        }
-
-        composeRule.onNodeWithText(string(R.string.onb_activation_preview_failed_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.onb_activation_preview_failed_terminal_body)).assertIsDisplayed()
-        composeRule.onAllNodesWithTag("gmail-activation-wait").assertCountEquals(0)
-        composeRule.onNodeWithTag("gmail-activation-start-without-preview").assertIsDisplayed().performClick()
-        composeRule.onAllNodesWithTag("gmail-activation-manual").assertCountEquals(0)
-
-        composeRule.runOnIdle {
-            assertEquals(0, waitClicks)
-            assertEquals(1, startClicks)
-        }
-    }
-
-    @Test
-    fun `P1-GAP-006 gmail activation empty state starts without retry loop or static actions`() {
-        var waitClicks = 0
-        var startClicks = 0
-
-        composeRule.setContent {
-            BecalmTheme {
-                GmailActivationPreviewContent(
-                    state = GmailActivationPreviewUiState(
-                        status = GmailActivationPreviewStatus.Empty,
-                    ),
-                    onUsePreview = {},
-                    onRetry = { waitClicks += 1 },
-                    onStartWithoutPreview = { startClicks += 1 },
-                )
-            }
-        }
-
-        composeRule.onNodeWithText(string(R.string.onb_activation_preview_empty_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.onb_activation_preview_empty_body)).assertIsDisplayed()
-        composeRule.onAllNodesWithTag("gmail-activation-preview-card").assertCountEquals(0)
-        composeRule.onAllNodesWithTag("gmail-activation-wait").assertCountEquals(0)
-        composeRule.onNodeWithTag("gmail-activation-start-without-preview").assertIsDisplayed().performClick()
-        composeRule.onAllNodesWithTag("gmail-activation-manual").assertCountEquals(0)
-
-        composeRule.runOnIdle {
-            assertEquals(0, waitClicks)
-            assertEquals(1, startClicks)
-        }
+        composeRule.onNodeWithText(string(R.string.onb_activation_preview_scan_log_calendar_fmt, 18))
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(
+            string(
+                R.string.onb_activation_preview_scan_result_warning_fmt,
+                string(R.string.onb_activation_preview_scan_result_calendar_fmt, 1, 1),
+            ),
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText("다음 미팅 전에 자료 확인하기").assertIsDisplayed()
     }
 
     @Test

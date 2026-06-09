@@ -73,6 +73,7 @@ internal object CommitmentManagementProjector {
             ),
             completedSection = CommitmentSectionUiState(),
             cancelledSection = CommitmentSectionUiState(),
+            today = now.toLocalDateTime(KST).date,
             loading = loading,
         )
     }

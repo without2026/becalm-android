@@ -11,11 +11,16 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.CalendarEventDao
+import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.ManualMemoryOutboxDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.CalendarEventEntity
+import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.ManualMemoryOutboxEntity
 import com.becalm.android.data.local.db.entity.ManualMemoryOutboxSyncStatus
+import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
@@ -46,7 +51,9 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,10 +64,23 @@ import kotlinx.datetime.Instant
 
 /** Compact commitment summary rendered inside one source-event card. */
 public data class PersonDetailCommitmentSummary(
+    val id: String? = null,
     val title: String,
     val itemType: String,
     val direction: String? = null,
     val status: String? = null,
+    val dueAt: Instant? = null,
+    val dueHint: String? = null,
+    val dueIsApproximate: Boolean = false,
+)
+
+/** One raw email/message inside a collapsed thread timeline row. */
+public data class PersonTimelineThreadEvent(
+    val rawEventId: String,
+    val sourceType: String,
+    val occurredAt: Instant,
+    val title: String?,
+    val snippet: String?,
 )
 
 /** Projection-only connector from one source-event card to the next interaction. */
@@ -89,7 +109,47 @@ public data class SourceEventCardProjection(
     val firstMemoryOrigin: String? = null,
     val linkedCalendarEventId: String? = null,
     val relatedSourceTypes: List<String> = emptyList(),
+    val isEmailThread: Boolean = false,
+    val threadMessageCount: Int = 1,
+    val threadEvents: List<PersonTimelineThreadEvent> = emptyList(),
+    val relatedSourceEventKeys: List<String> = emptyList(),
 )
+
+public sealed interface PersonTimelineItem {
+    public val key: String
+    public val sortAt: Instant
+
+    public data class SourceEvent(
+        public val card: SourceEventCardProjection,
+    ) : PersonTimelineItem {
+        override val key: String = "source:${card.sourceEventKey}"
+        override val sortAt: Instant = card.occurredAt
+    }
+
+    public data class ScheduleCandidate(
+        override val key: String,
+        override val sortAt: Instant,
+        public val proposedEndAt: Instant?,
+        public val title: String?,
+        public val sourceType: String,
+        public val rawEventId: String?,
+        public val commitmentId: String?,
+        public val status: String,
+        public val relationType: String,
+    ) : PersonTimelineItem
+
+    public data class ConfirmedSchedule(
+        override val key: String,
+        override val sortAt: Instant,
+        public val endAt: Instant?,
+        public val title: String,
+        public val sourceType: String,
+        public val calendarEventId: String,
+        public val rawEventId: String?,
+        public val commitmentId: String?,
+        public val status: String,
+    ) : PersonTimelineItem
+}
 
 public enum class ManualMemorySyncStatusKind {
     PENDING,
@@ -161,6 +221,9 @@ public data class PersonDetailUiState(
     val draftSheet: PersonActionDraftSheetUiState? = null,
     val loadingDraftActionId: String? = null,
     val sourceEventCards: List<SourceEventCardProjection> = emptyList(),
+    val timelineItems: List<PersonTimelineItem> = sourceEventCards.map { PersonTimelineItem.SourceEvent(it) },
+    val relationshipStartedAt: Instant? = sourceEventCards.minOfOrNull { it.occurredAt },
+    val lastInteractionAt: Instant? = sourceEventCards.maxOfOrNull { it.occurredAt },
     val manualMemorySyncStatus: ManualMemorySyncStatusUi? = null,
     val retryingManualMemorySync: Boolean = false,
     val canLoadMoreTimeline: Boolean = false,
@@ -174,6 +237,7 @@ private const val TAG = "PersonDetailViewModel"
 internal const val ARG_PERSON_ID = "person_id"
 private const val PERSON_INTERACTIONS_PAGE_SIZE = 150
 private const val PERSON_ACTION_DISMISS_REASON = "not_actionable"
+private const val PERSON_THREAD_EVENT_LIMIT = 20
 
 /**
  * ViewModel for PersonDetailScreen (SRC-003, SRC-004, SRC-005).
@@ -192,6 +256,8 @@ public class PersonDetailViewModel @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val personIndexDao: PersonIndexDao,
     private val rawIngestionEventDao: RawIngestionEventDao,
+    private val commitmentDao: CommitmentDao,
+    private val calendarEventDao: CalendarEventDao,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val personActionRepository: PersonActionRepository = NoopPersonDetailActionRepository,
     private val personDetailRemoteRepository: PersonDetailRemoteRepository = NoopPersonDetailRemoteRepository,
@@ -676,15 +742,40 @@ public class PersonDetailViewModel @Inject constructor(
                             )
                         }.flatMapLatest { inputs ->
                             val interactions = inputs.interactions
+                            val scheduleRefs = interactions.toScheduleProjectionRefs()
                             val linksFlow = scheduleEventLinkRepository?.observeForProjectionRefs(
                                 userId = userId,
-                                commitmentIds = interactions.mapNotNull { it.commitmentId },
-                                rawEventIds = interactions.mapNotNull { it.sourceEventId },
-                                calendarEventIds = emptyList(),
+                                commitmentIds = scheduleRefs.commitmentIds,
+                                rawEventIds = scheduleRefs.rawEventIds,
+                                calendarEventIds = scheduleRefs.calendarEventIds,
                             ) ?: flowOf(emptyList<ScheduleEventLinkEntity>())
-                            linksFlow.combine(flowOf(inputs)) { links, currentInputs ->
-                                DetailInputsWithLinks(currentInputs, links)
+                            linksFlow.map { links ->
+                                DetailInputsWithLinks(
+                                    inputs = inputs,
+                                    scheduleRefs = scheduleRefs,
+                                    scheduleLinks = links,
+                                )
                             }
+                        }.flatMapLatest { detail ->
+                            val commitmentIds = (
+                                detail.scheduleRefs.commitmentIds +
+                                    detail.scheduleLinks.mapNotNull { it.commitmentId.cleanId() }
+                                )
+                                .distinct()
+                            val calendarEventIds = (
+                                detail.scheduleRefs.calendarEventIds +
+                                    detail.scheduleLinks.mapNotNull { it.calendarEventId.cleanId() }
+                                )
+                                .distinct()
+                            observeCommitmentsForDetail(userId, commitmentIds)
+                                .combine(observeCalendarEventsForDetail(userId, calendarEventIds)) { commitments, calendarEvents ->
+                                    DetailProjectionInputs(
+                                        inputs = detail.inputs,
+                                        scheduleLinks = detail.scheduleLinks,
+                                        commitments = commitments,
+                                        calendarEvents = calendarEvents,
+                                    )
+                                }
                         }.flatMapLatest { detail ->
                             val inputs = detail.inputs
                             flowOf(
@@ -697,6 +788,8 @@ public class PersonDetailViewModel @Inject constructor(
                                         interactions = inputs.interactions,
                                         rawEvents = rawEvents,
                                         scheduleLinks = detail.scheduleLinks,
+                                        commitments = detail.commitments,
+                                        calendarEvents = detail.calendarEvents,
                                     ).copy(
                                         topActions = inputs.actionRows
                                             .asSequence()
@@ -743,7 +836,7 @@ public class PersonDetailViewModel @Inject constructor(
 
     private suspend fun loadRawEventsForInteractions(
         userId: String,
-        interactions: List<com.becalm.android.data.local.db.entity.PersonInteractionEntity>,
+        interactions: List<PersonInteractionEntity>,
     ): List<RawIngestionEventEntity> {
         val rawIds = interactions.mapNotNull { interaction ->
             interaction.sourceEventId
@@ -764,7 +857,26 @@ public class PersonDetailViewModel @Inject constructor(
         } else {
             rawIngestionEventDao.findBySourceRefsForUser(userId = userId, sourceRefs = sourceRefs)
         }
-        return (byId + bySourceRef).distinctBy { it.id }
+        val baseEvents = (byId + bySourceRef).distinctBy { it.id }
+        val threadRefs = baseEvents
+            .asSequence()
+            .filter { it.sourceType in com.becalm.android.ui.components.EMAIL_SOURCE_TYPES }
+            .mapNotNull { event ->
+                val conversationRef = event.conversationRef?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                event.sourceType to conversationRef
+            }
+            .distinct()
+            .toList()
+        val threadEvents = mutableListOf<RawIngestionEventEntity>()
+        for ((sourceType, conversationRef) in threadRefs) {
+            threadEvents += rawIngestionEventDao.findByConversationRefForUser(
+                    userId = userId,
+                    sourceType = sourceType,
+                    conversationRef = conversationRef,
+                    limit = PERSON_THREAD_EVENT_LIMIT,
+                )
+        }
+        return (baseEvents + threadEvents).distinctBy { it.id }
     }
 
     private fun refreshPersonActions(userId: String) {
@@ -785,21 +897,83 @@ public class PersonDetailViewModel @Inject constructor(
         }
     }
 
+    private fun observeCommitmentsForDetail(
+        userId: String,
+        commitmentIds: List<String>,
+    ): Flow<List<CommitmentEntity>> =
+        if (commitmentIds.isEmpty()) {
+            flowOf(emptyList())
+        } else {
+            commitmentDao.observeLiveByIdsForUser(userId = userId, ids = commitmentIds)
+        }
+
+    private fun observeCalendarEventsForDetail(
+        userId: String,
+        calendarEventIds: List<String>,
+    ): Flow<List<CalendarEventEntity>> =
+        if (calendarEventIds.isEmpty()) {
+            flowOf(emptyList())
+        } else {
+            calendarEventDao.observeByIdsForUser(userId = userId, ids = calendarEventIds)
+        }
+
     private fun hashId(id: String): String = "%08x".format(id.hashCode())
 
     private data class DetailInputs(
         val identities: List<com.becalm.android.data.local.db.entity.PersonIdentityEntity>,
         val enrichmentRows: List<com.becalm.android.data.local.db.entity.PersonEnrichmentEntity>,
-        val interactions: List<com.becalm.android.data.local.db.entity.PersonInteractionEntity>,
+        val interactions: List<PersonInteractionEntity>,
         val actionRows: List<com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity>,
         val manualMemoryOutboxRows: List<ManualMemoryOutboxEntity>,
     )
 
     private data class DetailInputsWithLinks(
         val inputs: DetailInputs,
+        val scheduleRefs: ScheduleProjectionRefs,
         val scheduleLinks: List<ScheduleEventLinkEntity>,
     )
+
+    private data class DetailProjectionInputs(
+        val inputs: DetailInputs,
+        val scheduleLinks: List<ScheduleEventLinkEntity>,
+        val commitments: List<CommitmentEntity>,
+        val calendarEvents: List<CalendarEventEntity>,
+    )
 }
+
+private data class ScheduleProjectionRefs(
+    val commitmentIds: List<String>,
+    val rawEventIds: List<String>,
+    val calendarEventIds: List<String>,
+)
+
+private fun List<PersonInteractionEntity>.toScheduleProjectionRefs(): ScheduleProjectionRefs =
+    ScheduleProjectionRefs(
+        commitmentIds = mapNotNull { it.commitmentId.cleanId() }.distinct(),
+        rawEventIds = flatMap { interaction ->
+            listOfNotNull(
+                interaction.sourceEventId.cleanId(),
+                interaction.sourceRef.removePrefixId("raw:"),
+            )
+        }.distinct(),
+        calendarEventIds = flatMap { interaction ->
+            listOfNotNull(
+                interaction.sourceEventId.takeIf { interaction.sourceRef.startsWith("calendar:") }.cleanId(),
+                interaction.sourceRef.takeIf { it.trim().startsWith("calendar:") }?.cleanId(),
+                interaction.sourceRef.removePrefixId("calendar:"),
+            )
+        }.distinct(),
+    )
+
+private fun String?.cleanId(): String? =
+    this?.trim()?.takeIf { it.isNotEmpty() }
+
+private fun String.removePrefixId(prefix: String): String? =
+    trim()
+        .takeIf { it.startsWith(prefix) }
+        ?.removePrefix(prefix)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
 
 private fun List<ManualMemoryOutboxEntity>.toManualMemorySyncStatusUi(): ManualMemorySyncStatusUi? {
     val failedCount = count { it.syncStatus == ManualMemoryOutboxSyncStatus.FAILED }

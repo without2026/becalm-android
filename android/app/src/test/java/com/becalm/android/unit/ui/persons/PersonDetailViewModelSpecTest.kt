@@ -6,9 +6,13 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.CalendarEventDao
+import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.ManualMemoryOutboxDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.CalendarEventEntity
+import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.ManualMemoryOutboxEntity
 import com.becalm.android.data.local.db.entity.ManualMemoryOutboxSyncStatus
@@ -16,6 +20,10 @@ import com.becalm.android.data.local.db.entity.PersonActionItemCacheEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkRelationType
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkStatus
 import com.becalm.android.data.remote.dto.PersonActionDraftDto
 import com.becalm.android.data.remote.dto.PersonActionDraftProvenanceDto
 import com.becalm.android.data.remote.dto.PersonActionDraftSafetyDto
@@ -25,6 +33,7 @@ import com.becalm.android.data.repository.PersonActionMutationSyncStats
 import com.becalm.android.data.repository.PersonActionRefreshStats
 import com.becalm.android.data.repository.PersonActionRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.ui.persons.ARG_PERSON_ID
 import com.becalm.android.ui.persons.ManualMemorySyncStatusKind
@@ -62,7 +71,10 @@ class PersonDetailViewModelSpecTest {
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk()
     private val personIndexDao: PersonIndexDao = mockk()
     private val rawIngestionEventDao: RawIngestionEventDao = mockk()
+    private val commitmentDao: CommitmentDao = mockk()
+    private val calendarEventDao: CalendarEventDao = mockk()
     private val personActionRepository: PersonActionRepository = mockk(relaxed = true)
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository = mockk(relaxed = true)
     private val manualMemoryOutboxDao: ManualMemoryOutboxDao = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
@@ -77,6 +89,9 @@ class PersonDetailViewModelSpecTest {
         every { personIndexDao.observeIdentitiesForPerson(any(), any()) } returns flowOf(emptyList())
         every { personIndexDao.observeInteractionsForPerson(any(), any(), any()) } returns flowOf(emptyList())
         every { personActionRepository.observeActiveForPerson(any(), any(), any()) } returns flowOf(emptyList())
+        every { scheduleEventLinkRepository.observeForProjectionRefs(any(), any(), any(), any()) } returns flowOf(emptyList())
+        every { commitmentDao.observeLiveByIdsForUser(any(), any()) } returns flowOf(emptyList())
+        every { calendarEventDao.observeByIdsForUser(any(), any()) } returns flowOf(emptyList())
         every { manualMemoryOutboxDao.observeForPerson(any(), any()) } returns flowOf(emptyList())
         coEvery { personActionRepository.refresh(any(), any()) } returns
             BecalmResult.Success(
@@ -90,6 +105,7 @@ class PersonDetailViewModelSpecTest {
         coEvery { manualMemoryOutboxDao.markFailedForPersonPending(any(), any(), any()) } returns 0
         coEvery { rawIngestionEventDao.findByIdsForUser(any(), any()) } returns emptyList()
         coEvery { rawIngestionEventDao.findBySourceRefsForUser(any(), any()) } returns emptyList()
+        coEvery { rawIngestionEventDao.findByConversationRefForUser(any(), any(), any(), any()) } returns emptyList()
         coEvery { userPrefsStore.setCommitmentReminderDisabled(any(), any()) } returns Unit
     }
 
@@ -199,6 +215,25 @@ class PersonDetailViewModelSpecTest {
                     ),
                 ),
             )
+        every { commitmentDao.observeLiveByIdsForUser("user-1", listOf("give", "schedule", "decision-only")) } returns
+            flowOf(
+                listOf(
+                    commitment(
+                        id = "give",
+                        itemType = CommitmentItemType.ACTION,
+                        title = "자료 보내기",
+                        direction = "give",
+                        actionState = "pending",
+                    ),
+                    commitment(
+                        id = "schedule",
+                        itemType = CommitmentItemType.SCHEDULE,
+                        title = "데모 미팅",
+                        direction = null,
+                        scheduleStatus = "confirmed",
+                    ),
+                ),
+            )
 
         val viewModel = buildViewModel(personId = personId)
         advanceUntilIdle()
@@ -259,6 +294,448 @@ class PersonDetailViewModelSpecTest {
 
         val titles = viewModel.uiState.value.sourceEventCards.map { it.title }
         assertEquals(listOf("yesterday", "old"), titles)
+    }
+
+    @Test
+    fun `email thread raw events are available for expanding person timeline row`() = runTest {
+        val personId = "person-1"
+        val latestRaw = rawEvent(
+            id = "raw-mail-2",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-message-2",
+            conversationRef = "thread-1",
+            title = "Re: 계약서 확인",
+            snippet = "두 번째 메일",
+            timestamp = Instant.parse("2026-06-03T03:00:00Z"),
+        )
+        val firstRaw = rawEvent(
+            id = "raw-mail-1",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-message-1",
+            conversationRef = "thread-1",
+            title = "계약서 확인",
+            snippet = "첫 번째 메일",
+            timestamp = Instant.parse("2026-06-03T01:00:00Z"),
+        )
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "mail",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-2",
+                        interactionKind = "email",
+                        title = "Re: 계약서 확인",
+                        snippet = "두 번째 메일",
+                        occurredAt = latestRaw.timestamp,
+                    ),
+                ),
+            )
+        coEvery { rawIngestionEventDao.findByIdsForUser("user-1", listOf("raw-mail-2")) } returns listOf(latestRaw)
+        coEvery {
+            rawIngestionEventDao.findByConversationRefForUser(
+                userId = "user-1",
+                sourceType = SourceType.GMAIL,
+                conversationRef = "thread-1",
+                limit = any(),
+            )
+        } returns listOf(firstRaw, latestRaw)
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val card = viewModel.uiState.value.sourceEventCards.single()
+        assertTrue(card.isEmailThread)
+        assertEquals(2, card.threadMessageCount)
+        assertEquals(listOf("raw-mail-1", "raw-mail-2"), card.threadEvents.map { it.rawEventId })
+    }
+
+    @Test
+    fun `schedule link candidate with proposed time is promoted into person timeline`() = runTest {
+        val personId = "person-1"
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "mail",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-1",
+                        interactionKind = "email",
+                        title = "메일",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                    interaction(
+                        id = "schedule",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "commitment:schedule-1",
+                        interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "schedule-1",
+                        role = CommitmentItemType.SCHEDULE,
+                        status = "pending",
+                        title = "가격 협의 미팅",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                ),
+            )
+        every {
+            scheduleEventLinkRepository.observeForProjectionRefs(
+                userId = "user-1",
+                commitmentIds = listOf("schedule-1"),
+                rawEventIds = listOf("raw-mail-1"),
+                calendarEventIds = emptyList(),
+            )
+        } returns flowOf(
+            listOf(
+                scheduleLink(
+                    rawEventId = "raw-mail-1",
+                    commitmentId = "schedule-1",
+                    proposedTitle = "가격 협의 미팅",
+                    proposedStartAt = Instant.parse("2026-06-09T06:00:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(1, state.sourceEventCards.size)
+        assertEquals(
+            listOf("schedule-candidate:link-1", "source:raw:raw-mail-1"),
+            state.timelineItems.map { it.key },
+        )
+        val candidate = state.timelineItems.first() as com.becalm.android.ui.persons.PersonTimelineItem.ScheduleCandidate
+        assertEquals("가격 협의 미팅", candidate.title)
+        assertEquals("raw-mail-1", candidate.rawEventId)
+    }
+
+    @Test
+    fun `commitment summary hydrates latest commitment source of truth`() = runTest {
+        val personId = "person-1"
+        val dueAt = Instant.parse("2026-06-10T06:00:00Z")
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "mail",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-1",
+                        interactionKind = "email",
+                        title = "메일",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                    interaction(
+                        id = "commitment",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "commitment:commitment-1",
+                        interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "commitment-1",
+                        role = CommitmentItemType.ACTION,
+                        direction = "give",
+                        status = "pending",
+                        title = "오래된 약속 제목",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                ),
+            )
+        every { commitmentDao.observeLiveByIdsForUser("user-1", listOf("commitment-1")) } returns
+            flowOf(
+                listOf(
+                    commitment(
+                        id = "commitment-1",
+                        itemType = CommitmentItemType.ACTION,
+                        title = "최신 약속 제목",
+                        direction = "give",
+                        actionState = "completed",
+                        dueAt = dueAt,
+                        dueHint = "내일",
+                    ),
+                ),
+            )
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val summary = viewModel.uiState.value.sourceEventCards.single().myActions.single()
+        assertEquals("최신 약속 제목", summary.title)
+        assertEquals("completed", summary.status)
+        assertEquals(dueAt, summary.dueAt)
+        assertEquals("내일", summary.dueHint)
+        assertEquals(0, viewModel.uiState.value.pendingCommitmentCount)
+    }
+
+    @Test
+    fun `commitment source truth updates reproject person detail`() = runTest {
+        val personId = "person-1"
+        val commitmentRows = MutableStateFlow(
+            listOf(
+                commitment(
+                    id = "commitment-1",
+                    itemType = CommitmentItemType.ACTION,
+                    title = "처음 약속 제목",
+                    direction = "give",
+                    actionState = "pending",
+                ),
+            ),
+        )
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "mail",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-1",
+                        interactionKind = "email",
+                        title = "메일",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                    interaction(
+                        id = "commitment",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "commitment:commitment-1",
+                        interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "commitment-1",
+                        role = CommitmentItemType.ACTION,
+                        direction = "give",
+                        status = "pending",
+                        title = "오래된 약속 제목",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                ),
+            )
+        every { commitmentDao.observeLiveByIdsForUser("user-1", listOf("commitment-1")) } returns commitmentRows
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        assertEquals("처음 약속 제목", viewModel.uiState.value.sourceEventCards.single().myActions.single().title)
+        assertEquals(1, viewModel.uiState.value.pendingCommitmentCount)
+
+        commitmentRows.value = listOf(
+            commitment(
+                id = "commitment-1",
+                itemType = CommitmentItemType.ACTION,
+                title = "완료된 최신 약속 제목",
+                direction = "give",
+                actionState = "completed",
+            ),
+        )
+        advanceUntilIdle()
+
+        val summary = viewModel.uiState.value.sourceEventCards.single().myActions.single()
+        assertEquals("완료된 최신 약속 제목", summary.title)
+        assertEquals("completed", summary.status)
+        assertEquals(0, viewModel.uiState.value.pendingCommitmentCount)
+    }
+
+    @Test
+    fun `missing live commitment source truth suppresses stale commitment interaction`() = runTest {
+        val personId = "person-1"
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "mail",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-1",
+                        interactionKind = "email",
+                        title = "메일",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                    interaction(
+                        id = "commitment",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "commitment:commitment-1",
+                        interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "commitment-1",
+                        role = CommitmentItemType.ACTION,
+                        direction = "give",
+                        status = "pending",
+                        title = "삭제된 약속",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                ),
+            )
+        every { commitmentDao.observeLiveByIdsForUser("user-1", listOf("commitment-1")) } returns flowOf(emptyList())
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val card = viewModel.uiState.value.sourceEventCards.single()
+        assertTrue(card.myActions.isEmpty())
+        assertTrue(card.theirActions.isEmpty())
+        assertTrue(card.schedules.isEmpty())
+        assertEquals(0, viewModel.uiState.value.pendingCommitmentCount)
+    }
+
+    @Test
+    fun `confirmed schedule link hydrates latest calendar source of truth`() = runTest {
+        val personId = "person-1"
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "mail",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-1",
+                        interactionKind = "email",
+                        title = "메일",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                    interaction(
+                        id = "schedule",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "commitment:schedule-1",
+                        interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "schedule-1",
+                        role = CommitmentItemType.SCHEDULE,
+                        status = "tentative",
+                        title = "오래된 미팅 제목",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                ),
+            )
+        every {
+            scheduleEventLinkRepository.observeForProjectionRefs(
+                userId = "user-1",
+                commitmentIds = listOf("schedule-1"),
+                rawEventIds = listOf("raw-mail-1"),
+                calendarEventIds = emptyList(),
+            )
+        } returns flowOf(
+            listOf(
+                scheduleLink(
+                    rawEventId = "raw-mail-1",
+                    commitmentId = "schedule-1",
+                    proposedTitle = "오래된 미팅 제목",
+                    proposedStartAt = Instant.parse("2026-06-09T06:00:00Z"),
+                    calendarEventId = "calendar-1",
+                ),
+            ),
+        )
+        every { calendarEventDao.observeByIdsForUser("user-1", listOf("calendar-1")) } returns
+            flowOf(
+                listOf(
+                    calendarEvent(
+                        id = "calendar-1",
+                        title = "캘린더에서 확정된 미팅",
+                        startAt = Instant.parse("2026-06-09T07:00:00Z"),
+                        endAt = Instant.parse("2026-06-09T08:00:00Z"),
+                    ),
+                ),
+            )
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val confirmed = viewModel.uiState.value.timelineItems
+            .first { it.key == "confirmed-schedule:calendar-1" }
+            as com.becalm.android.ui.persons.PersonTimelineItem.ConfirmedSchedule
+        assertEquals("캘린더에서 확정된 미팅", confirmed.title)
+        assertEquals(Instant.parse("2026-06-09T07:00:00Z"), confirmed.sortAt)
+        assertEquals("raw-mail-1", confirmed.rawEventId)
+    }
+
+    @Test
+    fun `calendar source truth updates confirmed schedule row`() = runTest {
+        val personId = "person-1"
+        val calendarRows = MutableStateFlow(
+            listOf(
+                calendarEvent(
+                    id = "calendar-1",
+                    title = "처음 확정 미팅",
+                    startAt = Instant.parse("2026-06-09T07:00:00Z"),
+                    endAt = Instant.parse("2026-06-09T08:00:00Z"),
+                ),
+            ),
+        )
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "mail",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-1",
+                        interactionKind = "email",
+                        title = "메일",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                    interaction(
+                        id = "schedule",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "commitment:schedule-1",
+                        interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "schedule-1",
+                        role = CommitmentItemType.SCHEDULE,
+                        status = "tentative",
+                        title = "오래된 미팅 제목",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                ),
+            )
+        every {
+            scheduleEventLinkRepository.observeForProjectionRefs(
+                userId = "user-1",
+                commitmentIds = listOf("schedule-1"),
+                rawEventIds = listOf("raw-mail-1"),
+                calendarEventIds = emptyList(),
+            )
+        } returns flowOf(
+            listOf(
+                scheduleLink(
+                    rawEventId = "raw-mail-1",
+                    commitmentId = "schedule-1",
+                    proposedTitle = "오래된 미팅 제목",
+                    proposedStartAt = Instant.parse("2026-06-09T06:00:00Z"),
+                    calendarEventId = "calendar-1",
+                ),
+            ),
+        )
+        every { calendarEventDao.observeByIdsForUser("user-1", listOf("calendar-1")) } returns calendarRows
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val initial = viewModel.uiState.value.timelineItems
+            .first { it.key == "confirmed-schedule:calendar-1" }
+            as com.becalm.android.ui.persons.PersonTimelineItem.ConfirmedSchedule
+        assertEquals("처음 확정 미팅", initial.title)
+        assertEquals(Instant.parse("2026-06-09T07:00:00Z"), initial.sortAt)
+
+        calendarRows.value = listOf(
+            calendarEvent(
+                id = "calendar-1",
+                title = "변경된 확정 미팅",
+                startAt = Instant.parse("2026-06-10T09:00:00Z"),
+                endAt = Instant.parse("2026-06-10T10:00:00Z"),
+            ),
+        )
+        advanceUntilIdle()
+
+        val updated = viewModel.uiState.value.timelineItems
+            .first { it.key == "confirmed-schedule:calendar-1" }
+            as com.becalm.android.ui.persons.PersonTimelineItem.ConfirmedSchedule
+        assertEquals("변경된 확정 미팅", updated.title)
+        assertEquals(Instant.parse("2026-06-10T09:00:00Z"), updated.sortAt)
     }
 
     @Test
@@ -444,6 +921,38 @@ class PersonDetailViewModelSpecTest {
         assertEquals(R.string.person_detail_error_load_failed, viewModel.uiState.value.error?.resId)
         viewModel.onErrorDismissed()
         assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `source truth observe failure surfaces error`() = runTest {
+        val personId = "person-1"
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "commitment",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "commitment:commitment-1",
+                        interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "commitment-1",
+                        role = CommitmentItemType.ACTION,
+                        direction = "give",
+                        status = "pending",
+                        title = "약속",
+                        occurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+                    ),
+                ),
+            )
+        every { commitmentDao.observeLiveByIdsForUser("user-1", listOf("commitment-1")) } returns flow {
+            throw IllegalStateException("commitments failed")
+        }
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        assertEquals(R.string.person_detail_error_load_failed, viewModel.uiState.value.error?.resId)
     }
 
     @Test
@@ -894,13 +1403,125 @@ class PersonDetailViewModelSpecTest {
             personEnrichmentRepository = personEnrichmentRepository,
             personIndexDao = personIndexDao,
             rawIngestionEventDao = rawIngestionEventDao,
+            commitmentDao = commitmentDao,
+            calendarEventDao = calendarEventDao,
             personActionRepository = personActionRepository,
+            scheduleEventLinkRepository = scheduleEventLinkRepository,
             manualMemoryOutboxDao = manualMemoryOutboxDao,
             workScheduler = workScheduler,
             reminderScheduler = reminderScheduler,
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
             logger = logger,
+        )
+
+    private fun scheduleLink(
+        rawEventId: String?,
+        commitmentId: String?,
+        proposedTitle: String?,
+        proposedStartAt: Instant?,
+        calendarEventId: String? = null,
+    ): ScheduleEventLinkEntity =
+        ScheduleEventLinkEntity(
+            id = "link-1",
+            userId = "user-1",
+            calendarEventId = calendarEventId,
+            calendarSourceType = null,
+            calendarSourceRef = null,
+            sourceType = SourceType.GMAIL,
+            sourceRef = rawEventId,
+            rawEventId = rawEventId,
+            commitmentId = commitmentId,
+            relationType = ScheduleEventLinkRelationType.CREATES_CANDIDATE,
+            status = ScheduleEventLinkStatus.NEEDS_REVIEW,
+            confidence = 0.86,
+            proposedStartAt = proposedStartAt,
+            proposedEndAt = proposedStartAt?.let { Instant.fromEpochMilliseconds(it.toEpochMilliseconds() + 3_600_000) },
+            proposedTitle = proposedTitle,
+            evidence = "미팅하자는 메일",
+            createdAt = Instant.parse("2026-06-03T01:00:00Z"),
+            updatedAt = Instant.parse("2026-06-03T01:00:01Z"),
+        )
+
+    private fun commitment(
+        id: String,
+        itemType: String,
+        title: String,
+        direction: String?,
+        actionState: String = "pending",
+        scheduleStatus: String? = null,
+        dueAt: Instant? = null,
+        dueHint: String? = null,
+    ): CommitmentEntity =
+        CommitmentEntity(
+            id = id,
+            userId = "user-1",
+            itemType = itemType,
+            direction = direction,
+            scheduleStatus = scheduleStatus,
+            counterpartyRaw = "Alice",
+            counterpartyRef = "alice@example.com",
+            title = title,
+            description = null,
+            quote = "quote",
+            sourceEventTitle = "메일",
+            sourceEventOccurredAt = Instant.parse("2026-06-03T01:00:00Z"),
+            dueAt = dueAt,
+            dueHint = dueHint,
+            actionState = actionState,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-message",
+            sourceEventId = "raw-mail-1",
+            confidence = 0.9,
+            syncStatus = "synced",
+            createdAt = Instant.parse("2026-06-03T01:00:00Z"),
+            updatedAt = Instant.parse("2026-06-03T02:00:00Z"),
+        )
+
+    private fun calendarEvent(
+        id: String,
+        title: String,
+        startAt: Instant,
+        endAt: Instant,
+    ): CalendarEventEntity =
+        CalendarEventEntity(
+            id = id,
+            userId = "user-1",
+            sourceType = SourceType.GOOGLE_CALENDAR,
+            sourceRef = id,
+            title = title,
+            startAt = startAt,
+            endAt = endAt,
+            attendeesRaw = "alice@example.com",
+            status = "confirmed",
+            syncStatus = "synced",
+        )
+
+    private fun rawEvent(
+        id: String,
+        sourceType: String,
+        sourceRef: String?,
+        conversationRef: String?,
+        title: String?,
+        snippet: String?,
+        timestamp: Instant,
+    ): RawIngestionEventEntity =
+        RawIngestionEventEntity(
+            id = id,
+            userId = "user-1",
+            clientEventId = "client-$id",
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            counterpartyRef = null,
+            eventTitle = title,
+            eventSnippet = snippet,
+            durationSeconds = null,
+            location = null,
+            conversationRef = conversationRef,
+            folder = "INBOX",
+            commitmentsExtractedCount = 0,
+            timestamp = timestamp,
+            syncStatus = "synced",
         )
 
     private fun identity(
